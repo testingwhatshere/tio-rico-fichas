@@ -4,12 +4,11 @@ document.addEventListener('DOMContentLoaded', function () {
   var isAndroid = /android/i.test(ua);
 
   var WEB_APP_URL = 'https://tiorico-chat-web.onrender.com';
-  // APK fallback served from this same site (Render). For zero-server-bandwidth
-  // hosting, swap this to a GitHub Releases URL once the release is published:
-  //   https://github.com/<usuario>/<repo>/releases/download/v1.0.0/tio-rico-fichas.apk
-  // (no other code changes needed — the in-app auto-update flow reads APP_APK_URL_CHAT
-  // from backend settings and downloads from whatever URL is set there.)
-  var APK_URL = 'tio-rico-fichas.apk';
+  // APK served from GitHub Releases (free, unlimited bandwidth, CDN-backed).
+  // To publish a new version: bump app.json version, build APK, then
+  //   gh release create vX.Y.Z apps/landing-page/public/tio-rico-fichas.apk
+  // and update this URL (or just bump the tag).
+  var APK_URL = 'https://github.com/testingwhatshere/tio-rico-fichas/releases/download/v1.0.0/tio-rico-fichas.apk';
 
   var btns = [
     document.getElementById('downloadBtn'),
