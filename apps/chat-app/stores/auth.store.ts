@@ -51,7 +51,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         isAuthenticated: true,
         isLoading: false,
         error: null,
-        balance: response.user.balance || 0,
+        balance: 0, // internal balance removed; field kept = 0 for legacy callers
       });
 
       // Connect socket after successful login
@@ -153,7 +153,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         isLoading: false,
         hasCheckedAuth: true,
         error: null,
-        balance: userData.balance || 0,
+        balance: 0,
       });
 
       // Connect socket after successful auth check
@@ -177,19 +177,16 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ error: null });
   },
 
-  // Refresh balance from API
+  // refreshBalance / setBalance kept as no-ops for backward compatibility with
+  // callers that still invoke them. The platform no longer tracks an internal
+  // balance — the real chip count lives on the gaming panel and is fetched by
+  // the chrome extension during prize-claim verification, never shown to the
+  // user. Don't reintroduce reads from /users/me/balance.
   refreshBalance: async () => {
-    try {
-      const response = await api.get('/users/me/balance');
-      set({ balance: response.data.balance });
-    } catch (error) {
-      console.error('Failed to refresh balance:', error);
-    }
+    /* no-op: internal balance removed */
   },
-
-  // Set balance directly (for socket updates)
-  setBalance: (balance: number) => {
-    set({ balance });
+  setBalance: (_balance: number) => {
+    /* no-op: internal balance removed */
   },
 }));
 

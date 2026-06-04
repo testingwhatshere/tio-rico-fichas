@@ -290,64 +290,14 @@ export class BotService implements OnModuleInit {
       data: { status: requestStatus },
     });
 
-    // Add balance on successful completion
-    // Fix 35B: Use try/catch on P2002 (unique constraint on Transaction.requestId)
-    // instead of check-then-act to prevent double-addition from concurrent completions
-    if (dto.success && job.request) {
-      try {
-        await this.balanceService.addBalance(
-          job.request.userId,
-          Number(job.request.amount),
-          job.requestId,
-          `Carga de fichas completada - ${job.request.targetUsername}`,
-        );
-        this.logger.log(
-          `Balance added: $${job.request.amount} to user ${job.request.userId}`,
-        );
-      } catch (error: any) {
-        // P2002 = unique constraint violation on Transaction.requestId → balance already added
-        const isP2002 = error.code === 'P2002' || error?.cause?.code === 'P2002';
-        if (isP2002) {
-          // Defensive verification: confirm the Transaction actually exists. If the prior
-          // attempt rolled back after partial state, P2002 could appear without a real
-          // dedup row — that would silently lose a balance addition. Alert ops on that.
-          const existing = await this.prisma.transaction.findUnique({
-            where: { requestId: job.requestId },
-            select: { id: true, amount: true },
-          });
-          if (existing) {
-            this.logger.warn(
-              `Balance already added for request ${job.requestId} (concurrent completion), skipping`,
-            );
-          } else {
-            this.logger.error(
-              `P2002 on balance add for request ${job.requestId} but no Transaction found — possible lost balance`,
-            );
-            this.eventsGateway.emitToOperators('balance_error', {
-              requestId: job.requestId,
-              userId: job.request.userId,
-              amount: Number(job.request.amount),
-              error: 'P2002 without dedup row — manual review required',
-              timestamp: new Date().toISOString(),
-            });
-          }
-        } else {
-          this.logger.error(
-            `Failed to add balance for request ${job.requestId}: ${error.message}`,
-          );
-          // Alert operators so they can manually fix the balance
-          this.eventsGateway.emitToOperators('balance_error', {
-            requestId: job.requestId,
-            userId: job.request.userId,
-            amount: Number(job.request.amount),
-            error: error.message,
-            timestamp: new Date().toISOString(),
-          });
-        }
-        // Don't throw - job still completed successfully, balance can be added manually
-      }
-    } else if (dto.success && !job.request) {
-      this.logger.error(`Job ${jobId} completed but request is missing — cannot add balance`);
+    // Internal balance tracking removed. The real balance lives on the gaming
+    // panel and is read on-demand by the chrome extension during prize-claim
+    // verification — so we don't accumulate a parallel number here that would
+    // drift from reality. The Transaction model + Request history remain as
+    // audit logs of what we charged / loaded, but they no longer mutate
+    // User.balance.
+    if (dto.success && !job.request) {
+      this.logger.warn(`Job ${jobId} completed but request is missing — skipping audit log`);
     }
 
     // Clear progress tracking

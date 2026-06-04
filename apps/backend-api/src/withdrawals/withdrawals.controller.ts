@@ -5,6 +5,8 @@ import {
   Body,
   Param,
   Query,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { WithdrawalsService } from './withdrawals.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -23,12 +25,26 @@ export class WithdrawalsController {
   // CLIENT ENDPOINTS
   // ==========================================
 
+  /**
+   * DEPRECATED — use POST /api/prize-claims instead. Withdrawals were unified
+   * with prize-claims (which verify the real chip balance on the panel via the
+   * chrome extension instead of an internal counter). Old clients that still
+   * hit this endpoint get a 410 with the migration hint.
+   */
   @Post()
   async create(
-    @CurrentUser() user: { sub: string },
-    @Body() dto: CreateWithdrawalDto,
+    @CurrentUser() _user: { sub: string },
+    @Body() _dto: CreateWithdrawalDto,
   ) {
-    return this.withdrawalsService.create(user.sub, dto);
+    throw new HttpException(
+      {
+        statusCode: HttpStatus.GONE,
+        message:
+          'Este endpoint está deprecado. Usá POST /api/prize-claims para cobrar premios.',
+        replacement: 'POST /api/prize-claims',
+      },
+      HttpStatus.GONE,
+    );
   }
 
   @Get()

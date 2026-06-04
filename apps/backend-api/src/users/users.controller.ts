@@ -123,12 +123,15 @@ export class UsersController {
   }
 
   /**
-   * Get current user's balance
+   * Get current user's balance — DEPRECATED.
+   * The internal `User.balance` no longer tracks anything meaningful: real
+   * chip balance lives on the gaming panel and is fetched on-demand by the
+   * chrome extension during prize-claim verification. Endpoint kept so old
+   * APKs don't 404; always returns `null` to make it obvious nothing's there.
    */
   @Get('me/balance')
-  async getMyBalance(@CurrentUser() user: CurrentUserPayload) {
-    const balance = await this.balanceService.getUserBalance(user.sub);
-    return { balance };
+  async getMyBalance(@CurrentUser() _user: CurrentUserPayload) {
+    return { balance: null, deprecated: true };
   }
 
   /**

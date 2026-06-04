@@ -294,13 +294,7 @@ export const connectSocket = (token: string) => {
       status: 'COMPLETED',
     });
     notifyBrowser('Fichas cargadas!', 'Tus fichas ya estan en tu cuenta.', { requestId: data.requestId });
-    // Refresh balance — credits were just loaded
-    try {
-      const { useAuthStore } = require('@/stores/auth.store');
-      useAuthStore.getState().refreshBalance();
-    } catch (e) {
-      console.warn('[Socket] Failed to refresh balance on job completion:', e);
-    }
+    // (Internal balance tracking removed — real balance is on the gaming panel.)
   });
 
   socket.on('job:failed', (data: JobEvent) => {
