@@ -1,0 +1,25 @@
+{
+  "title": "Panel de Operadores",
+  "bodyHead": "Tio Rico\nPanel de Operadores\nDashboard\nFallos\n5\nTrabajos\nSolicitudes\nChats\nActividad\nBilleteras\nPremios\nPagos\nUsuarios\nPaneles\nExtensiones\nConfiguración\nConectado\n⌨️ Enter: Aprobar • R: Rechazar (motivo) • Esc: Cerrar\nFallos Pendientes\nBot Offline\nValidador Online\nSin AI\n3m\nKill Switch\nPendientes\nAprobados\nRechazados\nTodos\nExportar\ne2e_user\n43%\n$5.000\nBaja confianza en la validacion\nahora\ne2e_user\n0%\n$5.000\nOCR no pudo extraer datos confiables y el motor de IA no esta disponible. Requiere revision manual.\nahora\ne2e_user\n0%\n$5.000\nOCR no pudo extraer datos confiables y el motor de IA no esta disponible. Requiere revision manual.\nahora\ne2e_user\n43%\n$5.000\nBaja confianza en la validacion\n1m\ne2e_user\n0%\n$5.000\nValidador no conectado\n51m",
+  "visibleButtons": [
+    "Dashboard",
+    "Fallos\n          5",
+    "Trabajos",
+    "Solicitudes",
+    "Chats\n          0",
+    "Actividad",
+    "Billeteras",
+    "Premios\n          0",
+    "Pagos",
+    "Usuarios",
+    "Paneles",
+    "Extensiones",
+    "Configuración",
+    "Kill Switch",
+    "Pendientes",
+    "Aprobados",
+    "Rechazados",
+    "Todos",
+    "Exportar"
+  ]
+}

@@ -1,0 +1,1661 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:11434 http://localhost:11434 https:; img-src 'self' data: blob: https:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Validador de Comprobantes</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #fff;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container { max-width: 480px; margin: 0 auto; }
+
+    h1 {
+      font-size: 1.4rem;
+      margin-bottom: 20px;
+      text-align: center;
+      color: #4ade80;
+    }
+
+    .card {
+      background: rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .card h2 {
+      font-size: 0.9rem;
+      color: #94a3b8;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+    }
+
+    .status-label { color: #94a3b8; font-size: 0.9rem; }
+
+    .status-value {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+      font-size: 0.9rem;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot.green { background: #4ade80; }
+    .dot.red { background: #f87171; }
+    .dot.yellow { background: #facc15; animation: pulse 1.5s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .setup-step {
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .setup-step.done { border-left: 3px solid #4ade80; }
+    .setup-step.pending { border-left: 3px solid #facc15; }
+    .setup-step.error { border-left: 3px solid #f87171; }
+
+    .setup-step h3 {
+      font-size: 0.95rem;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .setup-step p {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin-bottom: 10px;
+    }
+
+    .progress-bar {
+      height: 6px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 3px;
+      margin: 10px 0;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: #4ade80;
+      border-radius: 3px;
+      transition: width 0.3s;
+    }
+
+    .form-group { margin-bottom: 12px; }
+
+    .form-group label {
+      display: block;
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin-bottom: 4px;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      background: rgba(0,0,0,0.3);
+      color: #fff;
+      font-size: 0.9rem;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #4ade80;
+    }
+
+    .btn {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-primary { background: #4ade80; color: #000; }
+    .btn-primary:hover { background: #22c55e; }
+    .btn-primary:disabled { background: #374151; color: #6b7280; cursor: not-allowed; }
+
+    .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
+    .btn-secondary:hover { background: rgba(255,255,255,0.2); }
+
+    .btn-danger { background: #f87171; color: #000; }
+    .btn-danger:hover { background: #ef4444; }
+
+    .btn-full { width: 100%; justify-content: center; }
+
+    .btn-group { display: flex; gap: 8px; margin-top: 10px; }
+
+    .logs {
+      background: rgba(0,0,0,0.3);
+      border-radius: 8px;
+      padding: 12px;
+      max-height: 180px;
+      overflow-y: auto;
+      font-family: 'Consolas', monospace;
+      font-size: 0.75rem;
+    }
+
+    .log-entry {
+      padding: 4px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .log-entry.success { color: #4ade80; }
+    .log-entry.error { color: #f87171; }
+    .log-entry.warning { color: #facc15; }
+    .log-entry.info { color: #60a5fa; }
+
+    .log-time { color: #64748b; margin-right: 8px; }
+
+    .hidden { display: none !important; }
+
+    .alert {
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      margin-bottom: 12px;
+    }
+
+    .alert-warning {
+      background: rgba(250,204,21,0.1);
+      border: 1px solid rgba(250,204,21,0.3);
+      color: #facc15;
+    }
+
+    .alert-success {
+      background: rgba(74,222,128,0.1);
+      border: 1px solid rgba(74,222,128,0.3);
+      color: #4ade80;
+    }
+
+    .check-icon { color: #4ade80; }
+    .x-icon { color: #f87171; }
+
+    .model-selector {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .model-selector label {
+      display: block;
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin-bottom: 6px;
+    }
+
+    .model-dropdown {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      background: rgba(0,0,0,0.3);
+      color: #fff;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .model-dropdown:focus {
+      outline: none;
+      border-color: #4ade80;
+    }
+
+    .model-dropdown option {
+      background: #1a1a2e;
+      color: #fff;
+    }
+
+    .queue-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: rgba(250,204,21,0.1);
+      border: 1px solid rgba(250,204,21,0.3);
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .queue-icon { font-size: 1.1rem; }
+
+    .queue-text {
+      flex: 1;
+      font-size: 0.85rem;
+      color: #facc15;
+    }
+
+    .btn-queue-clear {
+      background: rgba(255,255,255,0.1);
+      border: none;
+      color: #94a3b8;
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .btn-queue-clear:hover {
+      background: rgba(248,113,113,0.2);
+      color: #f87171;
+    }
+
+    .validation-queue-badge {
+      background: rgba(250,204,21,0.2);
+      color: #facc15;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-left: auto;
+    }
+
+    /* Tab Navigation */
+    .tab-nav { display: flex; gap: 4px; margin-bottom: 16px; background: rgba(0,0,0,0.2); border-radius: 10px; padding: 4px; }
+    .tab-btn { flex: 1; padding: 10px; border: none; border-radius: 8px; background: transparent; color: #94a3b8; font-size: 0.85rem; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+    .tab-btn.active { background: rgba(74,222,128,0.15); color: #4ade80; }
+    .tab-btn:hover:not(.active) { background: rgba(255,255,255,0.05); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* OCR Sandbox */
+    .sandbox-upload { border: 2px dashed rgba(255,255,255,0.2); border-radius: 12px; padding: 24px; text-align: center; cursor: pointer; transition: border-color 0.2s; margin-bottom: 12px; }
+    .sandbox-upload:hover { border-color: #4ade80; }
+    .sandbox-upload.dragover { border-color: #4ade80; background: rgba(74,222,128,0.05); }
+    .sandbox-preview { max-width: 100%; max-height: 200px; border-radius: 8px; margin: 12px auto; display: none; }
+    .sandbox-raw { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; font-family: monospace; font-size: 0.75rem; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: #e2e8f0; margin-bottom: 8px; }
+    .field-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .field-label { width: 90px; font-size: 0.8rem; color: #94a3b8; flex-shrink: 0; }
+    .field-input { flex: 1; padding: 6px 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: #fff; font-size: 0.85rem; }
+    .field-input:focus { outline: none; border-color: #4ade80; }
+    .field-match { width: 20px; text-align: center; font-size: 0.9rem; }
+    .confidence-bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin: 8px 0; overflow: hidden; }
+    .confidence-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+    .example-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: rgba(0,0,0,0.2); border-radius: 8px; margin-bottom: 6px; font-size: 0.85rem; }
+    .example-source { color: #4ade80; font-weight: 500; }
+    .example-count { color: #64748b; font-size: 0.8rem; }
+
+    .validating-indicator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px;
+      background: rgba(96,165,250,0.1);
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #60a5fa;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <!-- Update Blocker Overlay -->
+  <div id="update-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:#1a1a2e; z-index:10000; align-items:center; justify-content:center;">
+    <div style="text-align:center; max-width:400px; padding:40px;">
+      <img src="../assets/icon.png" alt="Tio Rico" style="width:80px; height:80px; border-radius:16px; margin-bottom:16px;" />
+      <h2 style="color:#f8fafc; margin-bottom:12px;">Actualizacion disponible</h2>
+      <p style="color:#94a3b8; margin-bottom:24px; line-height:1.6;">
+        Para continuar usando el Validador, actualiza a la version
+        <span id="update-version" style="color:#4ade80; font-weight:600;"></span>
+      </p>
+      <div id="update-changelog" style="display:none; background:rgba(255,255,255,0.05); border-radius:12px; padding:16px; margin-bottom:24px; text-align:left; color:#94a3b8; font-size:0.9rem;">
+        <strong>Novedades:</strong>
+        <p id="update-changelog-text" style="margin:8px 0 0;"></p>
+      </div>
+      <div id="update-progress-container" style="display:none; margin-bottom:24px;">
+        <div style="width:100%; height:8px; background:rgba(255,255,255,0.1); border-radius:4px; overflow:hidden; margin-bottom:8px;">
+          <div id="update-progress-fill" style="height:100%; width:0%; background:linear-gradient(90deg,#4ade80,#22d3ee); border-radius:4px; transition:width 0.3s;"></div>
+        </div>
+        <p id="update-progress-text" style="font-size:0.85rem; color:#64748b;">Descargando... 0%</p>
+      </div>
+      <div id="update-error" style="display:none; background:rgba(239,68,68,0.1); border-radius:12px; padding:16px; margin-bottom:16px; color:#f87171; font-size:0.9rem;">
+        <p id="update-error-text"></p>
+      </div>
+      <button id="update-btn" style="background:linear-gradient(135deg,#4ade80,#22d3ee); color:#0f172a; border:none; padding:14px 48px; border-radius:12px; font-size:1rem; font-weight:600; cursor:pointer; width:100%;">Actualizar ahora</button>
+    </div>
+  </div>
+
+  <script>
+    // Auto-update check — runs BEFORE main app init
+    window.__updateRequired = false;
+    (async function() {
+      try {
+        if (!window.electronAPI?.checkUpdate) return;
+        const result = await window.electronAPI.checkUpdate();
+        if (!result || !result.updateAvailable) return;
+
+        window.__updateRequired = true;
+        const overlay = document.getElementById('update-overlay');
+        overlay.style.display = 'flex';
+
+        document.getElementById('update-version').textContent = result.latestVersion;
+        if (result.changelog) {
+          document.getElementById('update-changelog').style.display = 'block';
+          document.getElementById('update-changelog-text').textContent = result.changelog;
+        }
+
+        const btn = document.getElementById('update-btn');
+        const progressContainer = document.getElementById('update-progress-container');
+        const progressFill = document.getElementById('update-progress-fill');
+        const progressText = document.getElementById('update-progress-text');
+        const errorContainer = document.getElementById('update-error');
+        const errorText = document.getElementById('update-error-text');
+
+        // Listen for progress
+        window.electronAPI.on('update-progress', (data) => {
+          progressFill.style.width = data.percent + '%';
+          progressText.textContent = 'Descargando... ' + data.percent + '%';
+        });
+
+        btn.onclick = async () => {
+          btn.disabled = true;
+          btn.textContent = 'Descargando...';
+          errorContainer.style.display = 'none';
+          progressContainer.style.display = 'block';
+
+          const downloadResult = await window.electronAPI.downloadUpdate(result.downloadUrl);
+          if (!downloadResult.success) {
+            progressContainer.style.display = 'none';
+            errorContainer.style.display = 'block';
+            errorText.textContent = downloadResult.error || 'Error al descargar';
+            btn.disabled = false;
+            btn.textContent = 'Reintentar';
+            return;
+          }
+
+          btn.textContent = 'Instalando...';
+          progressText.textContent = 'Abriendo instalador...';
+          await window.electronAPI.installUpdate(downloadResult.filePath);
+        };
+      } catch (e) {
+        console.error('[Updater] Error:', e);
+      }
+    })();
+  </script>
+
+  <div class="container">
+    <div style="text-align: center; margin-bottom: 8px;">
+      <img src="../assets/icon.png" alt="Tio Rico" style="width: 48px; height: 48px; border-radius: 10px;" />
+    </div>
+    <h1>Tio Rico - Validador</h1>
+
+    <!-- Tab Navigation -->
+    <div class="tab-nav">
+      <button class="tab-btn active" data-tab="main" onclick="switchTab('main')">Principal</button>
+      <button class="tab-btn" data-tab="sandbox" onclick="switchTab('sandbox')">OCR Sandbox</button>
+    </div>
+
+    <!-- Main Tab (existing content) -->
+    <div id="tab-main" class="tab-content active">
+
+    <!-- Status Card -->
+    <div class="card">
+      <h2>📊 Estado</h2>
+      <div class="status-row">
+        <span class="status-label">Backend</span>
+        <span class="status-value">
+          <span class="dot" id="backend-dot" aria-label="Estado del backend"></span>
+          <span id="backend-status">Desconectado</span>
+        </span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Ollama</span>
+        <span class="status-value">
+          <span class="dot" id="ollama-dot" aria-label="Estado de Ollama"></span>
+          <span id="ollama-status">Verificando...</span>
+        </span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Modelo Vision</span>
+        <span class="status-value">
+          <span class="dot" id="model-dot" aria-label="Estado del modelo"></span>
+          <span id="model-status">-</span>
+        </span>
+      </div>
+      <!-- Model Selector (shown when multiple vision models available) -->
+      <div class="model-selector hidden" id="model-selector">
+        <label for="model-select">Modelo activo:</label>
+        <select id="model-select" class="model-dropdown">
+          <option value="">Seleccionar modelo...</option>
+        </select>
+      </div>
+      <!-- Daily stats (% by source) -->
+      <div id="validator-stats" style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08); font-size:0.75rem; color:#94a3b8;">
+        Sin validaciones aun
+      </div>
+    </div>
+
+    <!-- Validating Indicator -->
+    <div class="validating-indicator hidden" id="validating-indicator">
+      <div class="spinner"></div>
+      <span id="validating-text">Procesando comprobante...</span>
+      <span class="validation-queue-badge hidden" id="validation-queue-badge">+<span id="validation-queue-count">0</span></span>
+    </div>
+
+    <!-- Queue Status Indicator -->
+    <div class="queue-indicator hidden" id="queue-indicator">
+      <span class="queue-icon">📋</span>
+      <span class="queue-text"><span id="queue-count">0</span> solicitudes en cola</span>
+      <button class="btn-queue-clear" id="btn-clear-queue" title="Limpiar cola">✕</button>
+    </div>
+
+    <!-- Setup Wizard -->
+    <div class="card" id="setup-section">
+      <h2>⚙️ Configuracion Inicial</h2>
+
+      <!-- Step 1: Ollama -->
+      <div class="setup-step" id="step-ollama">
+        <h3>
+          <span id="step1-icon">1️⃣</span>
+          Ollama (Motor de IA)
+        </h3>
+        <p id="step1-desc">Verifica si Ollama esta instalado y corriendo</p>
+        <div class="progress-bar hidden" id="ollama-progress-bar">
+          <div class="progress-bar-fill" id="ollama-progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="btn-group" id="ollama-buttons">
+          <button class="btn btn-secondary" id="btn-check-ollama">🔄 Verificar</button>
+          <button class="btn btn-primary" id="btn-install-ollama">Instalar Ollama</button>
+          <button class="btn btn-secondary" id="btn-start-ollama">Iniciar Ollama</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Model -->
+      <div class="setup-step" id="step-model">
+        <h3>
+          <span id="step2-icon">2️⃣</span>
+          Modelo de Vision
+        </h3>
+        <p id="step2-desc">Descarga el modelo de IA para analizar imagenes</p>
+        <div class="progress-bar hidden" id="model-progress-bar">
+          <div class="progress-bar-fill" id="model-progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="btn-group" id="model-buttons">
+          <button class="btn btn-primary" id="btn-download-model" disabled>Descargar Modelo (~4GB)</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Connection -->
+      <div class="setup-step" id="step-connection">
+        <h3>
+          <span id="step3-icon">3️⃣</span>
+          Conexion al Servidor
+        </h3>
+        <div class="form-group">
+          <label>URL del Backend</label>
+          <input type="url" id="backend-url" placeholder="https://tu-app.onrender.com">
+        </div>
+        <div class="form-group">
+          <label>API Key</label>
+          <input type="password" id="api-key" placeholder="Tu clave de acceso">
+        </div>
+        <button class="btn btn-primary btn-full" id="btn-connect" disabled>Conectar</button>
+      </div>
+    </div>
+
+    <!-- Prompt Editor -->
+    <div class="card" id="prompt-section">
+      <h2 style="cursor:pointer;user-select:none" id="prompt-toggle">
+        🧠 Prompt de Validacion
+        <span style="margin-left:auto;font-size:0.8rem;color:#64748b" id="prompt-toggle-icon">▶</span>
+      </h2>
+      <div id="prompt-editor" style="display:none">
+        <p style="font-size:0.8rem;color:#94a3b8;margin-bottom:8px">
+          Personaliza las instrucciones que recibe la IA al validar comprobantes.<br>
+          Variables disponibles: <code style="color:#4ade80">{{AMOUNT}}</code>, <code style="color:#4ade80">{{WALLET_SECTION}}</code>, <code style="color:#4ade80">{{RECIPIENT_RULE}}</code>
+        </p>
+        <textarea id="prompt-textarea" style="
+          width:100%;min-height:220px;max-height:400px;resize:vertical;
+          background:rgba(0,0,0,0.3);color:#e2e8f0;border:1px solid rgba(255,255,255,0.15);
+          border-radius:8px;padding:12px;font-family:monospace;font-size:0.8rem;
+          line-height:1.5;outline:none;
+        " placeholder="Dejar vacio para usar el prompt por defecto..."></textarea>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-primary" id="btn-save-prompt" style="flex:1">Guardar Prompt</button>
+          <button class="btn btn-secondary" id="btn-reset-prompt">Restaurar Default</button>
+        </div>
+        <div id="prompt-saved-msg" style="display:none;font-size:0.8rem;color:#4ade80;margin-top:6px;text-align:center">Prompt guardado</div>
+      </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center;">
+        📋 Actividad
+        <button id="btn-copy-logs" type="button" style="background:rgba(255,255,255,0.08);color:#94a3b8;border:none;padding:4px 10px;border-radius:6px;font-size:0.7rem;cursor:pointer;">Copiar logs</button>
+      </h2>
+      <div class="logs" id="logs">
+        <div class="log-entry info">
+          <span class="log-time">--:--</span>
+          Iniciando...
+        </div>
+      </div>
+    </div>
+    </div><!-- end tab-main -->
+
+    <!-- OCR Sandbox Tab -->
+    <div id="tab-sandbox" class="tab-content">
+
+      <!-- Upload -->
+      <div class="card">
+        <h2>📸 Subir Comprobante</h2>
+        <div class="sandbox-upload" id="sandbox-dropzone">
+          <p style="font-size:0.9rem; margin-bottom:8px">Arrastra una imagen o PDF aqui</p>
+          <p style="font-size:0.75rem; color:#64748b">o hace click para seleccionar</p>
+          <input type="file" id="sandbox-file-input" accept="image/*,.pdf" style="display:none">
+        </div>
+        <img id="sandbox-preview" class="sandbox-preview" alt="Preview">
+        <div class="form-group" style="margin-top:8px">
+          <label style="font-size:0.8rem; color:#94a3b8">Monto esperado (opcional, para comparar)</label>
+          <input type="number" id="sandbox-expected-amount" placeholder="Ej: 5000" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;font-size:0.85rem">
+        </div>
+        <div class="btn-group" style="margin-top:8px">
+          <button class="btn btn-primary" id="btn-ocr-analyze" disabled style="flex:2">Analizar con OCR</button>
+          <button class="btn btn-secondary" id="btn-ollama-analyze" disabled style="flex:1" title="Comparar con Ollama">Ollama</button>
+        </div>
+        <div id="sandbox-analyzing" class="hidden" style="text-align:center; padding:12px; color:#60a5fa">
+          <div class="spinner" style="margin:0 auto 8px"></div>
+          <span id="sandbox-analyzing-text">Analizando...</span>
+        </div>
+      </div>
+
+      <!-- Raw Text -->
+      <div class="card hidden" id="sandbox-raw-section">
+        <h2 style="display:flex;align-items:center;justify-content:space-between">
+          📝 Texto Extraido
+          <button class="btn btn-secondary" id="btn-copy-raw" style="padding:4px 10px;font-size:0.75rem">Copiar</button>
+        </h2>
+        <div class="sandbox-raw" id="sandbox-raw-text"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px">
+          <span style="font-size:0.8rem; color:#94a3b8">Confianza OCR:</span>
+          <span id="sandbox-ocr-confidence" style="font-size:0.85rem; font-weight:600; color:#4ade80">-</span>
+        </div>
+        <div class="confidence-bar">
+          <div class="confidence-fill" id="sandbox-confidence-bar" style="width:0%; background:#4ade80"></div>
+        </div>
+      </div>
+
+      <!-- Detected Platform -->
+      <div class="card hidden" id="sandbox-platform-section" style="padding:12px 20px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:0.8rem;color:#94a3b8">Plataforma detectada:</span>
+          <span id="sandbox-platform-name" style="font-size:0.95rem;font-weight:600;color:#4ade80">-</span>
+        </div>
+      </div>
+
+      <!-- Extracted Fields -->
+      <div class="card hidden" id="sandbox-fields-section">
+        <h2>📋 Campos Extraidos</h2>
+        <div id="sandbox-fields">
+          <div class="field-row"><span class="field-label">Monto</span><input class="field-input" id="sf-amount" placeholder="-"><span class="field-match" id="sm-amount">-</span></div>
+          <div class="field-row"><span class="field-label">Fecha</span><input class="field-input" id="sf-date" placeholder="-"><span class="field-match" id="sm-date">-</span></div>
+          <div class="field-row"><span class="field-label">Estado</span><input class="field-input" id="sf-status" placeholder="-"><span class="field-match" id="sm-status">-</span></div>
+          <div class="field-row"><span class="field-label">Sender</span><input class="field-input" id="sf-sender" placeholder="-"><span class="field-match" id="sm-sender">-</span></div>
+          <div class="field-row"><span class="field-label">CUIT</span><input class="field-input" id="sf-cuit" placeholder="-"><span class="field-match" id="sm-cuit">-</span></div>
+          <div class="field-row"><span class="field-label">Destinatario</span><input class="field-input" id="sf-recipient" placeholder="-"><span class="field-match" id="sm-recipient">-</span></div>
+          <div class="field-row"><span class="field-label">Cuenta dest.</span><input class="field-input" id="sf-recipientacc" placeholder="-"><span class="field-match" id="sm-recipientacc">-</span></div>
+          <div class="field-row"><span class="field-label">Banco</span><input class="field-input" id="sf-bank" placeholder="-"><span class="field-match" id="sm-bank">-</span></div>
+          <div class="field-row"><span class="field-label">Operacion</span><input class="field-input" id="sf-txid" placeholder="-"><span class="field-match" id="sm-txid">-</span></div>
+          <div class="field-row"><span class="field-label">Metodo</span><input class="field-input" id="sf-method" placeholder="-"><span class="field-match" id="sm-method">-</span></div>
+        </div>
+        <!-- Amount comparison -->
+        <div id="sandbox-amount-compare" class="hidden" style="margin-top:8px;padding:8px 12px;border-radius:6px;font-size:0.85rem"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px">
+          <span style="font-size:0.8rem; color:#94a3b8">Confianza total: <b id="sandbox-total-confidence">-</b></span>
+          <span style="font-size:0.8rem; color:#64748b" id="sandbox-patterns-matched">-</span>
+        </div>
+        <button class="btn btn-primary btn-full" id="btn-ocr-save" style="margin-top:12px">Guardar Ejemplo</button>
+        <div id="sandbox-saved-msg" class="hidden" style="text-align:center; font-size:0.85rem; color:#4ade80; margin-top:8px">Ejemplo guardado</div>
+      </div>
+
+      <!-- Ollama Comparison -->
+      <div class="card hidden" id="sandbox-ollama-section">
+        <h2>🧠 Comparacion Ollama</h2>
+        <div id="sandbox-ollama-result" style="font-size:0.85rem;color:#94a3b8">-</div>
+      </div>
+
+      <!-- Test History -->
+      <div class="card hidden" id="sandbox-history-section">
+        <h2 style="display:flex;align-items:center;justify-content:space-between">
+          🕐 Historial de Tests
+          <button class="btn btn-secondary" id="btn-clear-history" style="padding:4px 10px;font-size:0.75rem">Limpiar</button>
+        </h2>
+        <div id="sandbox-history-list" style="max-height:200px;overflow-y:auto"></div>
+      </div>
+
+      <!-- Saved Examples -->
+      <div class="card">
+        <h2>💾 Ejemplos Guardados (<span id="sandbox-example-count">0</span>)</h2>
+        <div id="sandbox-examples-list">
+          <p style="font-size:0.85rem; color:#64748b; text-align:center; padding:12px">Sin ejemplos todavia</p>
+        </div>
+        <div class="btn-group" style="margin-top:12px">
+          <button class="btn btn-secondary" id="btn-ocr-export" style="flex:1">Exportar</button>
+          <button class="btn btn-secondary" id="btn-ocr-import" style="flex:1">Importar</button>
+        </div>
+      </div>
+
+    </div><!-- end tab-sandbox -->
+
+  </div><!-- end container -->
+
+  <script>
+    // electronAPI is exposed globally by preload.js via contextBridge.exposeInMainWorld
+    // No need to declare it - just use window.electronAPI or electronAPI directly
+
+    // XSS-safe HTML escaping helper. Use whenever building HTML strings from
+    // backend / Ollama / OCR data. Mirrors apps/operator-panel/src/renderer/utils.js.
+    const _escapeDiv = document.createElement('div');
+    function escapeHtml(text) {
+      if (text == null) return '';
+      _escapeDiv.textContent = String(text);
+      return _escapeDiv.innerHTML;
+    }
+
+    // Sanitize a backend URL: trim, drop trailing slashes, force https outside of localhost.
+    function sanitizeBackendUrl(raw) {
+      if (!raw || typeof raw !== 'string') return { ok: false, error: 'URL vacia' };
+      const trimmed = raw.trim().replace(/\/+$/, '');
+      let parsed;
+      try { parsed = new URL(trimmed); } catch (_) { return { ok: false, error: 'URL invalida' }; }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { ok: false, error: 'URL debe comenzar con http:// o https://' };
+      }
+      const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname.endsWith('.local');
+      if (parsed.protocol === 'http:' && !isLocal) {
+        return { ok: false, error: 'En produccion la URL debe usar https://' };
+      }
+      return { ok: true, url: trimmed };
+    }
+
+    // Block init if update is required — the update overlay handles everything
+    if (window.__updateRequired) { /* skip all app initialization */ } else {
+
+    // Elements
+    const backendDot = document.getElementById('backend-dot');
+    const backendStatus = document.getElementById('backend-status');
+    const ollamaDot = document.getElementById('ollama-dot');
+    const ollamaStatus = document.getElementById('ollama-status');
+    const modelDot = document.getElementById('model-dot');
+    const modelStatus = document.getElementById('model-status');
+    const logsContainer = document.getElementById('logs');
+    const validatingIndicator = document.getElementById('validating-indicator');
+    const validatingText = document.getElementById('validating-text');
+    const validationQueueBadge = document.getElementById('validation-queue-badge');
+    const validationQueueCount = document.getElementById('validation-queue-count');
+    const queueIndicator = document.getElementById('queue-indicator');
+    const queueCount = document.getElementById('queue-count');
+    const btnClearQueue = document.getElementById('btn-clear-queue');
+
+    // Buttons
+    const btnCheckOllama = document.getElementById('btn-check-ollama');
+    const btnInstallOllama = document.getElementById('btn-install-ollama');
+    const btnStartOllama = document.getElementById('btn-start-ollama');
+    const btnDownloadModel = document.getElementById('btn-download-model');
+    const btnConnect = document.getElementById('btn-connect');
+
+    // Model selector
+    const modelSelector = document.getElementById('model-selector');
+    const modelSelect = document.getElementById('model-select');
+
+    // Inputs
+    const backendUrlInput = document.getElementById('backend-url');
+    const apiKeyInput = document.getElementById('api-key');
+
+    // Steps
+    const stepOllama = document.getElementById('step-ollama');
+    const stepModel = document.getElementById('step-model');
+    const stepConnection = document.getElementById('step-connection');
+
+    // Progress
+    const ollamaProgressBar = document.getElementById('ollama-progress-bar');
+    const ollamaProgressFill = document.getElementById('ollama-progress-fill');
+    const modelProgressBar = document.getElementById('model-progress-bar');
+    const modelProgressFill = document.getElementById('model-progress-fill');
+
+    // State
+    let ollamaReady = false;
+    let modelReady = false;
+    let isConnected = false;
+    let availableVisionModels = [];
+    let selectedModel = null;
+
+    // Update Ollama step
+    function updateOllamaStep(data) {
+      // Reset check button state
+      btnCheckOllama.disabled = false;
+      btnCheckOllama.textContent = '🔄 Verificar';
+      btnCheckOllama.classList.remove('hidden');
+
+      if (data.running) {
+        stepOllama.className = 'setup-step done';
+        document.getElementById('step1-icon').textContent = '✅';
+        document.getElementById('step1-desc').textContent = 'Ollama esta corriendo';
+        ollamaDot.className = 'dot green';
+        ollamaStatus.textContent = 'Corriendo';
+        btnInstallOllama.classList.add('hidden');
+        btnStartOllama.classList.add('hidden');
+        ollamaReady = true;
+        btnDownloadModel.disabled = false;
+
+        // Update model status
+        if (data.hasVisionModel) {
+          updateModelStep({ ready: true, models: data.visionModels, selectedModel: data.selectedModel });
+        } else {
+          updateModelStep({ ready: false });
+        }
+      } else if (data.installed) {
+        stepOllama.className = 'setup-step pending';
+        document.getElementById('step1-icon').textContent = '⚠️';
+        document.getElementById('step1-desc').textContent = data.error
+          ? `Error: ${data.error}`
+          : 'Ollama instalado pero no esta corriendo';
+        ollamaDot.className = 'dot yellow';
+        ollamaStatus.textContent = 'No corriendo';
+        btnInstallOllama.classList.add('hidden');
+        btnStartOllama.classList.remove('hidden');
+        btnStartOllama.disabled = false;
+        btnStartOllama.textContent = 'Iniciar Ollama';
+        ollamaReady = false;
+        btnDownloadModel.disabled = true;
+        updateModelStep({ ready: false, waiting: true });
+      } else {
+        stepOllama.className = 'setup-step error';
+        document.getElementById('step1-icon').textContent = '❌';
+        document.getElementById('step1-desc').textContent = data.error
+          ? `Error: ${data.error}`
+          : 'Ollama no esta instalado';
+        ollamaDot.className = 'dot red';
+        ollamaStatus.textContent = 'No instalado';
+        btnInstallOllama.classList.remove('hidden');
+        btnStartOllama.classList.add('hidden');
+        ollamaReady = false;
+        btnDownloadModel.disabled = true;
+        updateModelStep({ ready: false, waiting: true });
+      }
+    }
+
+    // Update Model step
+    function updateModelStep(data) {
+      if (data.ready) {
+        stepModel.className = 'setup-step done';
+        document.getElementById('step2-icon').textContent = '✅';
+        document.getElementById('step2-desc').textContent = `Modelo listo: ${data.models?.[0] || 'vision'}`;
+        modelDot.className = 'dot green';
+        modelStatus.textContent = data.selectedModel || data.models?.[0] || 'OK';
+        btnDownloadModel.classList.add('hidden');
+        modelProgressBar.classList.add('hidden');
+        modelReady = true;
+        updateConnectButton();
+
+        // Update available models and show selector if multiple
+        availableVisionModels = data.models || [];
+        selectedModel = data.selectedModel || availableVisionModels[0];
+        updateModelSelector();
+      } else if (data.waiting) {
+        // Waiting for Ollama to start
+        stepModel.className = 'setup-step pending';
+        document.getElementById('step2-icon').textContent = '⏳';
+        document.getElementById('step2-desc').textContent = 'Esperando que Ollama inicie...';
+        modelDot.className = 'dot yellow';
+        modelStatus.textContent = 'Esperando...';
+        btnDownloadModel.classList.add('hidden');
+        modelReady = false;
+        modelSelector.classList.add('hidden');
+      } else {
+        stepModel.className = 'setup-step pending';
+        document.getElementById('step2-icon').textContent = '2️⃣';
+        document.getElementById('step2-desc').textContent = 'Necesitas descargar el modelo de vision';
+        modelDot.className = 'dot yellow';
+        modelStatus.textContent = 'No descargado';
+        btnDownloadModel.classList.remove('hidden');
+        btnDownloadModel.disabled = !ollamaReady;
+        modelReady = false;
+        modelSelector.classList.add('hidden');
+      }
+    }
+
+    // Update model selector dropdown
+    function updateModelSelector() {
+      if (availableVisionModels.length >= 1) {
+        modelSelector.classList.remove('hidden');
+        modelSelect.innerHTML = '';
+        availableVisionModels.forEach(model => {
+          const option = document.createElement('option');
+          option.value = model;
+          option.textContent = model;
+          if (model === selectedModel) option.selected = true;
+          modelSelect.appendChild(option);
+        });
+      } else {
+        modelSelector.classList.add('hidden');
+      }
+    }
+
+    // Update connect button
+    function updateConnectButton() {
+      const hasUrl = backendUrlInput.value.trim().length > 0;
+      const hasKey = apiKeyInput.value.trim().length > 0;
+      btnConnect.disabled = !ollamaReady || !modelReady || !hasUrl || !hasKey;
+    }
+
+    // Update connection status
+    function updateConnectionStatus(connected, error) {
+      isConnected = connected;
+      btnConnect.disabled = false;
+      backendDot.className = 'dot ' + (connected ? 'green' : 'red');
+      backendStatus.textContent = connected ? 'Conectado' : (error || 'Desconectado');
+
+      if (connected) {
+        stepConnection.className = 'setup-step done';
+        document.getElementById('step3-icon').textContent = '✅';
+        btnConnect.textContent = 'Desconectar';
+        btnConnect.className = 'btn btn-danger btn-full';
+      } else {
+        stepConnection.className = 'setup-step pending';
+        document.getElementById('step3-icon').textContent = '3️⃣';
+        btnConnect.textContent = 'Conectar';
+        btnConnect.className = 'btn btn-primary btn-full';
+      }
+    }
+
+    // Add log
+    function addLog(message, type = 'info') {
+      const time = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+      const entry = document.createElement('div');
+      entry.className = 'log-entry ' + type;
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'log-time';
+      timeSpan.textContent = time;
+      entry.appendChild(timeSpan);
+      entry.appendChild(document.createTextNode(message));
+      logsContainer.appendChild(entry);
+      logsContainer.scrollTo({ top: logsContainer.scrollHeight, behavior: 'smooth' });
+
+      while (logsContainer.children.length > 50) {
+        logsContainer.removeChild(logsContainer.firstChild);
+      }
+    }
+
+    // Button handlers
+    let _checkOllamaTimeout = null;
+    function resetCheckOllamaButton() {
+      btnCheckOllama.disabled = false;
+      btnCheckOllama.textContent = '🔄 Verificar';
+      if (_checkOllamaTimeout) { clearTimeout(_checkOllamaTimeout); _checkOllamaTimeout = null; }
+    }
+    btnCheckOllama.addEventListener('click', () => {
+      addLog('Verificando Ollama...', 'info');
+      btnCheckOllama.disabled = true;
+      btnCheckOllama.textContent = '⏳ Verificando...';
+      electronAPI.checkOllama();
+      // Safety net: if no response in 30s, re-enable so the user isn't stuck.
+      if (_checkOllamaTimeout) clearTimeout(_checkOllamaTimeout);
+      _checkOllamaTimeout = setTimeout(() => {
+        if (btnCheckOllama.disabled) {
+          addLog('Tiempo agotado verificando Ollama. ¿Esta corriendo? Abri una terminal y tipea "ollama serve".', 'error');
+          resetCheckOllamaButton();
+        }
+      }, 30000);
+    });
+
+    btnInstallOllama.addEventListener('click', () => {
+      addLog('Instalando Ollama...', 'info');
+      electronAPI.installOllama();
+    });
+
+    btnStartOllama.addEventListener('click', () => {
+      addLog('Iniciando Ollama...', 'info');
+      btnStartOllama.disabled = true;
+      btnStartOllama.textContent = 'Iniciando...';
+      electronAPI.startOllama();
+    });
+
+    btnDownloadModel.addEventListener('click', () => {
+      addLog('Descargando modelo de vision...', 'info');
+      modelProgressBar.classList.remove('hidden');
+      btnDownloadModel.disabled = true;
+      electronAPI.pullModel('llama3.2-vision');
+    });
+
+    btnConnect.addEventListener('click', () => {
+      if (isConnected) {
+        electronAPI.disconnect();
+      } else {
+        const apiKey = apiKeyInput.value.trim();
+        if (!apiKey) {
+          addLog('Falta la API Key', 'error');
+          return;
+        }
+        const sanitized = sanitizeBackendUrl(backendUrlInput.value);
+        if (!sanitized.ok) {
+          addLog(sanitized.error, 'error');
+          return;
+        }
+        // Echo the sanitized URL back to the input so what the user sees matches what we save.
+        backendUrlInput.value = sanitized.url;
+
+        electronAPI.saveConfig({ backendUrl: sanitized.url, apiKey });
+        btnConnect.disabled = true;
+        btnConnect.textContent = 'Conectando...';
+        electronAPI.connect();
+      }
+    });
+
+    backendUrlInput.addEventListener('input', updateConnectButton);
+    apiKeyInput.addEventListener('input', updateConnectButton);
+
+    // Model selection handler
+    modelSelect.addEventListener('change', (e) => {
+      const newModel = e.target.value;
+      if (newModel && newModel !== selectedModel) {
+        selectedModel = newModel;
+        modelStatus.textContent = newModel;
+        electronAPI.selectModel(newModel);
+      }
+    });
+
+    // Clear queue handler with native dialog confirmation
+    btnClearQueue.addEventListener('click', async () => {
+      const confirmed = await electronAPI.confirmClearQueue();
+      if (confirmed) {
+        electronAPI.clearQueue();
+      }
+    });
+
+    // IPC listeners using secure electronAPI
+    electronAPI.on('ollama-checking', () => {
+      console.log('[UI] ollama-checking received');
+      ollamaDot.className = 'dot yellow';
+      ollamaStatus.textContent = 'Verificando...';
+      stepOllama.className = 'setup-step pending';
+      document.getElementById('step1-icon').textContent = '⏳';
+      document.getElementById('step1-desc').textContent = 'Verificando Ollama...';
+      btnCheckOllama.disabled = true;
+      btnCheckOllama.textContent = '⏳ Verificando...';
+      // Also update model to show it's waiting
+      modelDot.className = 'dot yellow';
+      modelStatus.textContent = 'Esperando...';
+    });
+
+    electronAPI.on('ollama-status', (data) => {
+      console.log('[UI] ollama-status received:', data);
+      updateOllamaStep(data);
+      btnCheckOllama.disabled = false;
+      btnCheckOllama.textContent = '🔄 Verificar';
+      btnStartOllama.disabled = false;
+      btnStartOllama.textContent = 'Iniciar Ollama';
+    });
+
+    electronAPI.on('ollama-starting', () => {
+      console.log('[UI] ollama-starting received');
+      ollamaDot.className = 'dot yellow';
+      ollamaStatus.textContent = 'Iniciando...';
+    });
+
+    electronAPI.on('install-progress', (data) => {
+      console.log('[UI] install-progress received:', data);
+      ollamaProgressBar.classList.remove('hidden');
+      ollamaProgressFill.style.width = (data.progress || 0) + '%';
+      document.getElementById('step1-desc').textContent = data.message;
+
+      if (data.step === 'done' || data.step === 'manual') {
+        addLog(data.message, 'success');
+        setTimeout(() => electronAPI.checkOllama(), 2000);
+      } else if (data.step === 'error') {
+        addLog(data.message, 'error');
+      }
+    });
+
+    electronAPI.on('model-progress', (data) => {
+      console.log('[UI] model-progress received:', data);
+      modelProgressBar.classList.remove('hidden');
+      modelProgressFill.style.width = (data.progress || 0) + '%';
+      document.getElementById('step2-desc').textContent = data.message || `Descargando... ${data.progress || 0}%`;
+      stepModel.className = 'setup-step pending';
+      document.getElementById('step2-icon').textContent = '⏳';
+      modelDot.className = 'dot yellow';
+      modelStatus.textContent = `${data.progress || 0}%`;
+
+      if (data.step === 'done') {
+        addLog('Modelo descargado!', 'success');
+        modelProgressBar.classList.add('hidden');
+        stepModel.className = 'setup-step done';
+        document.getElementById('step2-icon').textContent = '✅';
+        modelDot.className = 'dot green';
+        modelStatus.textContent = 'Listo';
+        modelReady = true;
+        btnDownloadModel.classList.add('hidden');
+        updateConnectButton();
+      } else if (data.step === 'error') {
+        addLog(data.message, 'error');
+        modelProgressBar.classList.add('hidden');
+        stepModel.className = 'setup-step error';
+        document.getElementById('step2-icon').textContent = '❌';
+        modelDot.className = 'dot red';
+        modelStatus.textContent = 'Error';
+        btnDownloadModel.classList.remove('hidden');
+        btnDownloadModel.disabled = false;
+        btnDownloadModel.textContent = 'Reintentar Descarga';
+      }
+    });
+
+    // Auto-download events for seamless UX
+    electronAPI.on('auto-download-started', (data) => {
+      console.log('[UI] auto-download-started received:', data);
+      addLog(`Descargando ${data.model} automáticamente...`, 'info');
+      stepModel.className = 'setup-step pending';
+      document.getElementById('step2-icon').textContent = '⏳';
+      document.getElementById('step2-desc').textContent = `Descargando ${data.model}...`;
+      modelDot.className = 'dot yellow';
+      modelStatus.textContent = 'Descargando...';
+      modelProgressBar.classList.remove('hidden');
+      modelProgressFill.style.width = '0%';
+      btnDownloadModel.classList.add('hidden');
+    });
+
+    electronAPI.on('auto-download-complete', (data) => {
+      console.log('[UI] auto-download-complete received:', data);
+      addLog(`Modelo ${data.model} descargado!`, 'success');
+      stepModel.className = 'setup-step done';
+      document.getElementById('step2-icon').textContent = '✅';
+      document.getElementById('step2-desc').textContent = `Modelo ${data.model} listo!`;
+      modelDot.className = 'dot green';
+      modelStatus.textContent = data.model;
+      modelProgressBar.classList.add('hidden');
+      modelReady = true;
+      selectedModel = data.model;
+      updateConnectButton();
+    });
+
+    electronAPI.on('auto-download-failed', (data) => {
+      console.log('[UI] auto-download-failed received:', data);
+      addLog(`Error: ${data.error || 'Descarga falló'}`, 'error');
+      stepModel.className = 'setup-step error';
+      document.getElementById('step2-icon').textContent = '❌';
+      document.getElementById('step2-desc').textContent = `Error: ${data.error || 'Descarga falló'}`;
+      modelDot.className = 'dot red';
+      modelStatus.textContent = 'Error';
+      modelProgressBar.classList.add('hidden');
+      btnDownloadModel.classList.remove('hidden');
+      btnDownloadModel.disabled = false;
+      btnDownloadModel.textContent = 'Reintentar Descarga';
+    });
+
+    electronAPI.on('connection-status', (data) => {
+      console.log('[UI] connection-status received:', data);
+      updateConnectionStatus(data.connected, data.error);
+    });
+
+    electronAPI.on('log', (data) => {
+      console.log('[UI] log received:', data);
+      addLog(data.message, data.type);
+    });
+
+    // Log that listeners are set up
+    console.log('[UI] All event listeners registered');
+
+    electronAPI.on('config', (config) => {
+      backendUrlInput.value = config.backendUrl || '';
+      apiKeyInput.value = config.apiKey || '';
+      if (config.customPrompt && promptTextarea) {
+        promptTextarea.value = config.customPrompt;
+      }
+      updateConnectButton();
+    });
+
+    electronAPI.on('validating', () => {
+      validatingIndicator.classList.remove('hidden');
+    });
+
+    electronAPI.on('validation-done', () => {
+      validatingIndicator.classList.add('hidden');
+    });
+
+    electronAPI.on('model-selected', (data) => {
+      selectedModel = data.model;
+      modelStatus.textContent = data.model;
+      if (modelSelect.value !== data.model) {
+        modelSelect.value = data.model;
+      }
+    });
+
+    // The app sometimes auto-swaps the model (e.g. to a vision-capable one). Show a banner so
+    // the operator isn't confused why "their" pick changed.
+    electronAPI.on('model-auto-switched', (data) => {
+      const msg = `Cambiamos el modelo a "${data.selected}" porque "${data.previous || 'el anterior'}" no soporta vision.`;
+      addLog(msg, 'warning');
+    });
+
+    // Copy last 100 visible log entries to clipboard for support tickets.
+    document.getElementById('btn-copy-logs')?.addEventListener('click', () => {
+      const entries = Array.from(logsContainer.querySelectorAll('.log-entry')).slice(-100);
+      const text = entries.map(el => el.textContent.trim().replace(/\s+/g, ' ')).join('\n');
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('btn-copy-logs');
+        const orig = btn.textContent;
+        btn.textContent = 'Copiado!';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      }).catch(() => addLog('No se pudo copiar al portapapeles', 'error'));
+    });
+
+    // Tray "Cambiar configuracion" → reveal the wizard section and scroll to it.
+    electronAPI.on('open-wizard', () => {
+      const setupSection = document.getElementById('setup-section');
+      if (setupSection) {
+        setupSection.classList.remove('hidden');
+        setupSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (apiKeyInput) apiKeyInput.focus();
+      }
+    });
+
+    // Validator stats panel — populated by main process every minute.
+    electronAPI.on('validator-stats', (data) => {
+      const el = document.getElementById('validator-stats');
+      if (!el || !data) return;
+      const total = (data.ocrFastCount || 0) + (data.ocrAggressiveCount || 0) + (data.ollamaCount || 0) + (data.failedCount || 0);
+      if (total === 0) { el.textContent = 'Sin validaciones hoy'; return; }
+      const pct = (n) => Math.round((n / total) * 100);
+      el.textContent =
+        'OCR rapido: ' + pct(data.ocrFastCount || 0) + '% · ' +
+        'OCR agresivo: ' + pct(data.ocrAggressiveCount || 0) + '% · ' +
+        'Ollama: ' + pct(data.ollamaCount || 0) + '% · ' +
+        'Fallidos: ' + pct(data.failedCount || 0) + '% (total ' + total + ')';
+    });
+
+    electronAPI.on('queue-status', (data) => {
+      const count = data.count || 0;
+      queueCount.textContent = count;
+      if (count > 0) {
+        queueIndicator.classList.remove('hidden');
+      } else {
+        queueIndicator.classList.add('hidden');
+      }
+    });
+
+    electronAPI.on('validation-queue-status', (data) => {
+      const count = data.count || 0;
+      const processing = data.processing || false;
+
+      // Show/hide validating indicator based on processing state
+      if (processing) {
+        validatingIndicator.classList.remove('hidden');
+        validatingText.textContent = count > 0
+          ? `Procesando comprobante... (${count} en cola)`
+          : 'Procesando comprobante...';
+      }
+
+      // Show queue badge if there are items waiting
+      if (count > 0 && processing) {
+        validationQueueBadge.classList.remove('hidden');
+        validationQueueCount.textContent = count;
+      } else {
+        validationQueueBadge.classList.add('hidden');
+      }
+
+      // Hide indicator when done and queue is empty
+      if (!processing && count === 0) {
+        validatingIndicator.classList.add('hidden');
+      }
+    });
+
+    // ========== Prompt Editor ==========
+    const promptToggle = document.getElementById('prompt-toggle');
+    const promptEditor = document.getElementById('prompt-editor');
+    const promptToggleIcon = document.getElementById('prompt-toggle-icon');
+    const promptTextarea = document.getElementById('prompt-textarea');
+    const btnSavePrompt = document.getElementById('btn-save-prompt');
+    const btnResetPrompt = document.getElementById('btn-reset-prompt');
+    const promptSavedMsg = document.getElementById('prompt-saved-msg');
+
+    let defaultPromptCache = '';
+
+    promptToggle.addEventListener('click', () => {
+      const visible = promptEditor.style.display !== 'none';
+      promptEditor.style.display = visible ? 'none' : 'block';
+      promptToggleIcon.textContent = visible ? '▶' : '▼';
+      if (!visible && !defaultPromptCache) {
+        electronAPI.getDefaultPrompt();
+      }
+    });
+
+    electronAPI.on('default-prompt', (prompt) => {
+      defaultPromptCache = prompt;
+    });
+
+    btnSavePrompt.addEventListener('click', () => {
+      const customPrompt = promptTextarea.value.trim();
+      electronAPI.saveConfig({ customPrompt });
+      promptSavedMsg.style.display = 'block';
+      setTimeout(() => { promptSavedMsg.style.display = 'none'; }, 2000);
+      addLog(customPrompt ? 'Prompt personalizado guardado' : 'Prompt reseteado al default', 'success');
+    });
+
+    btnResetPrompt.addEventListener('click', () => {
+      if (!defaultPromptCache) {
+        electronAPI.getDefaultPrompt();
+        // Wait for response
+        const unsub = electronAPI.on('default-prompt', (prompt) => {
+          promptTextarea.value = prompt;
+          unsub();
+        });
+      } else {
+        promptTextarea.value = defaultPromptCache;
+      }
+    });
+
+    // Init
+    updateConnectionStatus(false);
+
+    // Set initial "checking" state
+    ollamaDot.className = 'dot yellow';
+    ollamaStatus.textContent = 'Iniciando...';
+    modelDot.className = 'dot yellow';
+    modelStatus.textContent = 'Esperando...';
+    document.getElementById('step1-desc').textContent = 'Iniciando verificación...';
+
+    // Load config
+    electronAPI.getConfig();
+    electronAPI.getQueueStatus();
+
+    // Add a small delay before showing the initial log entry
+    addLog('Iniciando validador...', 'info');
+
+    } // end of update guard (if !window.__updateRequired)
+
+    // ==========================================
+    // TAB SWITCHING
+    // ==========================================
+
+    window.switchTab = function(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tabId));
+      document.querySelectorAll('.tab-content').forEach(tc => tc.classList.toggle('active', tc.id === 'tab-' + tabId));
+      if (tabId === 'sandbox') loadExamples();
+    };
+
+    // ==========================================
+    // OCR SANDBOX
+    // ==========================================
+
+    let sandboxImageBase64 = null;
+    let sandboxLastResult = null;
+    const testHistory = [];
+
+    // File upload handling
+    const dropzone = document.getElementById('sandbox-dropzone');
+    const fileInput = document.getElementById('sandbox-file-input');
+    const preview = document.getElementById('sandbox-preview');
+    const analyzeBtn = document.getElementById('btn-ocr-analyze');
+    const ollamaBtn = document.getElementById('btn-ollama-analyze');
+
+    if (dropzone && fileInput) {
+      dropzone.addEventListener('click', () => fileInput.click());
+      dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+      dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+      dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+      });
+      fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+    }
+
+    function handleFile(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        sandboxImageBase64 = e.target.result;
+        if (file.type.startsWith('image/')) {
+          preview.src = sandboxImageBase64;
+          preview.style.display = 'block';
+        } else {
+          preview.style.display = 'none';
+        }
+        analyzeBtn.disabled = false;
+        ollamaBtn.disabled = false;
+        dropzone.querySelector('p').textContent = file.name;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // OCR Analyze
+    if (analyzeBtn) {
+      analyzeBtn.addEventListener('click', async () => {
+        if (!sandboxImageBase64) return;
+        analyzeBtn.disabled = true;
+        const analyzingEl = document.getElementById('sandbox-analyzing');
+        document.getElementById('sandbox-analyzing-text').textContent = 'Analizando con OCR...';
+        analyzingEl.classList.remove('hidden');
+        hideSections(['sandbox-raw-section', 'sandbox-fields-section', 'sandbox-platform-section', 'sandbox-ollama-section']);
+
+        const startTime = Date.now();
+        try {
+          const result = await electronAPI.ocrAnalyze(sandboxImageBase64);
+          const duration = Date.now() - startTime;
+          result._duration = duration;
+          sandboxLastResult = result;
+          displayOcrResult(result);
+          addToHistory('OCR', result, duration);
+        } catch (err) {
+          alert('Error OCR: ' + (err.message || err));
+        } finally {
+          analyzeBtn.disabled = false;
+          analyzingEl.classList.add('hidden');
+        }
+      });
+    }
+
+    // Ollama Analyze (comparison)
+    if (ollamaBtn) {
+      ollamaBtn.addEventListener('click', async () => {
+        if (!sandboxImageBase64) return;
+        ollamaBtn.disabled = true;
+        const analyzingEl = document.getElementById('sandbox-analyzing');
+        document.getElementById('sandbox-analyzing-text').textContent = 'Analizando con Ollama (puede tardar 30-120s)...';
+        analyzingEl.classList.remove('hidden');
+
+        const startTime = Date.now();
+        try {
+          const result = await electronAPI.ollamaAnalyze(sandboxImageBase64);
+          const duration = Date.now() - startTime;
+          displayOllamaResult(result, duration);
+          addToHistory('Ollama', { fields: result }, duration);
+        } catch (err) {
+          const ollamaSection = document.getElementById('sandbox-ollama-section');
+          ollamaSection.classList.remove('hidden');
+          document.getElementById('sandbox-ollama-result').innerHTML =
+            '<span style="color:#f87171">Error Ollama: ' + escapeHtml(err.message || err) + '</span>';
+        } finally {
+          ollamaBtn.disabled = false;
+          analyzingEl.classList.add('hidden');
+        }
+      });
+    }
+
+    function hideSections(ids) {
+      ids.forEach(id => document.getElementById(id)?.classList.add('hidden'));
+    }
+
+    function displayOcrResult(result) {
+      // Raw text + copy button
+      document.getElementById('sandbox-raw-section').classList.remove('hidden');
+      document.getElementById('sandbox-raw-text').textContent = result.rawText || '(sin texto)';
+      const ocrConf = Math.round((result.ocrConfidence || 0) * 100);
+      document.getElementById('sandbox-ocr-confidence').textContent = ocrConf + '%';
+      document.getElementById('sandbox-confidence-bar').style.width = ocrConf + '%';
+      document.getElementById('sandbox-confidence-bar').style.background = ocrConf > 70 ? '#4ade80' : ocrConf > 40 ? '#facc15' : '#f87171';
+
+      // Platform detection
+      const f = result.fields || {};
+      const platformSection = document.getElementById('sandbox-platform-section');
+      platformSection.classList.remove('hidden');
+      document.getElementById('sandbox-platform-name').textContent = f.detectedPlatformName || f.detectedPlatform || 'No detectada';
+
+      // Fields (10 campos)
+      document.getElementById('sandbox-fields-section').classList.remove('hidden');
+      const fieldMap = {
+        amount: f.extractedAmount,
+        date: f.extractedDate,
+        status: f.transactionStatus,
+        sender: f.senderName,
+        cuit: f.senderDniCuit,
+        recipient: f.recipientName,
+        recipientacc: f.recipientAccount,
+        bank: f.bankName,
+        txid: f.transactionId,
+        method: f.paymentMethod,
+      };
+
+      let matched = 0, total = 0;
+      for (const [key, val] of Object.entries(fieldMap)) {
+        total++;
+        const input = document.getElementById('sf-' + key);
+        const matchEl = document.getElementById('sm-' + key);
+        if (input) input.value = val != null ? String(val) : '';
+        if (matchEl) {
+          const hasVal = val != null && String(val).length > 0;
+          matchEl.textContent = hasVal ? '\u2713' : '\u2717';
+          matchEl.style.color = hasVal ? '#4ade80' : '#f87171';
+          if (hasVal) matched++;
+        }
+      }
+
+      const totalConf = Math.round((f.confidence || 0) * 100);
+      document.getElementById('sandbox-total-confidence').textContent = totalConf + '%';
+      document.getElementById('sandbox-patterns-matched').textContent = matched + '/' + total + ' campos';
+
+      // Amount comparison
+      const expectedInput = document.getElementById('sandbox-expected-amount');
+      const compareEl = document.getElementById('sandbox-amount-compare');
+      const expectedAmt = parseFloat(expectedInput?.value);
+      if (expectedAmt > 0 && f.extractedAmount) {
+        compareEl.classList.remove('hidden');
+        const diff = Math.abs(f.extractedAmount - expectedAmt);
+        if (diff <= 1) {
+          compareEl.style.background = 'rgba(74,222,128,0.1)';
+          compareEl.style.color = '#4ade80';
+          compareEl.textContent = 'Monto coincide: $' + f.extractedAmount + ' = $' + expectedAmt;
+        } else {
+          compareEl.style.background = 'rgba(248,113,113,0.1)';
+          compareEl.style.color = '#f87171';
+          compareEl.textContent = 'MONTO NO COINCIDE: extraido $' + f.extractedAmount + ' vs esperado $' + expectedAmt + ' (dif: $' + diff + ')';
+        }
+      } else if (expectedAmt > 0 && !f.extractedAmount) {
+        compareEl.classList.remove('hidden');
+        compareEl.style.background = 'rgba(250,204,21,0.1)';
+        compareEl.style.color = '#facc15';
+        compareEl.textContent = 'OCR no pudo extraer el monto (esperado: $' + expectedAmt + ')';
+      } else {
+        compareEl.classList.add('hidden');
+      }
+
+      // Show history section
+      if (testHistory.length > 0) {
+        document.getElementById('sandbox-history-section').classList.remove('hidden');
+      }
+    }
+
+    function displayOllamaResult(result, duration) {
+      const section = document.getElementById('sandbox-ollama-section');
+      section.classList.remove('hidden');
+      const el = document.getElementById('sandbox-ollama-result');
+
+      const f = result || {};
+      const rows = [
+        ['Monto', f.extractedAmount],
+        ['Fecha', f.extractedDate],
+        ['Estado', f.transactionStatus],
+        ['Sender', f.senderName],
+        ['CUIT', f.senderDniCuit],
+        ['Destinatario', f.recipientName],
+        ['Banco', f.bankName],
+        ['Operacion', f.transactionId],
+        ['Confianza', f.confidence ? Math.round(f.confidence * 100) + '%' : '-'],
+        ['Valido', f.isValid ? 'SI' : 'NO'],
+      ];
+
+      el.innerHTML = '<div style="margin-bottom:6px;color:#60a5fa;font-size:0.8rem">Tiempo: ' + escapeHtml((duration / 1000).toFixed(1)) + 's</div>' +
+        rows.map(([label, val]) => {
+          const hasVal = val != null && String(val).length > 0;
+          return '<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.05)">' +
+            '<span style="color:#94a3b8">' + escapeHtml(label) + '</span>' +
+            '<span style="color:' + (hasVal ? '#e2e8f0' : '#f87171') + '">' + (hasVal ? escapeHtml(val) : '-') + '</span></div>';
+        }).join('');
+
+      // Compare with OCR result if available
+      if (sandboxLastResult?.fields) {
+        const ocrF = sandboxLastResult.fields;
+        const ocrTime = sandboxLastResult._duration || 0;
+        el.innerHTML += '<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.1);font-size:0.8rem;color:#94a3b8">' +
+          'OCR: ' + escapeHtml((ocrTime / 1000).toFixed(1)) + 's vs Ollama: ' + escapeHtml((duration / 1000).toFixed(1)) + 's (' + escapeHtml(Math.round(duration / Math.max(ocrTime, 1))) + 'x mas lento)' +
+          '</div>';
+      }
+    }
+
+    // Test History
+    function addToHistory(method, result, duration) {
+      const f = result.fields || {};
+      testHistory.unshift({
+        method,
+        platform: f.detectedPlatformName || f.bankName || '-',
+        amount: f.extractedAmount,
+        confidence: f.confidence ? Math.round(f.confidence * 100) : 0,
+        duration,
+        time: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      });
+      if (testHistory.length > 20) testHistory.pop();
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const container = document.getElementById('sandbox-history-list');
+      if (!container) return;
+      document.getElementById('sandbox-history-section').classList.remove('hidden');
+
+      container.innerHTML = testHistory.map(h => {
+        const methodColor = h.method === 'OCR' ? '#4ade80' : '#60a5fa';
+        const confColor = h.confidence >= 70 ? '#4ade80' : h.confidence >= 40 ? '#facc15' : '#f87171';
+        return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:0.8rem">' +
+          '<span style="color:' + methodColor + ';font-weight:600;width:50px">' + escapeHtml(h.method) + '</span>' +
+          '<span style="flex:1;color:#94a3b8">' + escapeHtml(h.platform) + '</span>' +
+          '<span style="color:#e2e8f0">' + (h.amount ? '$' + escapeHtml(h.amount) : '-') + '</span>' +
+          '<span style="color:' + confColor + ';width:35px;text-align:right">' + escapeHtml(h.confidence) + '%</span>' +
+          '<span style="color:#64748b;width:45px;text-align:right">' + escapeHtml((h.duration / 1000).toFixed(1)) + 's</span>' +
+          '<span style="color:#475569;width:55px;text-align:right">' + escapeHtml(h.time) + '</span>' +
+          '</div>';
+      }).join('');
+    }
+
+    document.getElementById('btn-clear-history')?.addEventListener('click', () => {
+      testHistory.length = 0;
+      document.getElementById('sandbox-history-list').innerHTML = '';
+      document.getElementById('sandbox-history-section').classList.add('hidden');
+    });
+
+    // Copy raw text
+    document.getElementById('btn-copy-raw')?.addEventListener('click', () => {
+      const text = document.getElementById('sandbox-raw-text').textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('btn-copy-raw');
+        btn.textContent = 'Copiado!';
+        setTimeout(() => { btn.textContent = 'Copiar'; }, 1500);
+      });
+    });
+
+    // Save example
+    const saveBtn = document.getElementById('btn-ocr-save');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        const fields = {
+          amount: parseFloat(document.getElementById('sf-amount').value) || null,
+          date: document.getElementById('sf-date').value || null,
+          status: document.getElementById('sf-status').value || null,
+          senderName: document.getElementById('sf-sender').value || null,
+          senderDniCuit: document.getElementById('sf-cuit').value || null,
+          recipientName: document.getElementById('sf-recipient').value || null,
+          recipientAccount: document.getElementById('sf-recipientacc').value || null,
+          bankName: document.getElementById('sf-bank').value || null,
+          transactionId: document.getElementById('sf-txid').value || null,
+          paymentMethod: document.getElementById('sf-method').value || null,
+        };
+        const source = fields.bankName || fields.paymentMethod || 'Desconocido';
+
+        try {
+          await electronAPI.ocrSaveExample({ source, fields });
+          document.getElementById('sandbox-saved-msg').classList.remove('hidden');
+          setTimeout(() => document.getElementById('sandbox-saved-msg').classList.add('hidden'), 2000);
+          loadExamples();
+        } catch (err) {
+          alert('Error al guardar: ' + (err.message || err));
+        }
+      });
+    }
+
+    // Load examples
+    async function loadExamples() {
+      try {
+        const data = await electronAPI.ocrGetExamples();
+        const examples = data?.examples || [];
+        document.getElementById('sandbox-example-count').textContent = examples.length;
+
+        const container = document.getElementById('sandbox-examples-list');
+        if (examples.length === 0) {
+          container.innerHTML = '<p style="font-size:0.85rem; color:#64748b; text-align:center; padding:12px">Sin ejemplos todavia</p>';
+          return;
+        }
+
+        const bySource = {};
+        examples.forEach(ex => {
+          const src = ex.source || 'Desconocido';
+          bySource[src] = (bySource[src] || 0) + 1;
+        });
+
+        container.innerHTML = Object.entries(bySource).map(([src, count]) =>
+          '<div class="example-item"><span class="example-source">' + escapeHtml(src) + '</span><span class="example-count">' + escapeHtml(count) + ' ejemplo' + (count > 1 ? 's' : '') + '</span></div>'
+        ).join('');
+      } catch {}
+    }
+
+    // Export/Import
+    document.getElementById('btn-ocr-export')?.addEventListener('click', () => electronAPI.ocrExportExamples());
+    document.getElementById('btn-ocr-import')?.addEventListener('click', async () => {
+      await electronAPI.ocrImportExamples();
+      loadExamples();
+    });
+
+  </script>
+</body>
+</html>

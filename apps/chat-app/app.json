@@ -1,0 +1,76 @@
+{
+  "expo": {
+    "name": "Tio Rico Fichas",
+    "slug": "tioricofichas",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B0F15"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nawelito12.tioricofichas"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0B0F15"
+      },
+      "package": "com.tiorico.tioricofichas"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "tioricofichas",
+    "plugins": [
+      "expo-font",
+      [
+        "expo-share-intent",
+        {
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsImageWithMaxCount": 1,
+            "NSExtensionActivationSupportsFileWithMaxCount": 1
+          },
+          "androidIntentFilters": ["image/*", "application/pdf"],
+          "androidMultiIntentFilters": []
+        }
+      ],
+      [
+        "react-native-android-widget",
+        {
+          "widgets": [
+            {
+              "name": "QuickLoad",
+              "label": "Cargar Fichas",
+              "description": "Boton rapido para cargar fichas",
+              "minWidth": "200dp",
+              "minHeight": "60dp"
+            },
+            {
+              "name": "Status",
+              "label": "Estado + Cargar",
+              "description": "Muestra el estado de tu carga y boton para cargar",
+              "minWidth": "180dp",
+              "minHeight": "180dp",
+              "updatePeriodMillis": 1800000
+            },
+            {
+              "name": "Dashboard",
+              "label": "Mini Dashboard",
+              "description": "Estado, ultimo mensaje, cargar y cobrar",
+              "minWidth": "300dp",
+              "minHeight": "180dp",
+              "updatePeriodMillis": 1800000
+            }
+          ]
+        }
+      ]
+    ]
+  }
+}

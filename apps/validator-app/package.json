@@ -1,0 +1,53 @@
+{
+  "name": "validator-app",
+  "version": "1.0.0",
+  "description": "Validador de Comprobantes - Aplicacion de escritorio",
+  "main": "src/main.js",
+  "author": "Game Automation Platform",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "build": "electron-builder --win",
+    "build:win": "electron-builder --win"
+  },
+  "dependencies": {
+    "pdf-poppler": "^0.2.1",
+    "sharp": "^0.34.5",
+    "socket.io-client": "^4.8.1",
+    "tesseract.js": "^5.1.1",
+    "tree-kill": "^1.2.2"
+  },
+  "devDependencies": {
+    "electron": "33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.gameautomation.validator",
+    "productName": "Validador de Comprobantes",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "!src/api-mock.js",
+      "!src/test-index.html",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      { "from": "spa.traineddata", "to": "spa.traineddata" }
+    ],
+    "asarUnpack": [
+      "**/node_modules/sharp/**",
+      "**/node_modules/@img/**",
+      "**/node_modules/tesseract.js-core/**",
+      "**/node_modules/pdf-poppler/**"
+    ],
+    "win": {
+      "target": [
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "assets/icon.ico"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "_name": "NombrePlataforma",
+  "_description": "Breve descripcion de la plataforma",
+  "_instructions": "1. Abrir el panel en Chrome. 2. Inspeccionar cada elemento con DevTools. 3. Copiar selectores CSS. 4. Solo incluir los que difieren de TioRico (default). 5. Pegar este JSON en la Options page de la extension o cargar via URL remota.",
+
+  "LOGIN_USERNAME_INPUT": "SELECTOR_DEL_INPUT_DE_USUARIO",
+  "LOGIN_PASSWORD_INPUT": "SELECTOR_DEL_INPUT_DE_PASSWORD",
+  "LOGIN_SUBMIT_BUTTON": "SELECTOR_DEL_BOTON_LOGIN",
+  "USERS_PAGE_LINK": "SELECTOR_DEL_LINK_A_PAGINA_DE_USUARIOS",
+  "USER_SEARCH_INPUT": "SELECTOR_DEL_INPUT_DE_BUSQUEDA",
+  "ADD_CREDITS_BUTTON_ROW": "SELECTOR_DEL_BOTON_CARGAR_EN_LA_FILA",
+  "SUBTRACT_CREDITS_BUTTON_ROW": "SELECTOR_DEL_BOTON_DESCARGAR_EN_LA_FILA",
+  "MODAL": "SELECTOR_DEL_MODAL_DE_CARGA",
+  "MODAL_AMOUNT_INPUT": "SELECTOR_DEL_INPUT_DE_MONTO_EN_MODAL",
+  "MODAL_SUBMIT": "SELECTOR_DEL_BOTON_ACEPTAR_EN_MODAL",
+  "SUCCESS_MESSAGE": "SELECTOR_DEL_MENSAJE_DE_EXITO",
+  "ERROR_MESSAGE": "SELECTOR_DEL_MENSAJE_DE_ERROR"
+}

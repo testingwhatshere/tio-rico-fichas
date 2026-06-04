@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' https://cdn.socket.io https://tiorico-api.onrender.com wss://game-automation-platform.onrender.com; script-src 'self' 'unsafe-inline' https://cdn.socket.io; connect-src 'self' https://tiorico-api.onrender.com wss://game-automation-platform.onrender.com; img-src 'self' data:;">
+  <title>Validador de Comprobantes (E2E Test)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #fff;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container { max-width: 480px; margin: 0 auto; }
+
+    h1 {
+      font-size: 1.4rem;
+      margin-bottom: 20px;
+      text-align: center;
+      color: #4ade80;
+    }
+
+    .card {
+      background: rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .card h2 {
+      font-size: 0.9rem;
+      color: #94a3b8;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+    }
+
+    .status-label { color: #94a3b8; font-size: 0.9rem; }
+
+    .status-value {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+      font-size: 0.9rem;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot.green { background: #4ade80; }
+    .dot.red { background: #f87171; }
+    .dot.yellow { background: #facc15; animation: pulse 1.5s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .setup-step {
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .setup-step.done { border-left: 3px solid #4ade80; }
+    .setup-step.pending { border-left: 3px solid #facc15; }
+    .setup-step.error { border-left: 3px solid #f87171; }
+
+    .setup-step h3 {
+      font-size: 0.95rem;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .setup-step p {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin-bottom: 10px;
+    }
+
+    .progress-bar {
+      height: 6px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 3px;
+      margin: 10px 0;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: #4ade80;
+      border-radius: 3px;
+      transition: width 0.3s;
+    }
+
+    .form-group { margin-bottom: 12px; }
+
+    .form-group label {
+      display: block;
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin-bottom: 4px;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      background: rgba(0,0,0,0.3);
+      color: #fff;
+      font-size: 0.9rem;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #4ade80;
+    }
+
+    .btn {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-primary { background: #4ade80; color: #000; }
+    .btn-primary:hover { background: #22c55e; }
+    .btn-primary:disabled { background: #374151; color: #6b7280; cursor: not-allowed; }
+
+    .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
+    .btn-secondary:hover { background: rgba(255,255,255,0.2); }
+
+    .btn-danger { background: #f87171; color: #000; }
+    .btn-danger:hover { background: #ef4444; }
+
+    .btn-full { width: 100%; justify-content: center; }
+
+    .btn-group { display: flex; gap: 8px; margin-top: 10px; }
+
+    .logs {
+      background: rgba(0,0,0,0.3);
+      border-radius: 8px;
+      padding: 12px;
+      max-height: 180px;
+      overflow-y: auto;
+      font-family: 'Consolas', monospace;
+      font-size: 0.75rem;
+    }
+
+    .log-entry {
+      padding: 4px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .log-entry.success { color: #4ade80; }
+    .log-entry.error { color: #f87171; }
+    .log-entry.warning { color: #facc15; }
+    .log-entry.info { color: #60a5fa; }
+
+    .log-time { color: #64748b; margin-right: 8px; }
+
+    .hidden { display: none !important; }
+
+    .model-selector {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .model-selector label {
+      display: block;
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin-bottom: 6px;
+    }
+
+    .model-dropdown {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      background: rgba(0,0,0,0.3);
+      color: #fff;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .model-dropdown:focus {
+      outline: none;
+      border-color: #4ade80;
+    }
+
+    .model-dropdown option {
+      background: #1a1a2e;
+      color: #fff;
+    }
+
+    .queue-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: rgba(250,204,21,0.1);
+      border: 1px solid rgba(250,204,21,0.3);
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .queue-icon { font-size: 1.1rem; }
+
+    .queue-text {
+      flex: 1;
+      font-size: 0.85rem;
+      color: #facc15;
+    }
+
+    .btn-queue-clear {
+      background: rgba(255,255,255,0.1);
+      border: none;
+      color: #94a3b8;
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .btn-queue-clear:hover {
+      background: rgba(248,113,113,0.2);
+      color: #f87171;
+    }
+
+    .validation-queue-badge {
+      background: rgba(250,204,21,0.2);
+      color: #facc15;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-left: auto;
+    }
+
+    .validating-indicator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px;
+      background: rgba(96,165,250,0.1);
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #60a5fa;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .e2e-banner {
+      background: rgba(250,204,21,0.15);
+      border: 1px solid rgba(250,204,21,0.3);
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 12px;
+      font-size: 0.8rem;
+      color: #facc15;
+      text-align: center;
+    }
+  </style>
+  <!-- Socket.IO CDN for browser -->
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <!-- Mock electronAPI before the inline script runs -->
+  <script src="api-mock.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Validador de Comprobantes</h1>
+
+    <!-- E2E Test Banner -->
+    <div class="e2e-banner">E2E Test Mode - Ollama simulated, validation results are mocked</div>
+
+    <!-- Status Card -->
+    <div class="card">
+      <h2>📊 Estado</h2>
+      <div class="status-row">
+        <span class="status-label">Backend</span>
+        <span class="status-value">
+          <span class="dot" id="backend-dot" aria-label="Estado del backend"></span>
+          <span id="backend-status">Desconectado</span>
+        </span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Ollama</span>
+        <span class="status-value">
+          <span class="dot" id="ollama-dot" aria-label="Estado de Ollama"></span>
+          <span id="ollama-status">Verificando...</span>
+        </span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Modelo Vision</span>
+        <span class="status-value">
+          <span class="dot" id="model-dot" aria-label="Estado del modelo"></span>
+          <span id="model-status">-</span>
+        </span>
+      </div>
+      <!-- Model Selector (shown when multiple vision models available) -->
+      <div class="model-selector hidden" id="model-selector">
+        <label for="model-select">Modelo activo:</label>
+        <select id="model-select" class="model-dropdown">
+          <option value="">Seleccionar modelo...</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Validating Indicator -->
+    <div class="validating-indicator hidden" id="validating-indicator">
+      <div class="spinner"></div>
+      <span id="validating-text">Procesando comprobante...</span>
+      <span class="validation-queue-badge hidden" id="validation-queue-badge">+<span id="validation-queue-count">0</span></span>
+    </div>
+
+    <!-- Queue Status Indicator -->
+    <div class="queue-indicator hidden" id="queue-indicator">
+      <span class="queue-icon">📋</span>
+      <span class="queue-text"><span id="queue-count">0</span> solicitudes en cola</span>
+      <button class="btn-queue-clear" id="btn-clear-queue" title="Limpiar cola">✕</button>
+    </div>
+
+    <!-- Setup Wizard -->
+    <div class="card" id="setup-section">
+      <h2>⚙️ Configuracion Inicial</h2>
+
+      <!-- Step 1: Ollama -->
+      <div class="setup-step" id="step-ollama">
+        <h3>
+          <span id="step1-icon">1️⃣</span>
+          Ollama (Motor de IA)
+        </h3>
+        <p id="step1-desc">Verifica si Ollama esta instalado y corriendo</p>
+        <div class="progress-bar hidden" id="ollama-progress-bar">
+          <div class="progress-bar-fill" id="ollama-progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="btn-group" id="ollama-buttons">
+          <button class="btn btn-secondary" id="btn-check-ollama">🔄 Verificar</button>
+          <button class="btn btn-primary" id="btn-install-ollama">Instalar Ollama</button>
+          <button class="btn btn-secondary" id="btn-start-ollama">Iniciar Ollama</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Model -->
+      <div class="setup-step" id="step-model">
+        <h3>
+          <span id="step2-icon">2️⃣</span>
+          Modelo de Vision
+        </h3>
+        <p id="step2-desc">Descarga el modelo de IA para analizar imagenes</p>
+        <div class="progress-bar hidden" id="model-progress-bar">
+          <div class="progress-bar-fill" id="model-progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="btn-group" id="model-buttons">
+          <button class="btn btn-primary" id="btn-download-model" disabled>Descargar Modelo (~4GB)</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Connection -->
+      <div class="setup-step" id="step-connection">
+        <h3>
+          <span id="step3-icon">3️⃣</span>
+          Conexion al Servidor
+        </h3>
+        <div class="form-group">
+          <label>URL del Backend</label>
+          <input type="url" id="backend-url" placeholder="https://tu-app.onrender.com">
+        </div>
+        <div class="form-group">
+          <label>API Key</label>
+          <input type="password" id="api-key" placeholder="Tu clave de acceso">
+        </div>
+        <button class="btn btn-primary btn-full" id="btn-connect" disabled>Conectar</button>
+      </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="card">
+      <h2>📋 Actividad</h2>
+      <div class="logs" id="logs">
+        <div class="log-entry info">
+          <span class="log-time">--:--</span>
+          Iniciando...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // electronAPI is exposed globally by api-mock.js
+    // Same inline script as the original index.html
+
+    // Elements
+    const backendDot = document.getElementById('backend-dot');
+    const backendStatus = document.getElementById('backend-status');
+    const ollamaDot = document.getElementById('ollama-dot');
+    const ollamaStatus = document.getElementById('ollama-status');
+    const modelDot = document.getElementById('model-dot');
+    const modelStatus = document.getElementById('model-status');
+    const logsContainer = document.getElementById('logs');
+    const validatingIndicator = document.getElementById('validating-indicator');
+    const validatingText = document.getElementById('validating-text');
+    const validationQueueBadge = document.getElementById('validation-queue-badge');
+    const validationQueueCount = document.getElementById('validation-queue-count');
+    const queueIndicator = document.getElementById('queue-indicator');
+    const queueCount = document.getElementById('queue-count');
+    const btnClearQueue = document.getElementById('btn-clear-queue');
+
+    // Buttons
+    const btnCheckOllama = document.getElementById('btn-check-ollama');
+    const btnInstallOllama = document.getElementById('btn-install-ollama');
+    const btnStartOllama = document.getElementById('btn-start-ollama');
+    const btnDownloadModel = document.getElementById('btn-download-model');
+    const btnConnect = document.getElementById('btn-connect');
+
+    // Model selector
+    const modelSelector = document.getElementById('model-selector');
+    const modelSelect = document.getElementById('model-select');
+
+    // Inputs
+    const backendUrlInput = document.getElementById('backend-url');
+    const apiKeyInput = document.getElementById('api-key');
+
+    // Steps
+    const stepOllama = document.getElementById('step-ollama');
+    const stepModel = document.getElementById('step-model');
+    const stepConnection = document.getElementById('step-connection');
+
+    // Progress
+    const ollamaProgressBar = document.getElementById('ollama-progress-bar');
+    const ollamaProgressFill = document.getElementById('ollama-progress-fill');
+    const modelProgressBar = document.getElementById('model-progress-bar');
+    const modelProgressFill = document.getElementById('model-progress-fill');
+
+    // State
+    let ollamaReady = false;
+    let modelReady = false;
+    let isConnected = false;
+    let availableVisionModels = [];
+    let selectedModel = null;
+
+    // Update Ollama step
+    function updateOllamaStep(data) {
+      btnCheckOllama.disabled = false;
+      btnCheckOllama.textContent = '🔄 Verificar';
+      btnCheckOllama.classList.remove('hidden');
+
+      if (data.running) {
+        stepOllama.className = 'setup-step done';
+        document.getElementById('step1-icon').textContent = '✅';
+        document.getElementById('step1-desc').textContent = 'Ollama esta corriendo';
+        ollamaDot.className = 'dot green';
+        ollamaStatus.textContent = 'Corriendo';
+        btnInstallOllama.classList.add('hidden');
+        btnStartOllama.classList.add('hidden');
+        ollamaReady = true;
+        btnDownloadModel.disabled = false;
+
+        if (data.hasVisionModel) {
+          updateModelStep({ ready: true, models: data.visionModels, selectedModel: data.selectedModel });
+        } else {
+          updateModelStep({ ready: false });
+        }
+      } else if (data.installed) {
+        stepOllama.className = 'setup-step pending';
+        document.getElementById('step1-icon').textContent = '⚠️';
+        document.getElementById('step1-desc').textContent = data.error
+          ? `Error: ${data.error}`
+          : 'Ollama instalado pero no esta corriendo';
+        ollamaDot.className = 'dot yellow';
+        ollamaStatus.textContent = 'No corriendo';
+        btnInstallOllama.classList.add('hidden');
+        btnStartOllama.classList.remove('hidden');
+        btnStartOllama.disabled = false;
+        btnStartOllama.textContent = 'Iniciar Ollama';
+        ollamaReady = false;
+        btnDownloadModel.disabled = true;
+        updateModelStep({ ready: false, waiting: true });
+      } else {
+        stepOllama.className = 'setup-step error';
+        document.getElementById('step1-icon').textContent = '❌';
+        document.getElementById('step1-desc').textContent = data.error
+          ? `Error: ${data.error}`
+          : 'Ollama no esta instalado';
+        ollamaDot.className = 'dot red';
+        ollamaStatus.textContent = 'No instalado';
+        btnInstallOllama.classList.remove('hidden');
+        btnStartOllama.classList.add('hidden');
+        ollamaReady = false;
+        btnDownloadModel.disabled = true;
+        updateModelStep({ ready: false, waiting: true });
+      }
+    }
+
+    function updateModelStep(data) {
+      if (data.ready) {
+        stepModel.className = 'setup-step done';
+        document.getElementById('step2-icon').textContent = '✅';
+        document.getElementById('step2-desc').textContent = `Modelo listo: ${data.models?.[0] || 'vision'}`;
+        modelDot.className = 'dot green';
+        modelStatus.textContent = data.selectedModel || data.models?.[0] || 'OK';
+        btnDownloadModel.classList.add('hidden');
+        modelProgressBar.classList.add('hidden');
+        modelReady = true;
+        updateConnectButton();
+
+        availableVisionModels = data.models || [];
+        selectedModel = data.selectedModel || availableVisionModels[0];
+        updateModelSelector();
+      } else if (data.waiting) {
+        stepModel.className = 'setup-step pending';
+        document.getElementById('step2-icon').textContent = '⏳';
+        document.getElementById('step2-desc').textContent = 'Esperando que Ollama inicie...';
+        modelDot.className = 'dot yellow';
+        modelStatus.textContent = 'Esperando...';
+        btnDownloadModel.classList.add('hidden');
+        modelReady = false;
+        modelSelector.classList.add('hidden');
+      } else {
+        stepModel.className = 'setup-step pending';
+        document.getElementById('step2-icon').textContent = '2️⃣';
+        document.getElementById('step2-desc').textContent = 'Necesitas descargar el modelo de vision';
+        modelDot.className = 'dot yellow';
+        modelStatus.textContent = 'No descargado';
+        btnDownloadModel.classList.remove('hidden');
+        btnDownloadModel.disabled = !ollamaReady;
+        modelReady = false;
+        modelSelector.classList.add('hidden');
+      }
+    }
+
+    function updateModelSelector() {
+      if (availableVisionModels.length > 1) {
+        modelSelector.classList.remove('hidden');
+        modelSelect.innerHTML = '';
+        availableVisionModels.forEach(model => {
+          const option = document.createElement('option');
+          option.value = model;
+          option.textContent = model;
+          if (model === selectedModel) option.selected = true;
+          modelSelect.appendChild(option);
+        });
+      } else {
+        modelSelector.classList.add('hidden');
+      }
+    }
+
+    function updateConnectButton() {
+      const hasUrl = backendUrlInput.value.trim().length > 0;
+      const hasKey = apiKeyInput.value.trim().length > 0;
+      btnConnect.disabled = !ollamaReady || !modelReady || !hasUrl || !hasKey;
+    }
+
+    function updateConnectionStatus(connected, error) {
+      isConnected = connected;
+      btnConnect.disabled = false;
+      backendDot.className = 'dot ' + (connected ? 'green' : 'red');
+      backendStatus.textContent = connected ? 'Conectado' : (error || 'Desconectado');
+
+      if (connected) {
+        stepConnection.className = 'setup-step done';
+        document.getElementById('step3-icon').textContent = '✅';
+        btnConnect.textContent = 'Desconectar';
+        btnConnect.className = 'btn btn-danger btn-full';
+      } else {
+        stepConnection.className = 'setup-step pending';
+        document.getElementById('step3-icon').textContent = '3️⃣';
+        btnConnect.textContent = 'Conectar';
+        btnConnect.className = 'btn btn-primary btn-full';
+      }
+    }
+
+    function addLog(message, type = 'info') {
+      const time = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+      const entry = document.createElement('div');
+      entry.className = 'log-entry ' + type;
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'log-time';
+      timeSpan.textContent = time;
+      entry.appendChild(timeSpan);
+      entry.appendChild(document.createTextNode(message));
+      logsContainer.appendChild(entry);
+      logsContainer.scrollTo({ top: logsContainer.scrollHeight, behavior: 'smooth' });
+
+      while (logsContainer.children.length > 50) {
+        logsContainer.removeChild(logsContainer.firstChild);
+      }
+    }
+
+    // Button handlers
+    btnCheckOllama.addEventListener('click', () => {
+      addLog('Verificando Ollama...', 'info');
+      btnCheckOllama.disabled = true;
+      btnCheckOllama.textContent = '⏳ Verificando...';
+      electronAPI.checkOllama();
+    });
+
+    btnInstallOllama.addEventListener('click', () => {
+      addLog('Instalando Ollama...', 'info');
+      electronAPI.installOllama();
+    });
+
+    btnStartOllama.addEventListener('click', () => {
+      addLog('Iniciando Ollama...', 'info');
+      btnStartOllama.disabled = true;
+      btnStartOllama.textContent = 'Iniciando...';
+      electronAPI.startOllama();
+    });
+
+    btnDownloadModel.addEventListener('click', () => {
+      addLog('Descargando modelo de vision...', 'info');
+      modelProgressBar.classList.remove('hidden');
+      btnDownloadModel.disabled = true;
+      electronAPI.pullModel('llama3.2-vision');
+    });
+
+    btnConnect.addEventListener('click', () => {
+      if (isConnected) {
+        electronAPI.disconnect();
+      } else {
+        const backendUrl = backendUrlInput.value.trim();
+        const apiKey = apiKeyInput.value.trim();
+
+        if (!backendUrl || !apiKey) {
+          addLog('Completa la URL y API Key', 'error');
+          return;
+        }
+
+        try {
+          const parsedUrl = new URL(backendUrl);
+          if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+            addLog('La URL debe usar protocolo http o https', 'error');
+            return;
+          }
+        } catch (_) {
+          addLog('URL invalida. Ejemplo: https://tu-app.onrender.com', 'error');
+          return;
+        }
+
+        electronAPI.saveConfig({ backendUrl, apiKey });
+        btnConnect.disabled = true;
+        btnConnect.textContent = 'Conectando...';
+        electronAPI.connect();
+      }
+    });
+
+    backendUrlInput.addEventListener('input', updateConnectButton);
+    apiKeyInput.addEventListener('input', updateConnectButton);
+
+    modelSelect.addEventListener('change', (e) => {
+      const newModel = e.target.value;
+      if (newModel && newModel !== selectedModel) {
+        selectedModel = newModel;
+        modelStatus.textContent = newModel;
+        electronAPI.selectModel(newModel);
+      }
+    });
+
+    btnClearQueue.addEventListener('click', () => {
+      if (confirm('Limpiar cola de solicitudes pendientes?')) {
+        electronAPI.clearQueue();
+      }
+    });
+
+    // Event listeners
+    electronAPI.on('ollama-checking', () => {
+      ollamaDot.className = 'dot yellow';
+      ollamaStatus.textContent = 'Verificando...';
+      stepOllama.className = 'setup-step pending';
+      document.getElementById('step1-icon').textContent = '⏳';
+      document.getElementById('step1-desc').textContent = 'Verificando Ollama...';
+      btnCheckOllama.disabled = true;
+      btnCheckOllama.textContent = '⏳ Verificando...';
+      modelDot.className = 'dot yellow';
+      modelStatus.textContent = 'Esperando...';
+    });
+
+    electronAPI.on('ollama-status', (data) => {
+      updateOllamaStep(data);
+      btnCheckOllama.disabled = false;
+      btnCheckOllama.textContent = '🔄 Verificar';
+      btnStartOllama.disabled = false;
+      btnStartOllama.textContent = 'Iniciar Ollama';
+    });
+
+    electronAPI.on('ollama-starting', () => {
+      ollamaDot.className = 'dot yellow';
+      ollamaStatus.textContent = 'Iniciando...';
+    });
+
+    electronAPI.on('install-progress', (data) => {
+      ollamaProgressBar.classList.remove('hidden');
+      ollamaProgressFill.style.width = (data.progress || 0) + '%';
+      document.getElementById('step1-desc').textContent = data.message;
+
+      if (data.step === 'done' || data.step === 'manual') {
+        addLog(data.message, 'success');
+        setTimeout(() => electronAPI.checkOllama(), 2000);
+      } else if (data.step === 'error') {
+        addLog(data.message, 'error');
+      }
+    });
+
+    electronAPI.on('model-progress', (data) => {
+      modelProgressBar.classList.remove('hidden');
+      modelProgressFill.style.width = (data.progress || 0) + '%';
+      document.getElementById('step2-desc').textContent = data.message || `Descargando... ${data.progress || 0}%`;
+      stepModel.className = 'setup-step pending';
+      document.getElementById('step2-icon').textContent = '⏳';
+      modelDot.className = 'dot yellow';
+      modelStatus.textContent = `${data.progress || 0}%`;
+
+      if (data.step === 'done') {
+        addLog('Modelo descargado!', 'success');
+        modelProgressBar.classList.add('hidden');
+        stepModel.className = 'setup-step done';
+        document.getElementById('step2-icon').textContent = '✅';
+        modelDot.className = 'dot green';
+        modelStatus.textContent = 'Listo';
+        modelReady = true;
+        btnDownloadModel.classList.add('hidden');
+        updateConnectButton();
+      } else if (data.step === 'error') {
+        addLog(data.message, 'error');
+        modelProgressBar.classList.add('hidden');
+        stepModel.className = 'setup-step error';
+        document.getElementById('step2-icon').textContent = '❌';
+        modelDot.className = 'dot red';
+        modelStatus.textContent = 'Error';
+        btnDownloadModel.classList.remove('hidden');
+        btnDownloadModel.disabled = false;
+        btnDownloadModel.textContent = 'Reintentar Descarga';
+      }
+    });
+
+    electronAPI.on('auto-download-started', (data) => {
+      addLog(`Descargando ${data.model} automáticamente...`, 'info');
+      stepModel.className = 'setup-step pending';
+      document.getElementById('step2-icon').textContent = '⏳';
+      document.getElementById('step2-desc').textContent = `Descargando ${data.model}...`;
+      modelDot.className = 'dot yellow';
+      modelStatus.textContent = 'Descargando...';
+      modelProgressBar.classList.remove('hidden');
+      modelProgressFill.style.width = '0%';
+      btnDownloadModel.classList.add('hidden');
+    });
+
+    electronAPI.on('auto-download-complete', (data) => {
+      addLog(`Modelo ${data.model} descargado!`, 'success');
+      stepModel.className = 'setup-step done';
+      document.getElementById('step2-icon').textContent = '✅';
+      document.getElementById('step2-desc').textContent = `Modelo ${data.model} listo!`;
+      modelDot.className = 'dot green';
+      modelStatus.textContent = data.model;
+      modelProgressBar.classList.add('hidden');
+      modelReady = true;
+      selectedModel = data.model;
+      updateConnectButton();
+    });
+
+    electronAPI.on('auto-download-failed', (data) => {
+      addLog(`Error: ${data.error || 'Descarga falló'}`, 'error');
+      stepModel.className = 'setup-step error';
+      document.getElementById('step2-icon').textContent = '❌';
+      document.getElementById('step2-desc').textContent = `Error: ${data.error || 'Descarga falló'}`;
+      modelDot.className = 'dot red';
+      modelStatus.textContent = 'Error';
+      modelProgressBar.classList.add('hidden');
+      btnDownloadModel.classList.remove('hidden');
+      btnDownloadModel.disabled = false;
+      btnDownloadModel.textContent = 'Reintentar Descarga';
+    });
+
+    electronAPI.on('connection-status', (data) => {
+      updateConnectionStatus(data.connected, data.error);
+    });
+
+    electronAPI.on('log', (data) => {
+      addLog(data.message, data.type);
+    });
+
+    electronAPI.on('config', (config) => {
+      backendUrlInput.value = config.backendUrl || '';
+      apiKeyInput.value = config.apiKey || '';
+      updateConnectButton();
+    });
+
+    electronAPI.on('validating', () => {
+      validatingIndicator.classList.remove('hidden');
+    });
+
+    electronAPI.on('validation-done', () => {
+      validatingIndicator.classList.add('hidden');
+    });
+
+    electronAPI.on('model-selected', (data) => {
+      selectedModel = data.model;
+      modelStatus.textContent = data.model;
+      if (modelSelect.value !== data.model) {
+        modelSelect.value = data.model;
+      }
+    });
+
+    electronAPI.on('queue-status', (data) => {
+      const count = data.count || 0;
+      queueCount.textContent = count;
+      if (count > 0) {
+        queueIndicator.classList.remove('hidden');
+      } else {
+        queueIndicator.classList.add('hidden');
+      }
+    });
+
+    electronAPI.on('validation-queue-status', (data) => {
+      const count = data.count || 0;
+      const processing = data.processing || false;
+
+      if (processing) {
+        validatingIndicator.classList.remove('hidden');
+        validatingText.textContent = count > 0
+          ? `Procesando comprobante... (${count} en cola)`
+          : 'Procesando comprobante...';
+      }
+
+      if (count > 0 && processing) {
+        validationQueueBadge.classList.remove('hidden');
+        validationQueueCount.textContent = count;
+      } else {
+        validationQueueBadge.classList.add('hidden');
+      }
+
+      if (!processing && count === 0) {
+        validatingIndicator.classList.add('hidden');
+      }
+    });
+
+    // Init
+    updateConnectionStatus(false);
+
+    ollamaDot.className = 'dot yellow';
+    ollamaStatus.textContent = 'Iniciando...';
+    modelDot.className = 'dot yellow';
+    modelStatus.textContent = 'Esperando...';
+    document.getElementById('step1-desc').textContent = 'Iniciando verificación...';
+
+    electronAPI.getConfig();
+    electronAPI.getQueueStatus();
+
+    addLog('Iniciando validador (E2E Test Mode)...', 'info');
+  </script>
+</body>
+</html>

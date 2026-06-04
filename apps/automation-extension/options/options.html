@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configuración - AutoBot</title>
+  <link rel="stylesheet" href="../styles/main.css">
+  <style>
+    .password-toggle {
+      cursor: pointer;
+      transition: color 0.2s;
+    }
+    .password-toggle:hover {
+      color: white;
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+  <div class="min-h-screen py-8 px-4">
+    <div class="max-w-2xl mx-auto space-y-6">
+
+      <!-- Header -->
+      <div class="text-center mb-8">
+        <img src="../icons/icon128.png" alt="Tio Rico" style="width: 64px; height: 64px; border-radius: 16px; margin-bottom: 16px;" />
+        <h1 class="text-2xl font-bold text-white mb-2">Tio Rico - Configuración</h1>
+        <p class="text-purple-300 text-sm">Configura tu conexión al backend y credenciales del panel</p>
+      </div>
+
+      <form id="settings-form" class="space-y-6">
+
+        <!-- Backend API Configuration -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-xl bg-violet-500/20 flex items-center justify-center">
+              <svg class="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+              </svg>
+            </div>
+            <div>
+              <h2 class="text-white font-semibold">Backend API</h2>
+              <p class="text-white/50 text-xs">Conexión con el servidor</p>
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <div>
+              <label for="backend-url" class="block text-sm font-medium text-purple-300 mb-2">URL del Backend</label>
+              <input
+                type="url"
+                id="backend-url"
+                name="backendUrl"
+                placeholder="https://tu-backend.com"
+                required
+                class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-purple-500 transition-colors"
+              />
+            </div>
+
+            <div>
+              <label for="api-key" class="block text-sm font-medium text-purple-300 mb-2">Clave API</label>
+              <div class="relative">
+                <input
+                  type="password"
+                  id="api-key"
+                  name="apiKey"
+                  placeholder="Tu clave API secreta"
+                  required
+                  class="w-full px-4 py-3 pr-12 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-purple-500 transition-colors"
+                />
+                <button type="button" class="password-toggle absolute right-4 top-1/2 -translate-y-1/2 text-white/40" data-target="api-key">
+                  <svg class="w-5 h-5 eye-open" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                  </svg>
+                  <svg class="w-5 h-5 eye-closed hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Panel ID (select from backend) -->
+            <div>
+              <label class="block text-white/60 text-sm mb-2">Panel Asignado</label>
+              <div style="position: relative;">
+                <select
+                  id="panel-id"
+                  name="panelId"
+                  class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white focus:outline-none focus:border-purple-500 transition-colors text-sm appearance-none"
+                  style="-webkit-appearance: none; background-image: url('data:image/svg+xml;utf8,<svg fill=\"white\" viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M7 10l5 5 5-5z\"/></svg>'); background-repeat: no-repeat; background-position: right 12px center; background-size: 20px;"
+                >
+                  <option value="" style="background: #1e1b4b; color: #a78bfa;">Seleccionar panel...</option>
+                </select>
+                <span id="panel-id-loading" class="text-white/30 text-xs" style="display: none;">Cargando paneles...</span>
+              </div>
+              <p class="text-white/30 text-xs mt-1">Selecciona el panel que esta extensión va a operar</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel Credentials -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+              <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+              </svg>
+            </div>
+            <div>
+              <h2 class="text-white font-semibold">Panel de Juegos</h2>
+              <p class="text-white/50 text-xs">Credenciales de acceso</p>
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <div>
+              <label for="panel-url" class="block text-sm font-medium text-purple-300 mb-2">URL del Panel</label>
+              <input
+                type="url"
+                id="panel-url"
+                name="panelUrl"
+                placeholder="https://panel.ejemplo.com"
+                required
+                class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-purple-500 transition-colors"
+              />
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label for="panel-username" class="block text-sm font-medium text-purple-300 mb-2">Usuario</label>
+                <input
+                  type="text"
+                  id="panel-username"
+                  name="panelUsername"
+                  placeholder="admin@ejemplo.com"
+                  required
+                  class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-purple-500 transition-colors"
+                />
+              </div>
+
+              <div>
+                <label for="panel-password" class="block text-sm font-medium text-purple-300 mb-2">Contraseña</label>
+                <div class="relative">
+                  <input
+                    type="password"
+                    id="panel-password"
+                    name="panelPassword"
+                    placeholder="••••••••"
+                    required
+                    class="w-full px-4 py-3 pr-12 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-purple-500 transition-colors"
+                  />
+                  <button type="button" class="password-toggle absolute right-4 top-1/2 -translate-y-1/2 text-white/40" data-target="panel-password">
+                    <svg class="w-5 h-5 eye-open" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                    </svg>
+                    <svg class="w-5 h-5 eye-closed hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Automation Behavior -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center">
+              <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <div>
+              <h2 class="text-white font-semibold">Comportamiento</h2>
+              <p class="text-white/50 text-xs">Ajustes de automatización</p>
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label for="min-delay" class="block text-sm font-medium text-purple-300 mb-2">Demora Mínima (ms)</label>
+                <input
+                  type="number"
+                  id="min-delay"
+                  name="minDelay"
+                  value="2000"
+                  min="1000"
+                  max="10000"
+                  required
+                  class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-purple-500 transition-colors"
+                />
+              </div>
+
+              <div>
+                <label for="max-delay" class="block text-sm font-medium text-purple-300 mb-2">Demora Máxima (ms)</label>
+                <input
+                  type="number"
+                  id="max-delay"
+                  name="maxDelay"
+                  value="7000"
+                  min="2000"
+                  max="20000"
+                  required
+                  class="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-purple-500 transition-colors"
+                />
+              </div>
+            </div>
+
+            <!-- Debug Mode Toggle -->
+            <div class="flex items-center justify-between p-4 rounded-xl bg-white/5">
+              <div class="flex items-center gap-3">
+                <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+                </svg>
+                <div>
+                  <p class="text-white text-sm font-medium">Modo Debug</p>
+                  <p class="text-white/40 text-xs">Registro detallado en consola</p>
+                </div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="debug-mode" name="debugMode" class="sr-only peer">
+                <div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Notification Settings -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-xl bg-pink-500/20 flex items-center justify-center">
+              <svg class="w-5 h-5 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+              </svg>
+            </div>
+            <div>
+              <h2 class="text-white font-semibold">Notificaciones</h2>
+              <p class="text-white/50 text-xs">Configurar alertas del sistema</p>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <!-- Job Started -->
+            <div class="flex items-center justify-between p-3 rounded-xl bg-white/5">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                  <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                </div>
+                <div>
+                  <p class="text-white text-sm">Trabajo Iniciado</p>
+                  <p class="text-white/40 text-xs">Cuando comienza un trabajo</p>
+                </div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="notify-job-started" class="sr-only peer" checked>
+                <div class="w-10 h-5 bg-white/10 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
+              </label>
+            </div>
+
+            <!-- Job Completed -->
+            <div class="flex items-center justify-between p-3 rounded-xl bg-white/5">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                  <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                </div>
+                <div>
+                  <p class="text-white text-sm">Trabajo Completado</p>
+                  <p class="text-white/40 text-xs">Cuando se completa exitosamente</p>
+                </div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="notify-job-completed" class="sr-only peer" checked>
+                <div class="w-10 h-5 bg-white/10 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
+              </label>
+            </div>
+
+            <!-- Job Failed -->
+            <div class="flex items-center justify-between p-3 rounded-xl bg-white/5">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-red-500/20 flex items-center justify-center">
+                  <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                </div>
+                <div>
+                  <p class="text-white text-sm">Trabajo Fallido</p>
+                  <p class="text-white/40 text-xs">Cuando falla un trabajo</p>
+                </div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="notify-job-failed" class="sr-only peer" checked>
+                <div class="w-10 h-5 bg-white/10 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
+              </label>
+            </div>
+
+            <!-- Connection Lost -->
+            <div class="flex items-center justify-between p-3 rounded-xl bg-white/5">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                  <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3"/>
+                  </svg>
+                </div>
+                <div>
+                  <p class="text-white text-sm">Conexión Perdida</p>
+                  <p class="text-white/40 text-xs">Cuando se pierde la conexión</p>
+                </div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="notify-connection-lost" class="sr-only peer" checked>
+                <div class="w-10 h-5 bg-white/10 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-500"></div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Export & Data Management -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-xl bg-teal-500/20 flex items-center justify-center">
+              <svg class="w-5 h-5 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+              </svg>
+            </div>
+            <div>
+              <h2 class="text-white font-semibold">Exportar Datos</h2>
+              <p class="text-white/50 text-xs">Descargar estadísticas y registros</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <button type="button" id="btn-export-stats" class="glass hover:bg-white/20 text-white p-4 rounded-xl transition-all flex flex-col items-center gap-2">
+              <svg class="w-8 h-8 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+              </svg>
+              <span class="text-sm font-medium">Exportar Estadísticas</span>
+              <span class="text-xs text-white/40">JSON con historial</span>
+            </button>
+
+            <button type="button" id="btn-export-logs" class="glass hover:bg-white/20 text-white p-4 rounded-xl transition-all flex flex-col items-center gap-2">
+              <svg class="w-8 h-8 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              <span class="text-sm font-medium">Exportar Registros</span>
+              <span class="text-xs text-white/40">Logs completos</span>
+            </button>
+          </div>
+
+          <div class="mt-4 pt-4 border-t border-white/10">
+            <button type="button" id="btn-clear-stats" class="w-full bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 p-3 rounded-xl transition-all flex items-center justify-center gap-2">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+              <span class="text-sm font-medium">Limpiar Estadísticas</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Status Section -->
+        <div class="glass rounded-2xl p-6">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-xl bg-cyan-500/20 flex items-center justify-center">
+              <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+              </svg>
+            </div>
+            <div>
+              <h2 class="text-white font-semibold">Estado</h2>
+              <p class="text-white/50 text-xs">Estado de la configuración</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-4">
+            <div class="text-center p-4 rounded-xl bg-white/5">
+              <div id="backend-status-icon" class="w-8 h-8 rounded-full bg-gray-500/20 flex items-center justify-center mx-auto mb-2">
+                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+              </div>
+              <p id="backend-status" class="text-white text-xs font-medium">Desconocido</p>
+              <p class="text-white/40 text-xs">Backend</p>
+            </div>
+
+            <div class="text-center p-4 rounded-xl bg-white/5">
+              <div id="panel-status-icon" class="w-8 h-8 rounded-full bg-gray-500/20 flex items-center justify-center mx-auto mb-2">
+                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+              </div>
+              <p id="panel-status" class="text-white text-xs font-medium">Desconocido</p>
+              <p class="text-white/40 text-xs">Panel</p>
+            </div>
+
+            <div class="text-center p-4 rounded-xl bg-white/5">
+              <div class="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center mx-auto mb-2">
+                <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+                </svg>
+              </div>
+              <p id="extension-version" class="text-white text-xs font-medium">1.0.0</p>
+              <p class="text-white/40 text-xs">Versión</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex flex-col sm:flex-row gap-3">
+          <button type="submit" class="flex-1 bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white font-semibold py-3 px-6 rounded-xl transition-all shadow-lg shadow-purple-500/25 flex items-center justify-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            Guardar Configuración
+          </button>
+
+          <button type="button" id="btn-test-connection" class="glass hover:bg-white/20 text-white font-medium py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+            Probar Conexión
+          </button>
+
+          <button type="button" id="btn-clear-session" class="bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-400 font-medium py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+            Limpiar Sesión
+          </button>
+        </div>
+
+      </form>
+
+      <!-- Dashboard / Statistics -->
+      <div class="glass rounded-2xl p-6">
+        <div class="flex items-center gap-3 mb-6">
+          <div class="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center">
+            <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+            </svg>
+          </div>
+          <div>
+            <h2 class="text-white font-semibold">Dashboard</h2>
+            <p class="text-white/50 text-xs">Estadísticas de automatización</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- Donut Chart with Legend -->
+          <div class="bg-white/5 rounded-xl p-4">
+            <h3 class="text-white/70 text-sm font-medium mb-4 text-center">Tasa de Éxito</h3>
+            <div id="options-donut-chart" class="flex justify-center">
+              <!-- Donut chart will be rendered here -->
+            </div>
+          </div>
+
+          <!-- Area Chart for 7-day activity -->
+          <div class="bg-white/5 rounded-xl p-4">
+            <h3 class="text-white/70 text-sm font-medium mb-4 text-center">Actividad (7 días)</h3>
+            <div id="options-area-chart" class="flex justify-center overflow-hidden">
+              <!-- Area chart will be rendered here -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Summary Stats -->
+        <div class="grid grid-cols-4 gap-4 mt-6">
+          <div class="text-center p-3 rounded-xl bg-white/5">
+            <p id="stat-total-jobs" class="text-xl font-bold text-white">0</p>
+            <p class="text-purple-300 text-xs">Total</p>
+          </div>
+          <div class="text-center p-3 rounded-xl bg-white/5">
+            <p id="stat-completed-jobs" class="text-xl font-bold text-emerald-400">0</p>
+            <p class="text-purple-300 text-xs">Exitosos</p>
+          </div>
+          <div class="text-center p-3 rounded-xl bg-white/5">
+            <p id="stat-failed-jobs" class="text-xl font-bold text-red-400">0</p>
+            <p class="text-purple-300 text-xs">Fallidos</p>
+          </div>
+          <div class="text-center p-3 rounded-xl bg-white/5">
+            <p id="stat-avg-time" class="text-xl font-bold text-purple-400">0s</p>
+            <p class="text-purple-300 text-xs">Tiempo Prom.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel Profile (for custom casino platforms) -->
+      <div class="card">
+        <h2 class="text-lg font-semibold text-white/90 mb-3">Perfil de Panel (Avanzado)</h2>
+        <p class="text-white/50 text-xs mb-3">Solo modificar si el cliente usa una plataforma diferente a TioRico. JSON con selectores CSS que sobreescriben los default.</p>
+        <div class="mb-3">
+          <label class="text-white/50 text-xs block mb-1">URL remota de perfil (opcional)</label>
+          <input type="url" id="panelProfileUrl"
+            class="w-full p-2 bg-white/5 border border-white/10 rounded-lg text-white/80 text-xs"
+            placeholder="https://ejemplo.com/profiles/mi-casino.json">
+          <p class="text-white/30 text-xs mt-1">Si se configura, la extension descarga el perfil de esta URL al arrancar. Permite actualizar selectores sin tocar el dispositivo.</p>
+        </div>
+        <textarea id="panelProfileJson" rows="8"
+          class="w-full p-3 bg-white/5 border border-white/10 rounded-lg text-white/80 text-xs font-mono resize-y"
+          placeholder='{"ADD_CREDITS_BUTTON_ROW": "a.my-custom-plus", "MODAL": ".my-modal"}'
+        ></textarea>
+        <div class="flex gap-2 mt-2">
+          <button id="savePanelProfile" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium rounded-lg transition-colors">
+            Guardar Perfil
+          </button>
+          <button id="clearPanelProfile" class="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white/70 text-xs font-medium rounded-lg transition-colors">
+            Limpiar (usar TioRico)
+          </button>
+          <span id="profileStatus" class="text-xs self-center"></span>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="text-center pt-4">
+        <p class="text-white/30 text-xs">Tio Rico Bot v1.0.0</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed bottom-6 right-6 space-y-2 z-50"></div>
+
+  <script src="../utils/charts.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

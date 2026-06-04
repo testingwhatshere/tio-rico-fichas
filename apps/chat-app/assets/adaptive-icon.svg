@@ -1,0 +1,43 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Transparent background for adaptive icon foreground -->
+  <!-- Content centered with safe area padding (Android clips to circle/squircle) -->
+
+  <!-- Top hat -->
+  <rect x="380" y="140" width="264" height="40" rx="8" fill="#10B981"/>
+  <rect x="408" y="80" width="208" height="68" rx="12" fill="#10B981"/>
+
+  <!-- Pato head -->
+  <circle cx="512" cy="300" r="110" fill="#F59E0B"/>
+
+  <!-- Eye -->
+  <circle cx="545" cy="280" r="16" fill="#0B0F15"/>
+  <circle cx="551" cy="275" r="5" fill="#F1F5F9"/>
+
+  <!-- Beak -->
+  <path d="M590 310 L660 320 L590 340 Z" fill="#F59E0B"/>
+  <path d="M590 325 L645 325 L590 340 Z" fill="#D97706"/>
+
+  <!-- Body -->
+  <ellipse cx="512" cy="500" rx="160" ry="130" fill="#F59E0B"/>
+
+  <!-- Casino chip on body -->
+  <circle cx="512" cy="490" r="80" fill="#0B0F15"/>
+  <circle cx="512" cy="490" r="72" fill="none" stroke="#10B981" stroke-width="4"/>
+  <circle cx="512" cy="490" r="64" fill="none" stroke="#10B981" stroke-width="2" opacity="0.5"/>
+
+  <!-- Dollar sign -->
+  <path d="M512 445V535M487 462C487 452 498 444 512 444C526 444 537 452 537 462C537 472 526 480 512 480C498 480 487 488 487 498C487 508 498 518 512 518C526 518 537 508 537 498" stroke="#10B981" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Chip stacks (smaller for adaptive safe area) -->
+  <ellipse cx="310" cy="610" rx="50" ry="12" fill="#10B981"/>
+  <rect x="260" y="594" width="100" height="16" fill="#10B981"/>
+  <ellipse cx="310" cy="594" rx="50" ry="12" fill="#059669"/>
+
+  <ellipse cx="714" cy="610" rx="50" ry="12" fill="#F59E0B"/>
+  <rect x="664" y="594" width="100" height="16" fill="#F59E0B"/>
+  <ellipse cx="714" cy="594" rx="50" ry="12" fill="#D97706"/>
+
+  <!-- Text -->
+  <text x="512" y="730" text-anchor="middle" fill="#F1F5F9" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="64" letter-spacing="5">TIO RICO</text>
+  <text x="512" y="775" text-anchor="middle" fill="#10B981" font-family="Arial, sans-serif" font-weight="700" font-size="32" letter-spacing="10">FICHAS</text>
+</svg>

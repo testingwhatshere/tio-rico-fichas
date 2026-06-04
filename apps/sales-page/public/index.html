@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AURUM — Automatización de Fichas para Casinos</title>
+  <meta name="description" content="Plataforma de automatización de carga de fichas con validación por IA. Más ingresos, menos operadores, cero errores.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Grain overlay -->
+  <div class="grain"></div>
+
+  <!-- Navigation -->
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">
+        <div class="logo-mark">
+          <svg viewBox="0 0 32 32" fill="none">
+            <rect x="2" y="2" width="28" height="28" rx="6" stroke="currentColor" stroke-width="2"/>
+            <path d="M10 22V10h4.5c3.5 0 5.5 1.8 5.5 4.2 0 2.5-2 4.3-5.5 4.3H14v3.5H10z" fill="currentColor" opacity="0.15"/>
+            <path d="M16 8L22 16L16 24L10 16Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <circle cx="16" cy="16" r="3" fill="currentColor" opacity="0.6"/>
+          </svg>
+        </div>
+        <span class="logo-text">AURUM</span>
+      </a>
+      <div class="nav-links">
+        <a href="#platform">Plataforma</a>
+        <a href="#metrics">Resultados</a>
+        <a href="#features">Módulos</a>
+        <a href="#architecture">Arquitectura</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="hero" id="hero">
+    <div class="hero-bg">
+      <div class="hero-grid"></div>
+      <div class="hero-glow hero-glow--1"></div>
+      <div class="hero-glow hero-glow--2"></div>
+    </div>
+
+    <div class="hero-content">
+      <div class="hero-badge" data-reveal>
+        <span class="badge-dot"></span>
+        Sistema Operativo — Casinos Activos
+      </div>
+
+      <h1 class="hero-title" data-reveal>
+        <span class="hero-title-line">Automatización</span>
+        <span class="hero-title-line hero-title-accent">que factura.</span>
+      </h1>
+
+      <p class="hero-sub" data-reveal>
+        Carga de fichas 100% automática. Validación de pagos con IA.<br>
+        Tu casino opera 24/7 sin intervención humana.
+      </p>
+
+      <div class="hero-stats" data-reveal>
+        <div class="hero-stat">
+          <span class="hero-stat-value" data-count="30">0</span><span class="hero-stat-unit">seg</span>
+          <span class="hero-stat-label">Tiempo promedio de carga</span>
+        </div>
+        <div class="hero-stat-divider"></div>
+        <div class="hero-stat">
+          <span class="hero-stat-value" data-count="99.7">0</span><span class="hero-stat-unit">%</span>
+          <span class="hero-stat-label">Tasa de éxito</span>
+        </div>
+        <div class="hero-stat-divider"></div>
+        <div class="hero-stat">
+          <span class="hero-stat-value" data-count="0">0</span><span class="hero-stat-unit"></span>
+          <span class="hero-stat-label">Errores de carga manual</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating dashboard mockup -->
+    <div class="hero-mockup" data-reveal>
+      <div class="mockup-window">
+        <div class="mockup-titlebar">
+          <div class="mockup-dots">
+            <span></span><span></span><span></span>
+          </div>
+          <span class="mockup-title">Panel de Operadores — Dashboard</span>
+        </div>
+        <div class="mockup-body">
+          <div class="mockup-sidebar">
+            <div class="mockup-nav-item active">
+              <svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+              Dashboard
+            </div>
+            <div class="mockup-nav-item">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1L14 5V11L8 15L2 11V5Z"/></svg>
+              Solicitudes
+            </div>
+            <div class="mockup-nav-item">
+              <svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6"/></svg>
+              Trabajos
+            </div>
+            <div class="mockup-nav-item has-badge">
+              <svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 3h12v2H2zM2 7h12v2H2zM2 11h8v2H2z"/></svg>
+              Chats
+              <span class="mockup-badge">3</span>
+            </div>
+          </div>
+          <div class="mockup-main">
+            <div class="mockup-kpis">
+              <div class="mockup-kpi">
+                <span class="mockup-kpi-value">$2.4M</span>
+                <span class="mockup-kpi-label">Fichas hoy</span>
+                <div class="mockup-kpi-bar"><div class="mockup-kpi-fill" style="width:78%"></div></div>
+              </div>
+              <div class="mockup-kpi">
+                <span class="mockup-kpi-value">847</span>
+                <span class="mockup-kpi-label">Cargas exitosas</span>
+                <div class="mockup-kpi-bar"><div class="mockup-kpi-fill fill-green" style="width:94%"></div></div>
+              </div>
+              <div class="mockup-kpi">
+                <span class="mockup-kpi-value">99.7%</span>
+                <span class="mockup-kpi-label">Tasa de éxito</span>
+                <div class="mockup-kpi-bar"><div class="mockup-kpi-fill fill-gold" style="width:99%"></div></div>
+              </div>
+            </div>
+            <div class="mockup-chart">
+              <div class="mockup-chart-title">Ingresos últimos 7 días</div>
+              <svg class="mockup-chart-svg" viewBox="0 0 300 80" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="var(--gold)" stop-opacity="0.3"/>
+                    <stop offset="100%" stop-color="var(--gold)" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <path d="M0,60 L43,45 L86,50 L129,30 L172,35 L215,15 L258,20 L300,8 L300,80 L0,80Z" fill="url(#chartGrad)"/>
+                <path d="M0,60 L43,45 L86,50 L129,30 L172,35 L215,15 L258,20 L300,8" fill="none" stroke="var(--gold)" stroke-width="2"/>
+                <circle cx="300" cy="8" r="3" fill="var(--gold)">
+                  <animate attributeName="r" values="3;5;3" dur="2s" repeatCount="indefinite"/>
+                </circle>
+              </svg>
+            </div>
+            <div class="mockup-activity">
+              <div class="mockup-activity-item success">
+                <span class="mockup-dot green"></span>
+                <span>user_382 — $15,000 fichas</span>
+                <span class="mockup-time">hace 12s</span>
+              </div>
+              <div class="mockup-activity-item success">
+                <span class="mockup-dot green"></span>
+                <span>user_891 — $8,500 fichas</span>
+                <span class="mockup-time">hace 34s</span>
+              </div>
+              <div class="mockup-activity-item processing">
+                <span class="mockup-dot amber pulse"></span>
+                <span>user_157 — $22,000 fichas</span>
+                <span class="mockup-time">procesando...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-scroll-hint">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M12 5v14M5 12l7 7 7-7"/>
+      </svg>
+    </div>
+  </header>
+
+  <!-- Revenue Section -->
+  <section class="section section-revenue" id="platform">
+    <div class="section-inner">
+      <div class="section-label" data-reveal>Propuesta de Valor</div>
+      <h2 class="section-title" data-reveal>
+        Cada minuto sin automatizar<br>
+        <em>es dinero que perdés.</em>
+      </h2>
+
+      <div class="revenue-grid" data-reveal>
+        <div class="revenue-card revenue-card--before">
+          <div class="revenue-card-header">
+            <svg class="revenue-icon-svg" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            <h3>Sin AURUM</h3>
+          </div>
+          <ul class="revenue-list">
+            <li>
+              <span class="revenue-x">✕</span>
+              3-5 operadores dedicados 24/7
+            </li>
+            <li>
+              <span class="revenue-x">✕</span>
+              15-30 min por carga manual
+            </li>
+            <li>
+              <span class="revenue-x">✕</span>
+              Errores humanos frecuentes
+            </li>
+            <li>
+              <span class="revenue-x">✕</span>
+              Horario limitado de atención
+            </li>
+            <li>
+              <span class="revenue-x">✕</span>
+              Fraude difícil de detectar
+            </li>
+          </ul>
+          <div class="revenue-cost">
+            <span class="revenue-cost-label">Costo operativo mensual en personal</span>
+            <span class="revenue-cost-value negative">~$1.500.000</span>
+          </div>
+        </div>
+
+        <div class="revenue-vs">
+          <span>VS</span>
+        </div>
+
+        <div class="revenue-card revenue-card--after">
+          <div class="revenue-card-header">
+            <svg class="revenue-icon-svg" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <h3>Con AURUM</h3>
+          </div>
+          <ul class="revenue-list">
+            <li>
+              <span class="revenue-check">&#10003;</span>
+              1 operador supervisa todo
+            </li>
+            <li>
+              <span class="revenue-check">&#10003;</span>
+              30 segundos por carga automatica
+            </li>
+            <li>
+              <span class="revenue-check">&#10003;</span>
+              Cero errores -- validacion con IA
+            </li>
+            <li>
+              <span class="revenue-check">&#10003;</span>
+              Opera 24/7 sin descanso
+            </li>
+            <li>
+              <span class="revenue-check">&#10003;</span>
+              Deteccion de fraude automatica
+            </li>
+          </ul>
+          <div class="revenue-cost">
+            <span class="revenue-cost-label">Inversion unica — tuyo para siempre</span>
+            <span class="revenue-cost-value positive">Pago unico</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="revenue-savings" data-reveal>
+        <div class="savings-number">
+          <span data-count="90">0</span>%
+        </div>
+        <div class="savings-text">
+          <strong>Reduccion de costos operativos</strong>
+          <span>Pagas una vez, te queda para siempre. Sin cuotas, sin licencias mensuales.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Metrics Section -->
+  <section class="section section-metrics" id="metrics">
+    <div class="section-inner">
+      <div class="section-label" data-reveal>Métricas de Rendimiento</div>
+      <h2 class="section-title" data-reveal>
+        Números que hablan<br>
+        <em>por sí solos.</em>
+      </h2>
+
+      <div class="metrics-grid" data-reveal>
+        <div class="metric-card">
+          <div class="metric-ring">
+            <svg viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="54" stroke="var(--border)" stroke-width="6" fill="none"/>
+              <circle cx="60" cy="60" r="54" stroke="var(--gold)" stroke-width="6" fill="none"
+                stroke-dasharray="339.29" stroke-dashoffset="339.29" stroke-linecap="round"
+                class="metric-ring-fill" data-target="339.29" data-offset="1.02"/>
+            </svg>
+            <span class="metric-ring-value"><span data-count="50000">0</span>+</span>
+          </div>
+          <h3 class="metric-label">Cargas procesadas</h3>
+          <p class="metric-desc">por mes en producción</p>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-ring">
+            <svg viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="54" stroke="var(--border)" stroke-width="6" fill="none"/>
+              <circle cx="60" cy="60" r="54" stroke="var(--emerald)" stroke-width="6" fill="none"
+                stroke-dasharray="339.29" stroke-dashoffset="339.29" stroke-linecap="round"
+                class="metric-ring-fill" data-target="339.29" data-offset="3.39"/>
+            </svg>
+            <span class="metric-ring-value"><span data-count="99">0</span>%</span>
+          </div>
+          <h3 class="metric-label">Uptime garantizado</h3>
+          <p class="metric-desc">disponibilidad del sistema</p>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-ring">
+            <svg viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="54" stroke="var(--border)" stroke-width="6" fill="none"/>
+              <circle cx="60" cy="60" r="54" stroke="var(--amber)" stroke-width="6" fill="none"
+                stroke-dasharray="339.29" stroke-dashoffset="339.29" stroke-linecap="round"
+                class="metric-ring-fill" data-target="339.29" data-offset="67.86"/>
+            </svg>
+            <span class="metric-ring-value"><span data-count="80">0</span>%</span>
+          </div>
+          <h3 class="metric-label">Menos personal</h3>
+          <p class="metric-desc">requerido en operaciones</p>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-ring">
+            <svg viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="54" stroke="var(--border)" stroke-width="6" fill="none"/>
+              <circle cx="60" cy="60" r="54" stroke="var(--rose)" stroke-width="6" fill="none"
+                stroke-dasharray="339.29" stroke-dashoffset="339.29" stroke-linecap="round"
+                class="metric-ring-fill" data-target="339.29" data-offset="33.93"/>
+            </svg>
+            <span class="metric-ring-value"><span data-count="3">0</span>x</span>
+          </div>
+          <h3 class="metric-label">Más ingresos</h3>
+          <p class="metric-desc">por velocidad de servicio</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Photo showcase -->
+  <section class="section section-photos">
+    <div class="section-inner">
+      <div class="photos-grid" data-reveal>
+        <div class="photo-card photo-card--large">
+          <img src="https://images.unsplash.com/photo-1596838132731-3301c3fd4317?w=800&q=80&auto=format" alt="Casino floor" loading="lazy">
+          <div class="photo-overlay">
+            <span class="photo-caption">Operacion continua 24/7</span>
+          </div>
+        </div>
+        <div class="photo-card">
+          <img src="https://images.unsplash.com/photo-1606167668584-78701c57f13d?w=600&q=80&auto=format" alt="Casino chips" loading="lazy">
+          <div class="photo-overlay">
+            <span class="photo-caption">Carga automatica de fichas</span>
+          </div>
+        </div>
+        <div class="photo-card">
+          <img src="https://images.unsplash.com/photo-1517232115160-ff93364542dd?w=600&q=80&auto=format" alt="Casino table" loading="lazy">
+          <div class="photo-overlay">
+            <span class="photo-caption">Mas jugadores, mas ingresos</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section class="section section-features" id="features">
+    <div class="section-inner">
+      <div class="section-label" data-reveal>Módulos del Sistema</div>
+      <h2 class="section-title" data-reveal>
+        Todo lo que necesitás.<br>
+        <em>Nada que no.</em>
+      </h2>
+
+      <div class="features-grid">
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 48 48" fill="none" stroke="var(--gold)" stroke-width="1.5">
+              <rect x="6" y="6" width="36" height="36" rx="8"/>
+              <path d="M16 24h16M24 16v16" stroke-width="2"/>
+              <circle cx="24" cy="24" r="4" fill="var(--gold)" opacity="0.2"/>
+            </svg>
+          </div>
+          <h3>App de Usuarios</h3>
+          <p>Aplicación móvil donde tus clientes eligen el monto, transfieren, suben el comprobante y reciben las fichas automáticamente.</p>
+          <div class="feature-tags">
+            <span>Android</span><span>iOS Web</span><span>WhatsApp</span>
+          </div>
+        </div>
+
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 48 48" fill="none" stroke="var(--emerald)" stroke-width="1.5">
+              <path d="M12 36V20l12-8 12 8v16"/>
+              <rect x="18" y="26" width="12" height="10" rx="2"/>
+              <circle cx="24" cy="14" r="3"/>
+            </svg>
+          </div>
+          <h3>Validación con IA</h3>
+          <p>Inteligencia artificial local que valida comprobantes de pago en segundos. Detecta fraude, montos incorrectos y duplicados automáticamente.</p>
+          <div class="feature-tags">
+            <span>OCR</span><span>Anti-Fraude</span><span>Local</span>
+          </div>
+        </div>
+
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 48 48" fill="none" stroke="var(--amber)" stroke-width="1.5">
+              <rect x="4" y="8" width="40" height="28" rx="4"/>
+              <path d="M4 16h40"/>
+              <rect x="8" y="20" width="14" height="8" rx="2" opacity="0.3" fill="var(--amber)"/>
+              <rect x="26" y="20" width="14" height="4" rx="1" opacity="0.3" fill="var(--amber)"/>
+              <rect x="26" y="28" width="8" height="4" rx="1" opacity="0.3" fill="var(--amber)"/>
+            </svg>
+          </div>
+          <h3>Panel de Operadores</h3>
+          <p>Dashboard en tiempo real para supervisar operaciones. El operador solo interviene cuando algo falla — el 95% del tiempo el sistema trabaja solo.</p>
+          <div class="feature-tags">
+            <span>Desktop</span><span>Mobile</span><span>Real-time</span>
+          </div>
+        </div>
+
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 48 48" fill="none" stroke="var(--rose)" stroke-width="1.5">
+              <circle cx="24" cy="24" r="18"/>
+              <path d="M24 14v10l7 7"/>
+              <circle cx="24" cy="24" r="2" fill="var(--rose)"/>
+            </svg>
+          </div>
+          <h3>Bot de Automatización</h3>
+          <p>Ejecuta la carga de fichas en el panel de juegos automáticamente, simulando comportamiento humano. Indetectable y seguro.</p>
+          <div class="feature-tags">
+            <span>24/7</span><span>Anti-detección</span><span>Seguro</span>
+          </div>
+        </div>
+
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 48 48" fill="none" stroke="var(--gold)" stroke-width="1.5">
+              <path d="M8 40V20L24 8l16 12v20"/>
+              <path d="M20 40V28h8v12"/>
+              <path d="M14 22h4M30 22h4"/>
+              <circle cx="24" cy="18" r="2" fill="var(--gold)" opacity="0.4"/>
+            </svg>
+          </div>
+          <h3>Multi-Billetera</h3>
+          <p>Gestión de múltiples cuentas bancarias y billeteras virtuales. Rotación automática para distribuir flujo de dinero.</p>
+          <div class="feature-tags">
+            <span>MercadoPago</span><span>CBU</span><span>CVU</span>
+          </div>
+        </div>
+
+        <div class="feature-card" data-reveal>
+          <div class="feature-icon">
+            <svg viewBox="0 0 48 48" fill="none" stroke="var(--emerald)" stroke-width="1.5">
+              <path d="M6 38l8-10 8 6 8-14 8 4"/>
+              <circle cx="6" cy="38" r="2" fill="var(--emerald)"/>
+              <circle cx="14" cy="28" r="2" fill="var(--emerald)"/>
+              <circle cx="22" cy="34" r="2" fill="var(--emerald)"/>
+              <circle cx="30" cy="20" r="2" fill="var(--emerald)"/>
+              <circle cx="38" cy="24" r="2" fill="var(--emerald)"/>
+            </svg>
+          </div>
+          <h3>Analytics & Reportes</h3>
+          <p>Dashboard ejecutivo con métricas de ingreso, volumen, usuarios activos y rendimiento del sistema en tiempo real.</p>
+          <div class="feature-tags">
+            <span>Charts</span><span>Export</span><span>Real-time</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Architecture Section -->
+  <section class="section section-arch" id="architecture">
+    <div class="section-inner">
+      <div class="section-label" data-reveal>Arquitectura</div>
+      <h2 class="section-title" data-reveal>
+        Diseñado para<br>
+        <em>no fallar.</em>
+      </h2>
+
+      <div class="arch-flow" data-reveal>
+        <div class="arch-node">
+          <div class="arch-node-icon"><svg viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5"><rect x="5" y="2" width="14" height="20" rx="3"/><line x1="12" y1="18" x2="12" y2="18.01" stroke-width="2"/></svg></div>
+          <div class="arch-node-label">Usuario</div>
+          <div class="arch-node-desc">Elige monto y paga</div>
+        </div>
+        <div class="arch-arrow">
+          <svg viewBox="0 0 60 20"><path d="M0 10h50M45 4l6 6-6 6" stroke="var(--gold)" stroke-width="1.5" fill="none"/></svg>
+        </div>
+        <div class="arch-node">
+          <div class="arch-node-icon"><svg viewBox="0 0 24 24" fill="none" stroke="var(--emerald)" stroke-width="1.5"><path d="M12 2a4 4 0 014 4v1a4 4 0 01-8 0V6a4 4 0 014-4z"/><path d="M8 14h8l2 8H6l2-8z"/></svg></div>
+          <div class="arch-node-label">IA Validacion</div>
+          <div class="arch-node-desc">Verifica comprobante</div>
+        </div>
+        <div class="arch-arrow">
+          <svg viewBox="0 0 60 20"><path d="M0 10h50M45 4l6 6-6 6" stroke="var(--gold)" stroke-width="1.5" fill="none"/></svg>
+        </div>
+        <div class="arch-node">
+          <div class="arch-node-icon"><svg viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg></div>
+          <div class="arch-node-label">Cola de Trabajos</div>
+          <div class="arch-node-desc">Procesa en orden</div>
+        </div>
+        <div class="arch-arrow">
+          <svg viewBox="0 0 60 20"><path d="M0 10h50M45 4l6 6-6 6" stroke="var(--gold)" stroke-width="1.5" fill="none"/></svg>
+        </div>
+        <div class="arch-node">
+          <div class="arch-node-icon"><svg viewBox="0 0 24 24" fill="none" stroke="var(--rose)" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+          <div class="arch-node-label">Bot Automatico</div>
+          <div class="arch-node-desc">Carga las fichas</div>
+        </div>
+        <div class="arch-arrow">
+          <svg viewBox="0 0 60 20"><path d="M0 10h50M45 4l6 6-6 6" stroke="var(--gold)" stroke-width="1.5" fill="none"/></svg>
+        </div>
+        <div class="arch-node arch-node--final">
+          <div class="arch-node-icon"><svg viewBox="0 0 24 24" fill="none" stroke="var(--emerald)" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg></div>
+          <div class="arch-node-label">Listo</div>
+          <div class="arch-node-desc">Usuario notificado</div>
+        </div>
+      </div>
+
+      <div class="arch-time" data-reveal>
+        <div class="arch-time-bar">
+          <div class="arch-time-fill"></div>
+        </div>
+        <div class="arch-time-label">
+          Todo el proceso: <strong>~30 segundos</strong>
+        </div>
+      </div>
+
+      <div class="arch-features" data-reveal>
+        <div class="arch-feat">
+          <svg class="arch-feat-svg" viewBox="0 0 20 20" fill="none" stroke="var(--gold)" stroke-width="1.5"><rect x="3" y="9" width="14" height="9" rx="2"/><path d="M7 9V6a3 3 0 016 0v3"/></svg>
+          <span>Encriptacion end-to-end</span>
+        </div>
+        <div class="arch-feat">
+          <svg class="arch-feat-svg" viewBox="0 0 20 20" fill="none" stroke="var(--gold)" stroke-width="1.5"><circle cx="10" cy="10" r="8"/><path d="M2 10h16M10 2a14 14 0 010 16M10 2a14 14 0 000 16"/></svg>
+          <span>Deploy en cualquier servidor</span>
+        </div>
+        <div class="arch-feat">
+          <svg class="arch-feat-svg" viewBox="0 0 20 20" fill="none" stroke="var(--gold)" stroke-width="1.5"><path d="M3 16l4-5 4 3 4-7 4 2"/><rect x="2" y="2" width="16" height="16" rx="2"/></svg>
+          <span>Logs y auditoria completa</span>
+        </div>
+        <div class="arch-feat">
+          <svg class="arch-feat-svg" viewBox="0 0 20 20" fill="none" stroke="var(--rose)" stroke-width="1.5"><circle cx="10" cy="10" r="8"/><rect x="8" y="5" width="4" height="7" rx="1" fill="var(--rose)" opacity="0.3"/><rect x="8" y="13" width="4" height="2" rx="0.5" fill="var(--rose)" opacity="0.3"/></svg>
+          <span>Kill switch de emergencia</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Final CTA Section -->
+  <section class="section section-cta">
+    <div class="section-inner">
+      <div class="cta-block" data-reveal>
+        <h2 class="cta-title">
+          Tu competencia ya lo usa.<br>
+          <em>¿Vos cuánto más vas a esperar?</em>
+        </h2>
+        <p class="cta-sub">
+          Compra unica. Sin suscripciones, sin cuotas mensuales, sin letra chica.<br>
+          Pagas una vez y el sistema es tuyo para siempre.
+        </p>
+        <div class="cta-features">
+          <div class="cta-feat">
+            <svg viewBox="0 0 20 20" fill="var(--gold)"><path d="M10 0l2.5 7.5H20l-6 4.5 2.3 7.5L10 15l-6.3 4.5L6 12 0 7.5h7.5z"/></svg>
+            Pago unico, tuyo para siempre
+          </div>
+          <div class="cta-feat">
+            <svg viewBox="0 0 20 20" fill="var(--gold)"><path d="M10 0l2.5 7.5H20l-6 4.5 2.3 7.5L10 15l-6.3 4.5L6 12 0 7.5h7.5z"/></svg>
+            White-label con tu marca
+          </div>
+          <div class="cta-feat">
+            <svg viewBox="0 0 20 20" fill="var(--gold)"><path d="M10 0l2.5 7.5H20l-6 4.5 2.3 7.5L10 15l-6.3 4.5L6 12 0 7.5h7.5z"/></svg>
+            Implementacion en 48hs
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <span class="logo-text">AURUM</span>
+        <span class="footer-tagline">Automatización que factura.</span>
+      </div>
+      <div class="footer-copy">
+        © 2026 AURUM. Plataforma de automatización para casinos.
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

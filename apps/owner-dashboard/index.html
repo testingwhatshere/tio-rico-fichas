@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Owner Dashboard - Analytics</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- ============================================
+       Login Overlay
+       ============================================ -->
+  <div id="login-overlay" class="login-overlay">
+    <div class="login-card">
+      <div class="login-logo">
+        <img src="../chat-app/assets/icon.png" alt="Tio Rico" style="width: 80px; height: 80px; border-radius: 16px; margin-bottom: 12px;" onerror="this.style.display='none'" />
+        <h2>Tio Rico Analytics</h2>
+        <p>Admin access required</p>
+      </div>
+      <div class="form-group" style="margin-top: 24px">
+        <label>Backend URL</label>
+        <input type="url" id="login-url" placeholder="https://your-backend.com" autocomplete="url">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="login-email" placeholder="admin@example.com" autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="login-password" placeholder="Your password" autocomplete="current-password">
+      </div>
+      <button class="btn-login" id="btn-login">Login</button>
+      <div class="login-error" id="login-error"></div>
+    </div>
+  </div>
+
+  <!-- ============================================
+       Dashboard (hidden until login)
+       ============================================ -->
+  <div id="dashboard-container" style="display: none">
+
+    <!-- Header -->
+    <div class="header">
+      <div class="header-left">
+        <h1>Tio Rico Analytics</h1>
+        <span class="subtitle">ADMIN</span>
+      </div>
+      <div class="header-right">
+        <span class="last-refresh" id="last-refresh"></span>
+        <button class="btn-refresh" id="btn-refresh">Refresh</button>
+        <button class="btn-logout" id="btn-logout">Logout</button>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main">
+
+      <!-- Error Banner -->
+      <div class="error-banner" id="error-banner"></div>
+
+      <!-- KPI Cards -->
+      <div class="section-title">Key Metrics</div>
+      <div class="kpi-grid">
+        <div class="kpi-card emerald">
+          <div class="kpi-label">DAU (Today)</div>
+          <div class="kpi-value" id="kpi-dau">-</div>
+          <div class="kpi-sub">Active users today</div>
+        </div>
+        <div class="kpi-card blue">
+          <div class="kpi-label">MAU (30 days)</div>
+          <div class="kpi-value" id="kpi-mau">-</div>
+          <div class="kpi-sub">Active users this month</div>
+        </div>
+        <div class="kpi-card amber">
+          <div class="kpi-label">Revenue Today</div>
+          <div class="kpi-value" id="kpi-revenue-today">-</div>
+          <div class="kpi-sub">Completed loads</div>
+        </div>
+        <div class="kpi-card emerald">
+          <div class="kpi-label">Total Revenue</div>
+          <div class="kpi-value" id="kpi-total-revenue">-</div>
+          <div class="kpi-sub">All time</div>
+        </div>
+        <div class="kpi-card cyan">
+          <div class="kpi-label">Success Rate</div>
+          <div class="kpi-value" id="kpi-success-rate">-</div>
+          <div class="kpi-sub" id="kpi-success-detail">-</div>
+        </div>
+        <div class="kpi-card purple">
+          <div class="kpi-label">Avg Processing</div>
+          <div class="kpi-value" id="kpi-avg-time">-</div>
+          <div class="kpi-sub">Approved to completed</div>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="section-title">Revenue Trend (30 Days)</div>
+      <div class="charts-row">
+        <div class="chart-card">
+          <h3>Daily Revenue &amp; Requests</h3>
+          <div class="chart-wrapper">
+            <canvas id="revenue-chart"></canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <h3>Request Distribution</h3>
+          <div class="chart-wrapper">
+            <canvas id="distribution-chart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- System Balance -->
+      <div class="section-title">System</div>
+      <div class="balance-card">
+        <div class="balance-label">Total System Balance (All Users)</div>
+        <div class="balance-value" id="balance-value">$0</div>
+        <div class="balance-sub">Sum of all user balances</div>
+      </div>
+
+      <!-- Weekly Revenue -->
+      <div class="table-card" style="margin-top: 16px">
+        <h3>Revenue by Week</h3>
+        <div id="weekly-revenue"></div>
+      </div>
+
+      <!-- Top Users Table -->
+      <div class="section-title">Top Users by Volume</div>
+      <div class="table-card">
+        <h3>Top 10 Users (Completed Loads)</h3>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>User</th>
+              <th style="text-align:right">Requests</th>
+              <th style="text-align:right">Total Amount</th>
+            </tr>
+          </thead>
+          <tbody id="top-users-body">
+            <tr>
+              <td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px">Loading...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Validation Breakdown -->
+      <div class="section-title">Validation Breakdown</div>
+      <div class="validation-grid">
+        <div class="validation-item auto">
+          <div class="val-count" id="val-auto-count">-</div>
+          <div class="val-label">Auto-Approved</div>
+          <div class="val-pct" id="val-auto-pct">-</div>
+        </div>
+        <div class="validation-item manual">
+          <div class="val-count" id="val-manual-count">-</div>
+          <div class="val-label">Manually Approved</div>
+          <div class="val-pct" id="val-manual-pct">-</div>
+        </div>
+        <div class="validation-item rejected">
+          <div class="val-count" id="val-rejected-count">-</div>
+          <div class="val-label">Rejected</div>
+          <div class="val-pct" id="val-rejected-pct">-</div>
+        </div>
+        <div class="validation-item failed">
+          <div class="val-count" id="val-failed-count">-</div>
+          <div class="val-label">Validation Failed</div>
+          <div class="val-pct" id="val-failed-pct">-</div>
+        </div>
+      </div>
+
+      <!-- Footer spacer -->
+      <div style="height: 48px"></div>
+    </div>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,1360 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http: https:; media-src 'self';">
+  <title>Panel de Operadores</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Update Blocker Overlay (z-index above wizard) -->
+  <div id="update-overlay" class="update-overlay hidden">
+    <div class="update-container">
+      <div class="wizard-duck-icon">
+        <img src="../assets/duck-logo.png" width="96" height="96" alt="Tio Rico" style="border-radius: 20px;">
+      </div>
+      <h2 class="update-title">Actualizacion disponible</h2>
+      <p class="update-subtitle">
+        Para continuar usando el Panel de Operadores, actualiza a la version
+        <span id="update-version" class="update-version-badge"></span>
+      </p>
+      <div id="update-changelog" class="update-changelog hidden">
+        <strong>Novedades:</strong>
+        <p id="update-changelog-text"></p>
+      </div>
+      <div id="update-progress-container" class="update-progress hidden">
+        <div class="update-progress-bar-bg">
+          <div id="update-progress-fill" class="update-progress-bar-fill" style="width: 0%"></div>
+        </div>
+        <p id="update-progress-text" class="update-progress-text">Descargando... 0%</p>
+      </div>
+      <div id="update-error" class="update-error hidden">
+        <p id="update-error-text"></p>
+      </div>
+      <button id="update-btn" class="update-btn">Actualizar ahora</button>
+    </div>
+  </div>
+
+  <!-- Setup Wizard Overlay -->
+  <div id="setup-wizard" class="wizard-overlay hidden">
+    <div class="wizard-container">
+      <!-- Step Indicators -->
+      <div class="wizard-steps">
+        <div class="wizard-step active" data-step="1">
+          <div class="step-number">1</div>
+          <span class="step-label">Bienvenida</span>
+        </div>
+        <div class="wizard-step-line"></div>
+        <div class="wizard-step" data-step="2">
+          <div class="step-number">2</div>
+          <span class="step-label">Servidor</span>
+        </div>
+        <div class="wizard-step-line"></div>
+        <div class="wizard-step" data-step="3">
+          <div class="step-number">3</div>
+          <span class="step-label">Autenticación</span>
+        </div>
+        <div class="wizard-step-line"></div>
+        <div class="wizard-step" data-step="4">
+          <div class="step-number">4</div>
+          <span class="step-label">Listo</span>
+        </div>
+      </div>
+
+      <!-- Wizard Content -->
+      <div class="wizard-content">
+        <!-- Step 1: Welcome -->
+        <div class="wizard-page active" data-page="1">
+          <div class="wizard-duck-icon">
+            <img src="../assets/duck-logo.png" width="96" height="96" alt="Tio Rico" style="border-radius: 20px;">
+          </div>
+          <h2>Bienvenido a Tio Rico</h2>
+          <p class="wizard-description">
+            Este asistente te ayudará a configurar la conexión con el servidor backend
+            para que puedas comenzar a supervisar y gestionar las operaciones del sistema.
+          </p>
+          <div class="wizard-features">
+            <div class="wizard-feature">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <span>Monitoreo en tiempo real</span>
+            </div>
+            <div class="wizard-feature">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+              <span>Gestión de fallos</span>
+            </div>
+            <div class="wizard-feature">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+              </svg>
+              <span>Chat de soporte</span>
+            </div>
+            <div class="wizard-feature">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+              </svg>
+              <span>Control de emergencia</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2: Server URL -->
+        <div class="wizard-page" data-page="2">
+          <div class="wizard-icon server-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+            </svg>
+          </div>
+          <h2>Configurar Servidor</h2>
+          <p class="wizard-description">
+            Ingresa la URL del servidor backend al que deseas conectarte.
+            Asegúrate de incluir el protocolo (https://).
+          </p>
+          <div class="wizard-form">
+            <div class="wizard-input-group">
+              <label for="wizard-backend-url">URL del Backend</label>
+              <input
+                type="url"
+                id="wizard-backend-url"
+                placeholder="https://api.tuservidor.com"
+                autocomplete="off"
+              >
+              <span class="input-hint">Ejemplo: https://api.example.com</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3: API Key -->
+        <div class="wizard-page" data-page="3">
+          <div class="wizard-icon key-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+            </svg>
+          </div>
+          <h2>Autenticación</h2>
+          <p class="wizard-description">
+            Ingresa tu nombre de operador y clave API. Esta clave te fue proporcionada por
+            el administrador del sistema y es necesaria para acceder al panel.
+          </p>
+          <div class="wizard-form">
+            <div class="wizard-input-group">
+              <label for="wizard-operator-name">Nombre del Operador</label>
+              <input
+                type="text"
+                id="wizard-operator-name"
+                placeholder="Ej: Juan, María, Operador1"
+                autocomplete="off"
+              >
+              <span class="input-hint">Tu nombre para identificarte en el registro de acciones</span>
+            </div>
+
+            <div class="wizard-input-group">
+              <label for="wizard-api-key">API Key del Operador</label>
+              <div class="password-input-wrapper">
+                <input
+                  type="password"
+                  id="wizard-api-key"
+                  placeholder="Tu clave API secreta"
+                  autocomplete="off"
+                >
+                <button type="button" class="toggle-password-btn" id="toggle-api-key" aria-label="Mostrar/ocultar API Key">
+                  <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    <path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                  </svg>
+                  <svg class="eye-off-icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+                  </svg>
+                </button>
+              </div>
+              <span class="input-hint">Solicita esta clave a tu administrador</span>
+            </div>
+
+            <!-- Connection Test -->
+            <div class="wizard-test-section">
+              <button type="button" class="btn btn-ghost wizard-test-btn" id="wizard-test-connection">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+                Probar Conexión
+              </button>
+              <div class="wizard-test-result" id="wizard-test-result"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 4: Complete -->
+        <div class="wizard-page" data-page="4">
+          <div class="wizard-icon success-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+          <h2>¡Todo Listo!</h2>
+          <p class="wizard-description">
+            La configuración se ha completado correctamente. Ya puedes comenzar
+            a utilizar el Panel de Operadores.
+          </p>
+          <div class="wizard-summary">
+            <div class="summary-item">
+              <span class="summary-label">Servidor</span>
+              <span class="summary-value" id="summary-url">-</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Estado</span>
+              <span class="summary-value summary-status" id="summary-status">
+                <span class="status-dot connected"></span>
+                Conectado
+              </span>
+            </div>
+          </div>
+          <div class="wizard-tips">
+            <h4>Consejos rápidos:</h4>
+            <ul>
+              <li><kbd>1</kbd>-<kbd>7</kbd> para navegar entre vistas</li>
+              <li><kbd>Enter</kbd> para aprobar fallos</li>
+              <li><kbd>R</kbd> para rechazar fallos</li>
+              <li><kbd>Ctrl</kbd>+<kbd>K</kbd> para el Kill Switch</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Wizard Footer -->
+      <div class="wizard-footer">
+        <button type="button" class="btn btn-ghost wizard-btn-back" id="wizard-back" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 19l-7-7 7-7"/>
+          </svg>
+          Atrás
+        </button>
+        <button type="button" class="btn btn-primary wizard-btn-next" id="wizard-next">
+          Comenzar
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="app">
+    <!-- Sidebar Navigation -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <div class="logo-icon duck-logo">
+            <img src="../assets/duck-logo.png" width="44" height="44" alt="Tio Rico" style="border-radius: 12px;">
+          </div>
+          <div class="logo-text">
+            <h1>Tio Rico</h1>
+            <span>Panel de Operadores</span>
+          </div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-view="dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+          </svg>
+          <span>Dashboard</span>
+        </button>
+
+        <button class="nav-item" data-view="failures">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          </svg>
+          <span>Fallos</span>
+          <span class="badge" id="failures-badge">0</span>
+        </button>
+
+        <button class="nav-item" data-view="jobs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+          </svg>
+          <span>Trabajos</span>
+        </button>
+
+        <button class="nav-item" data-view="requests">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+          </svg>
+          <span>Solicitudes</span>
+        </button>
+
+        <button class="nav-item" data-view="chats">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+          </svg>
+          <span>Chats</span>
+          <span class="badge hidden" id="chats-badge">0</span>
+        </button>
+
+        <button class="nav-item" data-view="activity">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+          </svg>
+          <span>Actividad</span>
+        </button>
+
+        <button class="nav-item" data-view="wallets">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+          </svg>
+          <span>Billeteras</span>
+        </button>
+
+        <button class="nav-item" data-view="prizes">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/>
+          </svg>
+          <span>Premios</span>
+          <span class="badge hidden" id="prizes-badge">0</span>
+        </button>
+
+        <button class="nav-item" data-view="payments" title="Pagos Salientes (Alt+Y)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+          <span>Pagos</span>
+        </button>
+
+        <button class="nav-item" data-view="users">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 00-3-3.87"/>
+            <path d="M16 3.13a4 4 0 010 7.75"/>
+          </svg>
+          <span>Usuarios</span>
+        </button>
+
+        <button class="nav-item" data-view="panels">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+            <line x1="8" y1="21" x2="16" y2="21"/>
+            <line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
+          <span>Paneles</span>
+        </button>
+
+        <button class="nav-item" data-view="extensions" title="Alt+E">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          <span>Extensiones</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="nav-item" data-view="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+          <span>Configuración</span>
+        </button>
+
+        <div class="connection-status" id="connection-status">
+          <span class="status-dot disconnected"></span>
+          <span>Desconectado</span>
+        </div>
+
+        <div class="keyboard-hint">
+          <span>⌨️</span>
+          <span class="hint-text">Enter: Aprobar • R: Rechazar (motivo) • Esc: Cerrar</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main id="main-content">
+      <!-- Header -->
+      <header id="main-header">
+        <div class="header-left">
+          <h2 id="view-title">Dashboard</h2>
+          <div class="header-meta">
+            <div class="bot-status" id="bot-status">
+              <span class="bot-status-dot offline"></span>
+              <span class="bot-status-text">Bot Offline</span>
+            </div>
+            <div class="bot-status" id="validator-status" aria-label="Estado del validador">
+              <span class="bot-status-dot offline"></span>
+              <span class="bot-status-text">Validador Offline</span>
+            </div>
+            <div class="bot-status ai-status-indicator" id="ollama-status" role="button" tabindex="0" title="Click para activar/desactivar Bot AI" aria-label="Estado de AI">
+              <span class="bot-status-dot offline"></span>
+              <span class="bot-status-text">Sin AI</span>
+            </div>
+            <div class="last-update" id="last-update">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              <span>--</span>
+            </div>
+          </div>
+        </div>
+        <div class="header-right">
+          <button id="reconnect-btn" class="btn btn-ghost btn-sm hidden" aria-label="Reconectar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Reconectar
+          </button>
+          <button id="kill-switch-btn" class="btn btn-danger" aria-label="Kill Switch - Detener automatización">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+            </svg>
+            <span>Kill Switch</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Content Views -->
+      <div id="content-container">
+        <!-- Dashboard View -->
+        <section id="view-dashboard" class="view active">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-icon emerald">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+              </div>
+              <div class="stat-content">
+                <span class="stat-value skeleton-text" id="stat-today-completed">—</span>
+                <span class="stat-label">Completados Hoy</span>
+              </div>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-icon red">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+              </div>
+              <div class="stat-content">
+                <span class="stat-value skeleton-text" id="stat-today-failed">—</span>
+                <span class="stat-label">Fallidos Hoy</span>
+              </div>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-icon amber">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+              </div>
+              <div class="stat-content">
+                <span class="stat-value skeleton-text" id="stat-pending">—</span>
+                <span class="stat-label">Pendientes</span>
+              </div>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-icon purple">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+              </div>
+              <div class="stat-content">
+                <span class="stat-value skeleton-text" id="stat-processing">—</span>
+                <span class="stat-label">En Proceso</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Charts Section -->
+          <div class="card chart-card">
+            <div class="card-header">
+              <h3>Tendencia Semanal</h3>
+            </div>
+            <div class="card-content">
+              <div class="chart-container" id="weekly-chart">
+                <!-- Chart generated by JS -->
+              </div>
+            </div>
+          </div>
+
+          <div class="dashboard-grid">
+            <div class="card recent-failures">
+              <div class="card-header">
+                <h3>Fallos Recientes</h3>
+                <button class="btn btn-sm btn-ghost" data-navigate="failures">Ver todos</button>
+              </div>
+              <div class="card-content" id="recent-failures-list">
+                <div class="empty-state">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                  <p>No hay fallos pendientes</p>
+                  <p class="text-muted">Los fallos de validación y ejecución aparecerán aquí</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="card recent-jobs">
+              <div class="card-header">
+                <h3>Trabajos Recientes</h3>
+                <button class="btn btn-sm btn-ghost" data-navigate="jobs">Ver todos</button>
+              </div>
+              <div class="card-content" id="recent-jobs-list">
+                <div class="empty-state">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                  </svg>
+                  <p>Sin trabajos recientes</p>
+                  <p class="text-muted">Los trabajos de carga aparecerán cuando se procesen solicitudes</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Failures View -->
+        <section id="view-failures" class="view">
+          <div class="view-toolbar">
+            <input type="text" id="failures-search" placeholder="Buscar por usuario o monto..." class="search-input" style="margin-bottom: 8px; width: 100%;">
+            <div class="filter-tabs">
+              <button class="filter-tab active" data-filter="pending">Pendientes</button>
+              <button class="filter-tab" data-filter="approved">Aprobados</button>
+              <button class="filter-tab" data-filter="rejected">Rechazados</button>
+              <button class="filter-tab" data-filter="all">Todos</button>
+            </div>
+            <div class="toolbar-actions">
+              <button class="btn btn-sm btn-ghost" id="export-failures-btn" aria-label="Exportar fallos">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                Exportar
+              </button>
+            </div>
+          </div>
+
+          <div class="failures-list" id="failures-list">
+            <div class="empty-state">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <p>No hay fallos en esta categoría</p>
+              <p class="text-muted">Filtrá por estado usando las pestañas de arriba</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Jobs View -->
+        <section id="view-jobs" class="view">
+          <div class="view-toolbar">
+            <input type="text" id="jobs-search" placeholder="Buscar por usuario o monto..." class="search-input" style="margin-bottom: 8px; width: 100%;">
+            <div class="filter-tabs">
+              <button class="filter-tab active" data-filter="all">Todos</button>
+              <button class="filter-tab" data-filter="processing">En Proceso</button>
+              <button class="filter-tab" data-filter="completed">Completados</button>
+              <button class="filter-tab" data-filter="failed">Fallidos</button>
+            </div>
+            <div class="toolbar-actions">
+              <button class="btn btn-sm btn-ghost" id="export-jobs-btn" aria-label="Exportar trabajos">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                Exportar
+              </button>
+            </div>
+          </div>
+
+          <div class="jobs-list" id="jobs-list">
+            <div class="empty-state">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+              </svg>
+              <p>No hay trabajos</p>
+              <p class="text-muted">Los trabajos aparecen al aprobar solicitudes</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Requests View -->
+        <section id="view-requests" class="view">
+          <div class="view-toolbar">
+            <input type="text" id="requests-search" placeholder="Buscar por usuario o email..." class="search-input" style="margin-bottom: 8px; width: 100%;">
+            <div class="filter-tabs">
+              <button class="filter-tab active" data-requests-filter="all">Todas</button>
+              <button class="filter-tab" data-requests-filter="PENDING_PROOF">Pendiente</button>
+              <button class="filter-tab" data-requests-filter="VALIDATING">Validando</button>
+              <button class="filter-tab" data-requests-filter="VALIDATION_FAILED">Fallida</button>
+              <button class="filter-tab" data-requests-filter="APPROVED">Aprobada</button>
+              <button class="filter-tab" data-requests-filter="PROCESSING">Procesando</button>
+              <button class="filter-tab" data-requests-filter="COMPLETED">Completada</button>
+              <button class="filter-tab" data-requests-filter="REJECTED">Rechazada</button>
+            </div>
+          </div>
+          <div class="jobs-list" id="requests-list">
+            <div class="empty-state">
+              <p>Cargando solicitudes...</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Chats View -->
+        <section id="view-chats" class="view">
+          <div class="chats-container">
+            <!-- Chats Sidebar -->
+            <div class="chats-sidebar">
+              <div class="chats-header">
+                <h3>Conversaciones</h3>
+                <span class="chats-count" id="chats-count">0</span>
+              </div>
+              <input type="text" id="chats-search" placeholder="Buscar por usuario..." class="search-input" style="margin: 0 12px 8px 12px; width: calc(100% - 24px);">
+              <div class="chats-list" id="chats-list">
+                <div class="empty-state small">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                  </svg>
+                  <p>No hay conversaciones</p>
+                  <p class="text-muted">Los chats aparecerán cuando los usuarios envíen mensajes</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Chat Main Area -->
+            <div class="chat-main-wrapper">
+              <div class="chat-main" id="chat-main">
+                <div class="chat-empty">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                  </svg>
+                  <p>Selecciona una conversación</p>
+                </div>
+              </div>
+
+              <!-- Quick Replies Panel (Right Side) -->
+              <div class="quick-replies-sidebar" id="quick-replies-panel">
+                <div class="quick-replies-header">
+                  <h4>Respuestas Rapidas</h4>
+                </div>
+                <div class="quick-replies-list" id="quick-replies-list">
+                  <!-- Populated dynamically by renderer.js -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Activity Log View -->
+        <section id="view-activity" class="view">
+          <div class="view-toolbar">
+            <div class="filter-tabs">
+              <button class="filter-tab active" data-filter="all">Todas</button>
+              <button class="filter-tab" data-filter="failures">Fallos</button>
+              <button class="filter-tab" data-filter="jobs">Trabajos</button>
+              <button class="filter-tab" data-filter="chats">Chats</button>
+            </div>
+            <div class="toolbar-actions">
+              <button class="btn btn-sm btn-ghost" id="export-activity-btn" aria-label="Exportar actividad">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                Exportar
+              </button>
+            </div>
+          </div>
+
+          <div class="activity-list" id="activity-list">
+            <div class="empty-state">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+              </svg>
+              <p>No hay actividad registrada</p>
+              <p class="text-muted">Las acciones del sistema se registran automáticamente</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Wallets View -->
+        <section id="view-wallets" class="view">
+          <div class="view-header">
+            <h2>Gestión de Billeteras</h2>
+            <p class="view-subtitle">Administra las billeteras de pago y selecciona cuál mostrar a los clientes</p>
+          </div>
+
+          <div class="wallets-container">
+            <!-- Current Selected Wallet Card -->
+            <div class="card selected-wallet-card">
+              <div class="card-header">
+                <h3>💳 Billetera Activa</h3>
+                <span class="badge badge-success">Mostrando a clientes</span>
+              </div>
+              <div class="card-content" id="selected-wallet-display">
+                <div class="empty-state small">
+                  <p>No hay billetera seleccionada</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Add New Wallet -->
+            <div class="card">
+              <div class="card-header">
+                <h3>➕ Nueva Billetera</h3>
+              </div>
+              <div class="card-content">
+                <form id="wallet-form">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="wallet-type">Tipo</label>
+                      <select id="wallet-type" required>
+                        <option value="MERCADOPAGO">MercadoPago</option>
+                        <option value="CBU">CBU (Transferencia)</option>
+                        <option value="CVU">CVU (Billetera Virtual)</option>
+                        <option value="RIPIO">Ripio</option>
+                        <option value="FIWIND">Fiwind</option>
+                        <option value="PREX">Prex</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label for="wallet-label">Etiqueta</label>
+                      <input type="text" id="wallet-label" placeholder="Ej: MP Principal, Santander" required>
+                    </div>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="wallet-holder">Nombre del Titular</label>
+                    <input type="text" id="wallet-holder" placeholder="Nombre que verá el cliente" required>
+                  </div>
+
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="wallet-legal-name">Nombre Legal del Titular</label>
+                      <input type="text" id="wallet-legal-name" placeholder="Como figura en el banco (ej: GARCIA PEREZ JUAN)">
+                    </div>
+                    <div class="form-group">
+                      <label for="wallet-dni">DNI/CUIT del Titular</label>
+                      <input type="text" id="wallet-dni" placeholder="Solo números" maxlength="11">
+                    </div>
+                  </div>
+
+                  <!-- Dynamic fields based on type -->
+                  <div id="wallet-details-fields">
+                    <div class="form-group" id="alias-field">
+                      <label for="wallet-alias">Alias de MercadoPago</label>
+                      <input type="text" id="wallet-alias" placeholder="mi.alias.mp">
+                    </div>
+                    <div class="form-group hidden" id="cbu-field">
+                      <label for="wallet-cbu">CBU</label>
+                      <input type="text" id="wallet-cbu" placeholder="22 dígitos" maxlength="22">
+                    </div>
+                    <div class="form-group hidden" id="cvu-field">
+                      <label for="wallet-cvu">CVU</label>
+                      <input type="text" id="wallet-cvu" placeholder="22 dígitos" maxlength="22">
+                    </div>
+                    <div class="form-group hidden" id="bank-field">
+                      <label for="wallet-bank">Banco</label>
+                      <input type="text" id="wallet-bank" placeholder="Nombre del banco">
+                    </div>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="wallet-amount-limit">Límite de monto (opcional)</label>
+                    <input type="number" id="wallet-amount-limit" placeholder="Ej: 500000" min="1" step="0.01">
+                    <span class="input-hint">Monto máximo antes de rotar automáticamente. Dejar vacío = sin límite.</span>
+                  </div>
+
+                  <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 4v16m8-8H4"/>
+                      </svg>
+                      Agregar Billetera
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <!-- Wallets List -->
+            <div class="card">
+              <div class="card-header">
+                <h3>📋 Todas las Billeteras</h3>
+              </div>
+              <div class="card-content">
+                <div class="wallets-list" id="wallets-list">
+                  <div class="empty-state">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+                    </svg>
+                    <p>No hay billeteras configuradas</p>
+                    <p class="text-muted">Agrega una billetera usando el formulario de arriba</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Users View -->
+        <!-- Prizes View -->
+        <section id="view-prizes" class="view">
+          <div id="prizes-container"></div>
+        </section>
+
+        <!-- Payments View -->
+        <div id="view-payments" class="view">
+          <div class="view-header">
+            <h2>Pagos Salientes</h2>
+          </div>
+          <div id="payments-list" class="items-list"></div>
+        </div>
+
+        <section id="view-users" class="view">
+          <div class="view-header">
+            <h2>Usuarios</h2>
+            <input type="text" id="users-search" placeholder="Buscar por usuario o telefono..." class="search-input">
+          </div>
+          <div id="users-list" class="users-list">
+            <div class="empty-state">
+              <p>Cargando usuarios...</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Panels View -->
+        <section id="view-panels" class="view">
+          <div class="view-header">
+            <h2>Paneles</h2>
+            <button id="add-panel-btn" class="btn btn-primary btn-sm">+ Agregar Panel</button>
+          </div>
+          <div id="panels-list" class="panels-list">
+            <div class="empty-state"><p>Cargando paneles...</p></div>
+          </div>
+        </section>
+
+        <!-- Extensions View -->
+        <section id="view-extensions" class="view">
+          <div id="extensions-list"></div>
+          <div id="extension-logs-panel" class="extension-logs-panel" style="display:none">
+            <div class="logs-header">
+              <span id="extension-logs-title">Logs</span>
+              <button onclick="window.closeExtensionLogs()" class="btn btn-sm">&#10005;</button>
+            </div>
+            <div id="extension-logs-content" class="logs-content"></div>
+          </div>
+        </section>
+
+        <!-- Settings View -->
+        <section id="view-settings" class="view">
+          <div class="settings-container">
+            <div class="card">
+              <div class="card-header">
+                <h3>Conexión al Backend</h3>
+              </div>
+              <div class="card-content">
+                <form id="settings-form">
+                  <div class="form-group">
+                    <label for="backend-url">URL del Backend</label>
+                    <input type="url" id="backend-url" placeholder="https://tu-backend.com" required>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="api-key">API Key del Operador</label>
+                    <input type="password" id="api-key" placeholder="Tu clave API" required>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="operator-name">Nombre del Operador</label>
+                    <input type="text" id="operator-name" placeholder="Tu nombre (para el registro de auditoría)">
+                  </div>
+
+                  <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M5 13l4 4L19 7"/>
+                      </svg>
+                      Guardar y Conectar
+                    </button>
+
+                    <button type="button" id="test-connection-btn" class="btn btn-ghost">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                      </svg>
+                      Probar Conexión
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3>Contacto de Soporte</h3>
+              </div>
+              <div class="card-content">
+                <p style="color: var(--text-secondary); margin-bottom: 12px; font-size: 13px;">
+                  Este numero se muestra a los usuarios en la app cuando necesitan ayuda.
+                </p>
+                <div class="form-group">
+                  <label for="support-phone">Numero de Soporte</label>
+                  <input type="tel" id="support-phone" placeholder="+54 9 11 1234-5678">
+                </div>
+                <div class="form-actions">
+                  <button type="button" id="save-support-phone-btn" class="btn btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M5 13l4 4L19 7"/>
+                    </svg>
+                    Guardar
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3>Notificaciones</h3>
+              </div>
+              <div class="card-content">
+                <div class="notification-settings">
+                  <label class="toggle-setting">
+                    <span class="toggle-label">Sonidos de alerta</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="setting-sound" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+
+                  <label class="toggle-setting">
+                    <span class="toggle-label">Validaciones fallidas</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="setting-validation-failures" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+
+                  <label class="toggle-setting">
+                    <span class="toggle-label">Trabajos fallidos</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="setting-job-failures" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+
+                  <label class="toggle-setting">
+                    <span class="toggle-label">Nuevos mensajes de chat</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="setting-new-messages" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+
+                  <label class="toggle-setting">
+                    <span class="toggle-label">Estado de conexión</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="setting-connection-status" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+
+                  <label class="toggle-setting">
+                    <span class="toggle-label">Trabajos completados</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="setting-job-completed">
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3>Configuracion del Sistema</h3>
+              </div>
+              <div class="card-content">
+                <p style="color: var(--text-secondary); margin-bottom: 12px; font-size: 13px;">
+                  Ajustes de validacion, cola de trabajos y limites del sistema.
+                </p>
+                <div class="form-group">
+                  <label for="sys-validation-threshold">Umbral de validacion (0-1)</label>
+                  <input type="number" id="sys-validation-threshold" min="0" max="1" step="0.05" placeholder="0.8">
+                </div>
+                <div class="form-group">
+                  <label for="sys-validation-timeout">Timeout de validacion (segundos)</label>
+                  <input type="number" id="sys-validation-timeout" min="10" max="300" placeholder="90">
+                </div>
+                <div class="form-group">
+                  <label for="sys-queue-cooldown">Cooldown entre trabajos (segundos)</label>
+                  <input type="number" id="sys-queue-cooldown" min="1" max="300" placeholder="30">
+                </div>
+                <!-- Monto máximo removido — sin límites de monto -->
+                <div class="form-group">
+                  <label for="sys-max-requests-hour">Max solicitudes por usuario/hora</label>
+                  <input type="number" id="sys-max-requests-hour" min="1" max="100" placeholder="10">
+                </div>
+                <div class="form-group">
+                  <label for="sys-panel-balance-threshold">Alerta fichas bajas (umbral)</label>
+                  <input type="number" id="sys-panel-balance-threshold" min="0" max="1000000" step="100" placeholder="1000">
+                  <span class="input-hint">El sistema alerta cuando las fichas del panel bajan de este monto. 0 = desactivado.</span>
+                </div>
+                <div class="form-group">
+                  <label for="sys-default-new-user-panel">Panel para nuevos usuarios</label>
+                  <select id="sys-default-new-user-panel">
+                    <option value="">-- No crear automaticamente --</option>
+                  </select>
+                  <span class="input-hint">Cuando un usuario no existe en ningun panel, se crea automaticamente en el panel seleccionado.</span>
+                </div>
+                <div style="display: flex; gap: 12px;">
+                  <div class="form-group" style="flex: 1;">
+                    <label for="sys-activity-start">Ventana actividad (inicio)</label>
+                    <input type="time" id="sys-activity-start" value="00:00">
+                  </div>
+                  <div class="form-group" style="flex: 1;">
+                    <label for="sys-activity-end">Ventana actividad (fin)</label>
+                    <input type="time" id="sys-activity-end" value="00:00">
+                  </div>
+                </div>
+                <label class="toggle-setting" style="margin-top: 8px;">
+                  <span class="toggle-label">Bot habilitado</span>
+                  <span class="toggle-switch">
+                    <input type="checkbox" id="sys-bot-enabled" checked>
+                    <span class="toggle-slider"></span>
+                  </span>
+                </label>
+                <!-- Auto-Payment Settings -->
+                <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border);">
+                  <h4 style="font-size: 13px; color: var(--text-secondary); margin-bottom: 10px;">Pagos Automaticos</h4>
+                  <label class="toggle-setting">
+                    <span class="toggle-label">Pago automatico de premios</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="sys-auto-payment-enabled">
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+                  <label class="toggle-setting" style="margin-top: 6px;">
+                    <span class="toggle-label">Requiere confirmacion manual</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="sys-auto-payment-requires-confirm" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+                  <div class="form-group" style="margin-top: 8px;">
+                    <label for="sys-auto-payment-max-amount">Monto maximo auto-pago ($)</label>
+                    <input type="number" id="sys-auto-payment-max-amount" min="100" max="1000000" step="1000" placeholder="50000">
+                  </div>
+                </div>
+
+                <div class="form-actions" style="margin-top: 12px;">
+                  <button type="button" id="save-system-settings-btn" class="btn btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M5 13l4 4L19 7"/>
+                    </svg>
+                    Guardar Configuracion
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3>Enviar Promocion</h3>
+              </div>
+              <div class="card-content">
+                <p style="color: var(--text-secondary); margin-bottom: 12px; font-size: 13px;">
+                  Envia un mensaje promocional a todos los usuarios de la app (push notification + alerta en app).
+                </p>
+                <div class="form-group">
+                  <label for="promo-title">Titulo</label>
+                  <input type="text" id="promo-title" placeholder="ej: PROMO HOY" maxlength="50">
+                </div>
+                <div class="form-group">
+                  <label for="promo-message">Mensaje</label>
+                  <textarea id="promo-message" rows="3" placeholder="ej: 10% extra en cargas de +$10.000!" maxlength="200" style="resize: vertical; min-height: 60px;"></textarea>
+                </div>
+                <div class="form-actions">
+                  <button type="button" id="send-promo-btn" class="btn btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                      <path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>
+                    </svg>
+                    Enviar a Todos
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3>Publicar Actualizacion</h3>
+              </div>
+              <div class="card-content">
+                <p style="color: var(--text-secondary); margin-bottom: 12px; font-size: 13px;">
+                  Publica una nueva version del APK. Todos los usuarios seran forzados a actualizar.
+                </p>
+                <div class="form-group">
+                  <label for="update-version">Version (ej: 1.2.0)</label>
+                  <input type="text" id="update-version" placeholder="1.2.0" pattern="\d+\.\d+\.\d+">
+                </div>
+                <div class="form-group">
+                  <label for="update-apk-url">URL del APK</label>
+                  <input type="url" id="update-apk-url" placeholder="https://tiorico-landing.onrender.com/tio-rico-fichas.apk">
+                </div>
+                <div class="form-group">
+                  <label for="update-changelog">Novedades (opcional)</label>
+                  <textarea id="update-changelog" rows="2" placeholder="ej: Nuevo widget, notificaciones push..." maxlength="300" style="resize: vertical; min-height: 50px;"></textarea>
+                </div>
+                <div class="form-actions">
+                  <button type="button" id="publish-update-btn" class="btn btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    Publicar y Notificar
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header" style="display: flex; align-items: center; justify-content: space-between;">
+                <h3>Respuestas Rapidas</h3>
+                <button class="btn btn-sm btn-ghost" id="add-quick-reply-btn" title="Agregar respuesta" style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 4v16m8-8H4"/></svg>
+                  Agregar
+                </button>
+              </div>
+              <div class="card-content">
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">Arrastra para reordenar. Haz clic en el lapiz para editar.</p>
+                <div id="quick-replies-settings-list" class="quick-replies-settings-list">
+                  <!-- Populated dynamically -->
+                </div>
+                <div id="quick-replies-empty" class="hidden" style="text-align: center; padding: 20px 0; color: var(--text-muted); font-size: 13px;">
+                  <p style="margin: 0;">No hay respuestas rapidas</p>
+                  <p style="margin: 4px 0 0 0; font-size: 12px;">Agrega una usando el boton de arriba</p>
+                </div>
+                <button class="btn btn-ghost btn-sm" id="reset-quick-replies-btn" style="margin-top: 12px; font-size: 12px;">Restaurar predeterminadas</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3>Inteligencia Artificial</h3>
+              </div>
+              <div class="card-content">
+                <div class="form-group">
+                  <label for="ollama-url">URL de Ollama</label>
+                  <div class="input-with-action">
+                    <input type="url" id="ollama-url" placeholder="http://localhost:11434" value="http://localhost:11434">
+                    <button type="button" id="test-ollama-btn" class="btn btn-sm btn-ghost">Test Conexion</button>
+                  </div>
+                  <div id="ollama-test-result" class="ollama-test-result" style="display:none"></div>
+                </div>
+
+                <div class="form-group">
+                  <label>Modelo Actual</label>
+                  <div class="info-value" id="ollama-model-display" style="padding:6px 0;color:var(--text-muted);font-size:13px">No conectado</div>
+                </div>
+
+                <div class="notification-settings" style="margin-top:8px">
+                  <label class="toggle-setting">
+                    <span class="toggle-label">Bot auto-respuestas</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="setting-ai-bot-enabled">
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+
+                  <label class="toggle-setting">
+                    <span class="toggle-label">Respuestas sugeridas en chat</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="setting-ai-suggested-replies" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+
+                  <label class="toggle-setting">
+                    <span class="toggle-label">Analisis AI de fallos</span>
+                    <span class="toggle-switch">
+                      <input type="checkbox" id="setting-ai-failure-analysis" checked>
+                      <span class="toggle-slider"></span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3>Atajos de Teclado</h3>
+              </div>
+              <div class="card-content">
+                <div class="shortcuts-list">
+                  <div class="shortcut-item">
+                    <kbd>Enter</kbd>
+                    <span>Aprobar fallo seleccionado</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>R</kbd>
+                    <span>Rechazar fallo seleccionado</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>Esc</kbd>
+                    <span>Cerrar modal</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>1</kbd>-<kbd>7</kbd>
+                    <span>Navegar entre vistas</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>Ctrl+K</kbd>
+                    <span>Toggle Kill Switch</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3>Información</h3>
+              </div>
+              <div class="card-content">
+                <div class="info-grid">
+                  <div class="info-item">
+                    <span class="info-label">Versión</span>
+                    <span class="info-value">1.0.0</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Plataforma</span>
+                    <span class="info-value" id="platform-info">-</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Failure Detail Modal -->
+  <div id="failure-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h3>Detalle del Fallo</h3>
+        <button class="modal-close" aria-label="Cerrar modal">&times;</button>
+      </div>
+      <div class="modal-body" id="failure-modal-body">
+        <!-- Content will be inserted here -->
+      </div>
+      <div class="modal-footer">
+        <div class="modal-footer-left">
+          <span class="modal-shortcut-hint">Enter: Aprobar • R: Rechazar (pide motivo) • Esc: Cerrar</span>
+        </div>
+        <div class="modal-footer-right">
+          <button class="btn btn-outline hidden" id="modal-goto-chat-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+            </svg>
+            Ir al Chat
+          </button>
+          <button class="btn btn-outline" id="modal-retry-discovery-btn" style="display:none">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 4v6h6M23 20v-6h-6"/>
+              <path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/>
+            </svg>
+            Reintentar / Crear Usuario
+          </button>
+          <button class="btn btn-ghost" id="modal-reject-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            Rechazar (R)
+          </button>
+          <button class="btn btn-primary" id="modal-approve-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 13l4 4L19 7"/>
+            </svg>
+            Aprobar (Enter)
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Text Input Modal (replaces browser prompt) -->
+  <div id="text-input-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width: 420px;">
+      <div class="modal-header">
+        <h3 id="text-input-modal-title">Ingresá un motivo</h3>
+        <button class="modal-close" onclick="cancelTextInputModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 20px;">
+        <p id="text-input-modal-message" class="hidden" style="color: var(--text-primary); margin: 0 0 12px 0; font-size: 14px; line-height: 1.5;"></p>
+        <textarea
+          id="text-input-modal-textarea"
+          rows="3"
+          style="width: 100%; resize: vertical; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; font-size: 14px; font-family: inherit;"
+          placeholder="Escribí el motivo..."
+        ></textarea>
+      </div>
+      <div class="modal-footer">
+        <div class="modal-footer-left"></div>
+        <div class="modal-footer-right">
+          <button class="btn btn-ghost" onclick="cancelTextInputModal()">Cancelar</button>
+          <button class="btn btn-primary" id="text-input-modal-confirm" onclick="confirmTextInputModal()">Confirmar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image Zoom Modal -->
+  <div id="image-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <button class="modal-close" aria-label="Cerrar imagen">&times;</button>
+      <img id="zoomed-image" class="zoomed-img" src="" alt="Imagen ampliada">
+    </div>
+  </div>
+
+  <!-- Quick Reply Edit Modal -->
+  <div id="quick-reply-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content" style="max-width: 460px;">
+      <div class="modal-header">
+        <h3 id="quick-reply-modal-title">Agregar Respuesta Rapida</h3>
+        <button class="modal-close" onclick="closeQuickReplyModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 20px;">
+        <div style="margin-bottom: 16px;">
+          <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; display: block;">Icono (emoji)</label>
+          <input type="text" id="qr-edit-icon" maxlength="4" style="width: 60px; text-align: center; font-size: 20px; padding: 8px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px;">
+        </div>
+        <div style="margin-bottom: 16px;">
+          <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; display: block;">Etiqueta del boton</label>
+          <input type="text" id="qr-edit-label" maxlength="30" placeholder="Ej: Saludo" style="width: 100%; padding: 8px 12px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; box-sizing: border-box;">
+        </div>
+        <div>
+          <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; display: block;">Texto del mensaje</label>
+          <textarea id="qr-edit-text" rows="4" maxlength="500" placeholder="El texto completo que se enviara..." style="width: 100%; resize: vertical; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; font-size: 14px; font-family: inherit; box-sizing: border-box;"></textarea>
+          <span id="qr-edit-char-count" style="font-size: 11px; color: var(--text-muted); display: block; text-align: right; margin-top: 4px;">0/500</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div></div>
+        <div style="display: flex; gap: 12px;">
+          <button class="btn btn-ghost" onclick="closeQuickReplyModal()">Cancelar</button>
+          <button class="btn btn-primary" id="qr-edit-save" onclick="saveQuickReplyFromModal()">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container"></div>
+
+  <!-- Audio elements for sound alerts -->
+  <audio id="sound-alert" preload="auto">
+    <source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2teleWk6UXy82teleWk6UXy82telepWM5UHu61+2ofmw/X5nW76qDb0RhnN3srXtrP1aR0eqmbkJgl9fpqnJjOk2Fwtjlm2JCWYvL4qNzYT1Rh8XX4JlhQViKyuGicWA8UYfF1+CZYUFYisrhonFgPFGHxdfgmWFBWIrK4aJxYDxRh8XX4JlhQViKyuGicGA7UYbE1uCYYEBXicngoHBfO1CGw9bgl2A/V4nI35" type="audio/wav">
+  </audio>
+
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>

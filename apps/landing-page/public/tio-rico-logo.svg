@@ -1,0 +1,17 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dark background with rounded corners -->
+  <rect width="1024" height="1024" rx="180" fill="#1A202C"/>
+
+  <!-- Gold chat bubble -->
+  <path d="M256 384C256 331.206 298.206 289 351 289H673C725.794 289 768 331.206 768 384V576C768 628.794 725.794 671 673 671H480L352 767V671C298.206 671 256 628.794 256 576V384Z" fill="#F6AD55"/>
+
+  <!-- Dark coin/chip circle -->
+  <circle cx="512" cy="480" r="140" fill="#2D3748"/>
+
+  <!-- Gold dollar/chip symbol -->
+  <path d="M512 360V600M462 400C462 377.909 479.909 360 502 360H532C554.091 360 572 377.909 572 400C572 422.091 554.091 440 532 440H492C469.909 440 452 457.909 452 480V480C452 502.091 469.909 520 492 520H532C554.091 520 572 537.909 572 560C572 582.091 554.091 600 532 600H502C479.909 600 462 582.091 462 560" stroke="#F6AD55" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Decorative golden accents (chip edges) -->
+  <circle cx="512" cy="480" r="150" fill="none" stroke="#D69E2E" stroke-width="3" opacity="0.6"/>
+  <circle cx="512" cy="480" r="158" fill="none" stroke="#F6AD55" stroke-width="2" opacity="0.4"/>
+</svg>

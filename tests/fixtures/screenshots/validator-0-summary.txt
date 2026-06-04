@@ -1,0 +1,28 @@
+{
+  "title": "Validador de Comprobantes",
+  "bodyLen": 260,
+  "bodyHead": "Tio Rico - Validador\nPrincipal\nOCR Sandbox\n📸 Subir Comprobante\n\nArrastra una imagen o PDF aqui\n\no hace click para seleccionar\n\nMonto esperado (opcional, para comparar)\nAnalizar con OCR\nOllama\n💾 Ejemplos Guardados (\n1\n)\nMercadoPago\n1 ejemplo\nExportar\nImportar",
+  "buttons": [
+    "Actualizar ahora",
+    "Principal",
+    "OCR Sandbox",
+    "✕",
+    "🔄 Verificar",
+    "Instalar Ollama",
+    "Iniciar Ollama",
+    "Descargar Modelo (~4GB)",
+    "Conectar",
+    "Guardar Prompt",
+    "Restaurar Default",
+    "Copiar logs",
+    "Analizar con OCR",
+    "Ollama",
+    "Copiar",
+    "Guardar Ejemplo",
+    "Limpiar",
+    "Exportar",
+    "Importar"
+  ],
+  "hasOllamaUI": true,
+  "hasBotUI": false
+}

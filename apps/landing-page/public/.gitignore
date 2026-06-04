@@ -1,0 +1,19 @@
+# Vercel
+.vercel
+
+# Node modules (if npm is used)
+node_modules/
+
+# MacOS
+.DS_Store
+
+# Editor directories
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp

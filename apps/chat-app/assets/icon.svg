@@ -1,0 +1,65 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dark background with rounded corners -->
+  <rect width="1024" height="1024" rx="200" fill="#0B0F15"/>
+
+  <!-- Subtle emerald inner glow -->
+  <rect x="32" y="32" width="960" height="960" rx="170" fill="#111827"/>
+
+  <!-- Top hat (sombrero de copa) -->
+  <rect x="380" y="160" width="264" height="40" rx="8" fill="#10B981"/>
+  <rect x="408" y="100" width="208" height="68" rx="12" fill="#10B981"/>
+
+  <!-- Pato head silhouette (geometric circle) -->
+  <circle cx="512" cy="320" r="110" fill="#F59E0B"/>
+
+  <!-- Eye -->
+  <circle cx="545" cy="300" r="16" fill="#0B0F15"/>
+  <circle cx="551" cy="295" r="5" fill="#F1F5F9"/>
+
+  <!-- Beak (pico) -->
+  <path d="M590 330 L660 340 L590 360 Z" fill="#F59E0B"/>
+  <path d="M590 345 L645 345 L590 360 Z" fill="#D97706"/>
+
+  <!-- Body (simplified, geometric) -->
+  <ellipse cx="512" cy="510" rx="160" ry="130" fill="#F59E0B"/>
+
+  <!-- Casino chip / coin in center of body -->
+  <circle cx="512" cy="500" r="80" fill="#0B0F15"/>
+  <circle cx="512" cy="500" r="72" fill="none" stroke="#10B981" stroke-width="4"/>
+  <circle cx="512" cy="500" r="64" fill="none" stroke="#10B981" stroke-width="2" opacity="0.5"/>
+
+  <!-- Dollar sign on chip -->
+  <path d="M512 455V545M487 472C487 462 498 454 512 454C526 454 537 462 537 472C537 482 526 490 512 490C498 490 487 498 487 508C487 518 498 528 512 528C526 528 537 518 537 508" stroke="#10B981" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Poker chips stack (left side, behind body) -->
+  <ellipse cx="300" cy="620" rx="60" ry="14" fill="#10B981"/>
+  <rect x="240" y="600" width="120" height="20" fill="#10B981"/>
+  <ellipse cx="300" cy="600" rx="60" ry="14" fill="#059669"/>
+  <rect x="240" y="580" width="120" height="20" fill="#059669"/>
+  <ellipse cx="300" cy="580" rx="60" ry="14" fill="#10B981"/>
+
+  <!-- Poker chips stack (right side) -->
+  <ellipse cx="724" cy="620" rx="60" ry="14" fill="#F59E0B"/>
+  <rect x="664" y="600" width="120" height="20" fill="#F59E0B"/>
+  <ellipse cx="724" cy="600" rx="60" ry="14" fill="#D97706"/>
+  <rect x="664" y="580" width="120" height="20" fill="#D97706"/>
+  <ellipse cx="724" cy="580" rx="60" ry="14" fill="#F59E0B"/>
+
+  <!-- "TIO RICO" text -->
+  <text x="512" y="740" text-anchor="middle" fill="#F1F5F9" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="72" letter-spacing="6">TIO RICO</text>
+
+  <!-- "FICHAS" subtitle -->
+  <text x="512" y="790" text-anchor="middle" fill="#10B981" font-family="Arial, sans-serif" font-weight="700" font-size="36" letter-spacing="12">FICHAS</text>
+
+  <!-- Bottom accent line -->
+  <rect x="380" y="820" width="264" height="4" rx="2" fill="#10B981" opacity="0.5"/>
+
+  <!-- Corner decorations (casino chip dots) -->
+  <circle cx="80" cy="80" r="12" fill="#10B981" opacity="0.3"/>
+  <circle cx="944" cy="80" r="12" fill="#10B981" opacity="0.3"/>
+  <circle cx="80" cy="944" r="12" fill="#F59E0B" opacity="0.3"/>
+  <circle cx="944" cy="944" r="12" fill="#F59E0B" opacity="0.3"/>
+
+  <!-- Border frame -->
+  <rect x="16" y="16" width="992" height="992" rx="190" fill="none" stroke="#10B981" stroke-width="2" opacity="0.2"/>
+</svg>

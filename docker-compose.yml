@@ -1,0 +1,141 @@
+# ============================================
+# GAME AUTOMATION PLATFORM - Docker Compose
+# ============================================
+#
+# Usage:
+#   docker-compose up -d              # Start all services
+#   docker-compose up -d postgres redis  # Start only infrastructure
+#   docker-compose logs -f backend    # View backend logs
+#   docker-compose down               # Stop all services
+#   docker-compose down -v            # Stop and remove volumes
+#
+# After starting, run migrations:
+#   cd apps/backend-api && npx prisma migrate dev
+#
+
+services:
+  # ==========================================
+  # INFRASTRUCTURE SERVICES
+  # ==========================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: tiorico-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tio_rico_fichas
+    ports:
+      - "5435:5432"  # Using 5435 on host (5432-5434 are in use)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: tiorico-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # APPLICATION SERVICES (optional)
+  # ==========================================
+  # Uncomment these to run apps in Docker.
+  # For development, it's often easier to run apps locally.
+
+  # backend:
+  #   build:
+  #     context: ./apps/backend-api
+  #     dockerfile: Dockerfile
+  #   container_name: game-automation-backend
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     NODE_ENV: production
+  #     DATABASE_URL: postgresql://postgres:postgres@postgres:5432/game_automation
+  #     REDIS_HOST: redis
+  #     REDIS_PORT: 6379
+  #     JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+  #     BOT_API_KEY: ${BOT_API_KEY:-change-me-in-production}
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+
+  # operator-panel:
+  #   build:
+  #     context: ./apps/operator-panel
+  #     dockerfile: Dockerfile
+  #   container_name: game-automation-operator
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3002:3000"
+  #   environment:
+  #     NEXT_PUBLIC_API_URL: http://backend:3000
+  #   depends_on:
+  #     - backend
+
+  # ==========================================
+  # MONITORING & MANAGEMENT TOOLS (optional)
+  # ==========================================
+  # Start with: docker-compose --profile tools up -d
+  # ==========================================
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: tiorico-pgadmin
+    restart: unless-stopped
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@tiorico.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    profiles:
+      - tools
+
+  redis-commander:
+    image: ghcr.io/joeferner/redis-commander:latest
+    container_name: tiorico-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    depends_on:
+      - redis
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  default:
+    name: tiorico-network

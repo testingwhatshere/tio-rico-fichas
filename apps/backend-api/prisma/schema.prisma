@@ -1,0 +1,838 @@
+// ========================================
+// GAME AUTOMATION PLATFORM - PRISMA SCHEMA
+// ========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ========================================
+// ENUMS
+// ========================================
+
+enum UserRole {
+  CLIENT
+  OPERATOR
+  SENIOR_OPERATOR
+  ADMIN
+}
+
+enum RequestStatus {
+  PENDING_PROOF // Esperando que suba comprobante
+  VALIDATING // AI validando el comprobante
+  VALIDATION_FAILED // AI no pudo validar - necesita operador
+  PENDING_MP_VERIFICATION // AI OK, esperando confirmación de pago en MercadoPago
+  APPROVED // Validado (auto o manual) - en cola para bot
+  PROCESSING // Bot ejecutando
+  COMPLETED // Éxito!
+  FAILED // Bot falló
+  REJECTED // Operador rechazó manualmente
+  CANCELLED // Cancelada por el usuario
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ChatStatus {
+  OPEN
+  ASSIGNED
+  CLOSED
+}
+
+enum MessageType {
+  USER
+  OPERATOR
+  SYSTEM
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  ADJUSTMENT // manual operator adjustments
+}
+
+// ========================================
+// PANELS (MULTI-PANEL SUPPORT)
+// ========================================
+
+model Panel {
+  id        String   @id @default(uuid())
+  name      String   @unique // "Panel A", "Panel B", "Panel C"
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  users       User[]
+  requests    Request[]
+  jobs        Job[]
+  prizeClaims PrizeClaim[]
+
+  @@index([isActive])
+}
+
+// ========================================
+// USER & AUTHENTICATION
+// ========================================
+
+model User {
+  id        String   @id @default(uuid())
+  username  String?  @unique // For CLIENT users (simple auth)
+  phone     String?  @unique // Phone number for CLIENT users (prevents duplicates)
+  email     String?  @unique // For OPERATOR/ADMIN users
+  password  String?  // Required only for OPERATOR/ADMIN
+  role      UserRole @default(CLIENT)
+  isActive  Boolean  @default(true)
+  balance   Decimal  @default(0) @db.Decimal(10, 2) // User balance for credits
+  pushToken           String?  // Expo push notification token
+  savedTargetUsername String?  // Remembered gaming panel username for bot auto-fill
+  telegramId          String?  @unique // Telegram user ID for bot integration
+  createdAt           DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Panel assignment (discovered automatically on first request)
+  panelId String?
+  panel   Panel?  @relation(fields: [panelId], references: [id])
+
+  // Relations
+  operator         Operator?
+  requests         Request[]
+  approvedRequests Request[]     @relation("ApprovedBy")
+  chatsAsClient    Chat[]        @relation("ClientChats")
+  chatsAsOperator  Chat[]        @relation("OperatorChats")
+  messagesSent     Message[]
+  auditLogs        AuditLog[]
+  transactions     Transaction[] // Financial transaction history
+  withdrawals      Withdrawal[]  // Withdrawal requests
+  prizeClaims      PrizeClaim[]  // Prize claim requests
+  outboundPayments OutboundPayment[] // Outbound payment records
+
+  @@index([username])
+  @@index([phone])
+  @@index([email])
+  @@index([role])
+  @@index([panelId])
+}
+
+// ========================================
+// OPERATORS
+// ========================================
+
+model Operator {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName String
+  isAvailable Boolean  @default(true)
+  maxChats    Int      @default(5)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isAvailable])
+}
+
+// ========================================
+// CREDIT LOAD REQUESTS
+// ========================================
+
+model Request {
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetUsername String
+  amount         Decimal       @db.Decimal(10, 2)
+  status         RequestStatus @default(PENDING_PROOF)
+
+  // Payment Proof Upload
+  proofUrl        String? // URL del comprobante (S3, Cloudinary, etc.)
+  proofHash       String? // Hash para detectar duplicados
+  proofUploadedAt DateTime? // Cuando se subió
+
+  // AI Validation
+  validationScore   Float? // Score de confianza del AI (0-1)
+  validationError   String? // Mensaje de error si falló validación
+  validationDetails Json? // Detalles de la validación AI
+  extractedTransactionId String? // AI-extracted transaction ID for content-based dedup
+
+  // Manual Approval (solo si AI falla)
+  manuallyApproved Boolean   @default(false)
+  approvedById     String?
+  approvedBy       User?     @relation("ApprovedBy", fields: [approvedById], references: [id])
+  approvedAt       DateTime?
+  rejectionReason  String?
+
+  // Operator Assignment (for failed validations)
+  assignedOperatorId String?
+  assignedAt         DateTime?
+
+  // MercadoPago verification
+  mpVerified           Boolean   @default(false)
+  mpOperationNumber    String?   // N° de operación from MP detail
+  mpVerifiedAt         DateTime?
+  mpVerifiedByWalletId String?   // Which wallet/extension verified it
+
+  // Wallet assignment (which wallet was shown to the user)
+  walletId String?
+  wallet   PaymentConfig? @relation(fields: [walletId], references: [id])
+
+  // Panel assignment (copied from user, or discovered)
+  panelId String?
+  panel   Panel?  @relation(fields: [panelId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  job           Job?
+  chat          Chat? // Associated chat for this request
+  messages      Message[] // Messages tagged with this request (unified chat)
+  transactions  Transaction[] // Transactions created from this request
+  statusHistory    RequestStatusHistory[] // Status change history
+  mpVerifications  MpVerification[] // MP verification records matched to this request
+
+  @@index([userId])
+  @@index([status])
+  @@index([userId, createdAt])
+  @@index([targetUsername])
+  @@index([proofHash]) // Para detectar duplicados
+  @@index([extractedTransactionId])
+  @@index([assignedOperatorId])
+  @@index([walletId])
+  @@index([panelId])
+}
+
+// ========================================
+// REQUEST STATUS HISTORY
+// ========================================
+
+model RequestStatusHistory {
+  id        String        @id @default(uuid())
+  requestId String
+  request   Request       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  status    RequestStatus
+  changedBy String? // operator ID if manual
+  metadata  Json? // additional context
+  createdAt DateTime      @default(now())
+
+  @@index([requestId, createdAt])
+}
+
+// ========================================
+// TRANSACTIONS (BALANCE TRACKING)
+// ========================================
+
+model Transaction {
+  id            String          @id @default(uuid())
+  userId        String
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type          TransactionType
+  amount        Decimal         @db.Decimal(10, 2)
+  balanceBefore Decimal         @db.Decimal(10, 2)
+  balanceAfter  Decimal         @db.Decimal(10, 2)
+  requestId     String?  @unique // link to Request if deposit (unique prevents double-addition, NULLs allowed)
+  request       Request?        @relation(fields: [requestId], references: [id])
+  withdrawalId  String?         // link to Withdrawal if withdrawal
+  withdrawal    Withdrawal?     @relation("WithdrawalTransactions", fields: [withdrawalId], references: [id])
+  prizeClaimId  String?         // link to PrizeClaim if prize
+  prizeClaim    PrizeClaim?     @relation("PrizeClaimTransactions", fields: [prizeClaimId], references: [id])
+  description   String
+  createdAt     DateTime        @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ========================================
+// WITHDRAWALS
+// ========================================
+
+// ========================================
+// PRIZE CLAIMS (COBRAR PREMIO)
+// ========================================
+
+enum PrizeClaimStatus {
+  PENDING_PAYMENT_DETAILS // Esperando datos de pago del usuario
+  PENDING_VERIFICATION    // Tiene datos, esperando verificar fichas en panel
+  VERIFYING_CHIPS         // Extension verificando en el panel
+  VERIFIED                // Fichas confirmadas, esperando acción del operador
+  VERIFICATION_FAILED     // No tiene fichas suficientes o error
+  PROCESSING              // Operador inició retiro, bot retirando fichas
+  CHIPS_WITHDRAWN         // Fichas retiradas, operador debe pagar al usuario
+  COMPLETED               // Operador pagó, terminado
+  REJECTED                // Operador rechazó
+  FAILED                  // Bot falló al retirar fichas
+}
+
+model PrizeClaim {
+  id             String           @id @default(uuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetUsername String
+  amount         Decimal          @db.Decimal(10, 2)
+  status         PrizeClaimStatus @default(PENDING_PAYMENT_DETAILS)
+
+  // Payment details (asked every time, not saved on User)
+  paymentMethod  String? // "CBU" | "ALIAS"
+  paymentDetails Json?   // { cbu?, alias?, accountHolder? }
+
+  // Chip verification
+  verifiedBalance Decimal?  @db.Decimal(10, 2)
+  verifiedAt      DateTime?
+
+  // Panel
+  panelId String?
+  panel   Panel?  @relation(fields: [panelId], references: [id])
+
+  // Job (for WITHDRAW_CHIPS automation)
+  jobId String? @unique
+  job   Job?    @relation(fields: [jobId], references: [id])
+
+  // Chat association
+  chatId String?
+
+  // Operator actions
+  processedBy     String?
+  completedBy     String?
+  rejectedBy      String?
+  rejectionReason String?
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  transactions Transaction[] @relation("PrizeClaimTransactions")
+  outboundPayment OutboundPayment? // Automated outbound payment for this prize
+
+  @@index([userId, status])
+  @@index([status])
+  @@index([createdAt])
+  @@index([panelId])
+}
+
+// ========================================
+// WITHDRAWALS (RETIRO DE SALDO INTERNO)
+// ========================================
+
+enum WithdrawalStatus {
+  PENDING_APPROVAL  // waiting for operator approval
+  APPROVED          // approved by operator, balance deducted
+  PROCESSING        // payment being sent
+  COMPLETED         // payment sent successfully
+  REJECTED          // rejected by operator
+  FAILED            // payment failed
+}
+
+model Withdrawal {
+  id              String           @id @default(uuid())
+  userId          String
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount          Decimal          @db.Decimal(10, 2)
+  status          WithdrawalStatus @default(PENDING_APPROVAL)
+  paymentMethod   String           // e.g., "MercadoPago", "Bank Transfer"
+  paymentDetails  Json             // CBU, alias, account details
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectedReason  String?
+  completedAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  transactions    Transaction[]    @relation("WithdrawalTransactions")
+  outboundPayment OutboundPayment? // Automated outbound payment for this withdrawal
+
+  @@index([userId, status])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ========================================
+// OUTBOUND PAYMENTS (Prize Payouts & Withdrawal Payouts)
+// ========================================
+
+enum OutboundPaymentStatus {
+  PENDING     // Created, waiting for operator confirmation (if required)
+  CONFIRMED   // Operator confirmed, ready to create job
+  QUEUED      // Job created, waiting for payment extension
+  PROCESSING  // Extension executing the transfer
+  COMPLETED   // Transfer successful
+  FAILED      // Transfer failed
+  CANCELLED   // Cancelled by operator
+}
+
+enum OutboundPaymentType {
+  PRIZE_PAYOUT      // Payment for a prize claim
+  WITHDRAWAL_PAYOUT // Payment for a balance withdrawal
+}
+
+model OutboundPayment {
+  id              String                @id @default(uuid())
+  type            OutboundPaymentType
+  status          OutboundPaymentStatus @default(PENDING)
+
+  // Source (one of these is set)
+  prizeClaimId    String?               @unique
+  prizeClaim      PrizeClaim?           @relation(fields: [prizeClaimId], references: [id])
+  withdrawalId    String?               @unique
+  withdrawal      Withdrawal?           @relation(fields: [withdrawalId], references: [id])
+  userId          String
+  user            User                  @relation(fields: [userId], references: [id])
+
+  // What to pay
+  amount          Decimal               @db.Decimal(10, 2)
+  paymentMethod   String                // "CBU" | "ALIAS"
+  paymentDetails  Json                  // { cbu?, alias?, accountHolder }
+
+  // Which wallet pays
+  walletId        String
+  wallet          PaymentConfig         @relation(fields: [walletId], references: [id])
+  walletType      WalletType            // Denormalized for dispatch routing
+
+  // Execution tracking
+  jobId           String?               @unique
+  job             Job?                  @relation(fields: [jobId], references: [id])
+  operationNumber String?               // Transfer operation number from receipt
+  screenshotUrl   String?               // Screenshot of the receipt
+  error           String?
+  attempts        Int                   @default(0)
+
+  // Approval
+  requiresConfirm Boolean              @default(true)
+  confirmedBy     String?               // Operator ID who confirmed
+  confirmedAt     DateTime?
+
+  // Timestamps
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  executedAt      DateTime?             // When extension started processing
+  completedAt     DateTime?             // When transfer completed
+
+  @@index([status])
+  @@index([walletId])
+  @@index([userId])
+  @@index([walletType, status])
+}
+
+// ========================================
+// PAYMENT CONFIGURATION (Wallets)
+// ========================================
+
+enum WalletType {
+  MERCADOPAGO
+  CBU
+  CVU
+  RIPIO
+  FIWIND
+  PREX
+}
+
+model PaymentConfig {
+  id                String     @id @default(uuid())
+  type              WalletType // Type of wallet
+  label             String     // User-friendly label (e.g., "MP Principal", "Santander")
+  holderName        String     // Name to display to clients
+  holderDni         String?    // DNI/CUIT number of the wallet holder
+  holderLegalName   String?    // Legal name as it appears on bank records
+  details           Json       // Type-specific fields: { alias?, cbu?, cvu?, bank? }
+  isActive          Boolean    @default(true) // Soft delete / enabled
+  isSelected            Boolean    @default(false) // Currently selected wallet to show clients
+  requiresVerification  Boolean    @default(false) // Whether this wallet requires MP-style payment verification
+  amountLimit           Decimal?   @db.Decimal(12, 2) // Max amount before auto-rotation (null = no limit)
+  accumulatedAmount Decimal    @default(0) @db.Decimal(12, 2) // Running total of received amounts
+  lastEmptiedAt     DateTime?  // When operator last reset the accumulation
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  // Outbound payment capabilities
+  outboundEnabled   Boolean   @default(false) // Can this wallet send outbound payments?
+  outboundBalance   Decimal?  @db.Decimal(12, 2) // Last reported balance (from extension)
+  lastBalanceCheck  DateTime? // When extension last reported balance
+
+  requests          Request[] // Requests that were assigned this wallet
+  mpVerifications   MpVerification[] // MP verification records for this wallet
+  outboundPayments  OutboundPayment[] // Outbound payments sent from this wallet
+
+  @@index([isSelected])
+  @@index([isActive])
+  @@index([outboundEnabled])
+}
+
+// ========================================
+// MERCADOPAGO VERIFICATION
+// ========================================
+
+model MpVerification {
+  id               String        @id @default(uuid())
+  walletId         String
+  wallet           PaymentConfig @relation(fields: [walletId], references: [id])
+  operationNumber  String        @unique // N° de operación from MP (dedup key)
+  senderName       String        // Name shown on MP activity
+  senderBank       String?       // Bank entity (e.g., "Banco de Galicia")
+  senderCbu        String?       // CBU of the sender
+  senderCuit       String?       // CUIT of the sender
+  amount           Decimal       @db.Decimal(10, 2)
+  transactionDate  DateTime      // Date of the transfer
+  transactionTime  String?       // Time as shown on MP (e.g., "16:48 hs")
+  identificationCode String?     // "Código de identificación" from MP detail
+  channel          String?       // Transfer network (e.g., "Coelsa")
+  mpActivityUrl    String?       // Full URL of the MP detail page
+  status           String?       // MP status (e.g., "Aprobado")
+  requestId        String?       // Matched request (null if unmatched)
+  request          Request?      @relation(fields: [requestId], references: [id])
+  matchedAt        DateTime?     // When the match was confirmed
+  scrapedAt        DateTime      @default(now())
+
+  @@index([walletId, scrapedAt])
+  @@index([requestId])
+}
+
+// ========================================
+// JOBS (BOT EXECUTION)
+// ========================================
+
+enum JobType {
+  LOAD_CREDITS
+  WITHDRAW_CHIPS
+  CHANGE_PASSWORD
+  CREATE_USER
+  OUTBOUND_PAYMENT
+  BUY_CRYPTO
+}
+
+model Job {
+  id          String    @id @default(uuid())
+  type        JobType   @default(LOAD_CREDITS)
+  requestId   String?   @unique
+  request     Request?  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  bullmqJobId String?
+  status      JobStatus @default(QUEUED)
+  result      Json? // { success: true, transactionId: '...' }
+  error       String?
+  screenshot  String? // Error screenshot path
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  // Denormalized fields for dispatch (avoids needing request/prizeClaim join)
+  targetUsername String?
+  amount         Decimal? @db.Decimal(10, 2)
+
+  // Panel assignment (which panel this job targets)
+  panelId String?
+  panel   Panel?  @relation(fields: [panelId], references: [id])
+
+  // Operator Assignment (for failed jobs investigation)
+  assignedOperatorId String?
+  assignedAt         DateTime?
+
+  // Only for CHANGE_PASSWORD jobs
+  newPassword    String?  // Cleared after processing (security)
+  requestingUserId String? // User who requested the change
+
+  // Prize claim relation (for WITHDRAW_CHIPS jobs)
+  prizeClaim PrizeClaim?
+
+  // Outbound payment relation (for OUTBOUND_PAYMENT / BUY_CRYPTO jobs)
+  outboundPayment OutboundPayment?
+
+  @@index([status])
+  @@index([status, panelId])
+  @@index([createdAt])
+  @@index([assignedOperatorId])
+  @@index([panelId])
+  @@index([type])
+}
+
+// ========================================
+// CHAT SYSTEM
+// ========================================
+
+model Chat {
+  id         String     @id @default(uuid())
+  userId     String
+  user       User       @relation("ClientChats", fields: [userId], references: [id], onDelete: Cascade)
+  operatorId String?
+  operator   User?      @relation("OperatorChats", fields: [operatorId], references: [id])
+  requestId  String?    @unique // Associated request (optional, for request-contextual chats)
+  request    Request?   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  status     ChatStatus @default(OPEN)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  // Relations
+  messages Message[]
+
+  @@index([userId])
+  @@index([operatorId])
+  @@index([requestId])
+  @@index([status])
+}
+
+model Message {
+  id        String      @id @default(uuid())
+  chatId    String
+  chat      Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  senderId  String
+  sender    User        @relation(fields: [senderId], references: [id])
+  content   String
+  imageUrl  String?
+  type      MessageType @default(USER)
+  isRead    Boolean     @default(false)
+  createdAt DateTime    @default(now())
+
+  // Optional: which request this message belongs to (for unified chat)
+  requestId String?
+  request   Request? @relation(fields: [requestId], references: [id])
+
+  @@index([chatId])
+  @@index([chatId, createdAt])
+  @@index([requestId])
+}
+
+// ========================================
+// AUDIT LOGGING
+// ========================================
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  operatorId String?
+  operator   User?    @relation(fields: [operatorId], references: [id])
+  action     String // 'REQUEST_APPROVED', 'JOB_TRIGGERED', etc.
+  entityType String // 'REQUEST', 'JOB', 'USER', etc.
+  entityId   String
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  timestamp  DateTime @default(now())
+
+  @@index([operatorId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([timestamp])
+}
+
+// ========================================
+// SYSTEM SETTINGS
+// ========================================
+
+model Setting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+}
+
+// ========================================
+// ACTIVITY LOGGING (Comprehensive)
+// ========================================
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  CRITICAL
+}
+
+enum LogSource {
+  BACKEND
+  BOT
+  OPERATOR_PANEL
+  CHAT_APP
+}
+
+model ActivityLog {
+  id       String    @id @default(uuid())
+  level    LogLevel  @default(INFO)
+  source   LogSource @default(BACKEND)
+  category String // 'AUTH', 'REQUEST', 'JOB', 'BOT', 'PAYMENT', 'SYSTEM'
+  action   String // 'LOGIN', 'PROOF_UPLOADED', 'JOB_STARTED', etc.
+  message  String
+
+  // Context
+  userId     String?
+  operatorId String?
+  requestId  String?
+  jobId      String?
+  chatId     String?
+
+  // Details
+  metadata   Json? // Additional structured data
+  error      String? // Error message if applicable
+  stackTrace String? // Stack trace for errors
+
+  // Request info
+  ipAddress  String?
+  userAgent  String?
+  endpoint   String? // API endpoint called
+  method     String? // HTTP method
+  statusCode Int? // Response status
+  duration   Int? // Request duration in ms
+
+  // Screenshot reference
+  screenshotId String?
+  screenshot   Screenshot? @relation(fields: [screenshotId], references: [id])
+
+  timestamp DateTime @default(now())
+
+  @@index([level])
+  @@index([source])
+  @@index([category])
+  @@index([action])
+  @@index([userId])
+  @@index([requestId])
+  @@index([jobId])
+  @@index([timestamp])
+  @@index([category, action])
+}
+
+// ========================================
+// SCREENSHOTS
+// ========================================
+
+model Screenshot {
+  id       String @id @default(uuid())
+  filename String // Original filename
+  path     String // Storage path
+  mimeType String @default("image/png")
+  size     Int // File size in bytes
+
+  // Context
+  source      LogSource @default(BOT)
+  category    String // 'ERROR', 'SUCCESS', 'STEP', 'VERIFICATION'
+  description String?
+
+  // Relations
+  jobId     String?
+  requestId String?
+
+  // Metadata
+  metadata Json? // Browser viewport, URL, step name, etc.
+
+  createdAt DateTime @default(now())
+
+  // Relations
+  activityLogs ActivityLog[]
+
+  @@index([jobId])
+  @@index([requestId])
+  @@index([category])
+  @@index([createdAt])
+}
+
+// ========================================
+// BOT SESSION LOGS
+// ========================================
+
+model BotSessionLog {
+  id        String @id @default(uuid())
+  sessionId String // Browser session ID
+  action    String // 'SESSION_START', 'LOGIN', 'NAVIGATE', 'CLICK', 'TYPE', 'SCREENSHOT', etc.
+
+  // Target info
+  selector String? // DOM selector used
+  url      String? // Current page URL
+  value    String? // Value typed or selected
+
+  // Timing
+  startedAt   DateTime
+  completedAt DateTime?
+  duration    Int? // Action duration in ms
+
+  // Result
+  success Boolean @default(true)
+  error   String?
+
+  // Screenshot
+  screenshotPath String?
+
+  // Context
+  jobId String?
+  step  String? // Current flow step name
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([action])
+  @@index([jobId])
+  @@index([createdAt])
+  @@index([success])
+}
+
+// ========================================
+// VALIDATOR APP LOGS
+// ========================================
+
+model ValidatorLog {
+  id        String   @id @default(cuid())
+  timestamp DateTime // Timestamp from validator app
+  level     String // INFO, WARN, ERROR, SUCCESS
+  category  String // CONNECTION, OLLAMA, VALIDATION, MODEL, APP
+  message   String
+  data      Json     @default("{}")
+
+  createdAt DateTime @default(now())
+
+  @@index([timestamp])
+  @@index([level])
+  @@index([category])
+  @@index([createdAt])
+}
+
+// ========================================
+// EXPENSES (Owner Dashboard)
+// ========================================
+
+model Expense {
+  id          String   @id @default(uuid())
+  category    String   // PAYROLL, RENT, UTILITIES, OTHER
+  description String
+  amount      Decimal  @db.Decimal(10, 2)
+  date        DateTime
+  recurring   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+// ========================================
+// VAULT (Credential Storage)
+// ========================================
+
+model VaultEntry {
+  id          String   @id @default(uuid())
+  category    String   // PANEL, EMAIL, HOSTING, PAYMENT, OTHER
+  label       String
+  username    String?
+  password    String
+  url         String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ========================================
+// TELEGRAM BOT CONVERSATION STATE
+// ========================================
+
+model TelegramConversation {
+  telegramId    String   @id // Telegram user ID (string, not bigint)
+  step          String   @default("IDLE")
+  requestId     String?  // Active request being processed
+  amount        Int?     // Selected amount
+  prizeData     Json?    // { amount, paymentMethod, cbu, alias, accountHolder }
+  supportChatId String?  // Chat ID for support bridge
+  lastActivity  DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}

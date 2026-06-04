@@ -1,0 +1,22 @@
+{
+  "name": "@game-automation/extension",
+  "version": "1.0.0",
+  "description": "Extensión de Chrome para carga automática de créditos (evita Cloudflare)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'No build step needed for Chrome extension'",
+    "package": "zip -r extension.zip . -x '*.git*' -x 'node_modules/*' -x 'package.json' -x 'README.md'",
+    "dev": "echo 'Load extension in Chrome at chrome://extensions (Developer mode → Load unpacked)'"
+  },
+  "keywords": [
+    "chrome-extension",
+    "automation",
+    "gaming-panel"
+  ],
+  "author": "Internal",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "sharp": "^0.34.5"
+  }
+}

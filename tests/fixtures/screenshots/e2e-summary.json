@@ -1,0 +1,58 @@
+[
+  {
+    "name": "chat-app-login",
+    "ok": true,
+    "title": "Tio Rico Fichas",
+    "bodyHead": "TIO RICO\nFICHAS\nIngresa tu nombre de usuario para continuar\nNombre de usuario\n\nNumero de telefono\n\nCONTINUAR\nSi es tu primera vez, te pediremos un numero de telefono para crear tu cuenta.\nInstala Tio Rico\nAccede rapido desde tu pantalla de inicio\nAbre el menu del navegador y selecciona Instalar app\nAhora no",
+    "file": "/Users/nahuelsantillan/Trabajo/Codigo/Misc/game-automation-platform/tests/fixtures/screenshots/e2e-chat-app-login.png"
+  },
+  {
+    "name": "operator-mobile-home",
+    "ok": true,
+    "title": "Operator Panel",
+    "bodyHead": "Tio Rico\nPanel de Operadores\nConectado\n\nFallos pendientes\n0\n\nJobs procesando\n0\n\nChats activos\n0\n\nCompletados hoy\n0\nEstado del sistema\n\nBots de automatizacion\nDesconectado\n\nValidador AI\nDesconectado\n\nKill Switch\nDesactivado\nAcciones rapidas\n\nVer Fallos\n\nVer Chats\n\n\nInicio\n\n\nFallos\n\n\nChats\n\n\nJobs\n\n\nMas",
+    "file": "/Users/nahuelsantillan/Trabajo/Codigo/Misc/game-automation-platform/tests/fixtures/screenshots/e2e-operator-mobile-home.png"
+  },
+  {
+    "name": "landing-page",
+    "ok": true,
+    "title": "Tio Rico Fichas",
+    "bodyHead": "Tio Rico\nDescargar\nAUTOMATICO · SEGURO · AL TOQUE\nCarga fichas\nal toque.\n\nPaga con transferencia, validamos al instante con IA, y tus fichas llegan solas.\n\nDescargar App\n\nAndroid · Web para iOS\n\nCOMO FUNCIONA\nTres pasos. Cero complicaciones.\n01\nElegi tu monto\n\nDecinos cuantas fichas necesitas y el usuario de destino.\n\n02\nTransferi y subi el comprobante\n\nHace la transferencia y mandanos la foto o P",
+    "file": "/Users/nahuelsantillan/Trabajo/Codigo/Misc/game-automation-platform/tests/fixtures/screenshots/e2e-landing-page.png"
+  },
+  {
+    "name": "sales-page",
+    "ok": true,
+    "title": "AURUM — Automatización de Fichas para Casinos",
+    "bodyHead": "AURUM\nPlataforma\nResultados\nMódulos\nArquitectura\nSistema Operativo — Casinos Activos\nAutomatización\nque factura.\n\nCarga de fichas 100% automática. Validación de pagos con IA.\nTu casino opera 24/7 sin intervención humana.\n\n30seg\nTiempo promedio de carga\n99.7%\nTasa de éxito\n0\nErrores de carga manual\nPanel de Operadores — Dashboard\nDashboard\nSolicitudes\nTrabajos\nChats\n3\n$2.4M\nFichas hoy\n847\nCargas ex",
+    "file": "/Users/nahuelsantillan/Trabajo/Codigo/Misc/game-automation-platform/tests/fixtures/screenshots/e2e-sales-page.png"
+  },
+  {
+    "name": "onboarding-portal",
+    "ok": true,
+    "title": "Configurá tu plataforma",
+    "bodyHead": "Configurá tu plataforma\n\nCompletá los datos y descargá tu configuración\n\n1\nTu Negocio\nIdentidad y contacto\n2\nTu Panel\nURLs y accesos\n3\nTu Marca\nColores e imágenes\n4\nPersonalizar\nBot y mensajes\n🏢\nTu Negocio\n\nContanos sobre tu casino o sala de juegos\n\nNombre del negocio\nNombre corto\n\nSe usa en íconos y espacios reducidos\n\nDescripción\nNombre de contacto\n\nPersona responsable de la configuración\n\nAnte",
+    "file": "/Users/nahuelsantillan/Trabajo/Codigo/Misc/game-automation-platform/tests/fixtures/screenshots/e2e-onboarding-portal.png"
+  },
+  {
+    "name": "owner-dashboard",
+    "ok": true,
+    "title": "Owner Dashboard - Analytics",
+    "bodyHead": "Tio Rico Analytics\n\nAdmin access required\n\nBackend URL\nEmail\nPassword\nLogin",
+    "file": "/Users/nahuelsantillan/Trabajo/Codigo/Misc/game-automation-platform/tests/fixtures/screenshots/e2e-owner-dashboard.png"
+  },
+  {
+    "name": "operator-panel-dashboard",
+    "ok": true,
+    "title": "Panel de Operadores",
+    "bodyHead": "Tio Rico\nPanel de Operadores\nDashboard\nFallos\n5\nTrabajos\nSolicitudes\nChats\nActividad\nBilleteras\nPremios\nPagos\nUsuarios\nPaneles\nExtensiones\nConfiguración\nConectado\n⌨️ Enter: Aprobar • R: Rechazar (motivo) • Esc: Cerrar\nFallos Pendientes\nBots: 1/1 online\nValidador Online\nSin AI\n4m\nKill Switch\nPendientes\nAprobados\nRechazados\nTodos\nExportar\ne2e_user\n43%\n$5.000\nBaja confianza en la validacion\n23m\ne2e_u",
+    "file": "/Users/nahuelsantillan/Trabajo/Codigo/Misc/game-automation-platform/tests/fixtures/screenshots/e2e-operator-panel-dashboard.png"
+  },
+  {
+    "name": "validator-app",
+    "ok": true,
+    "title": "Validador de Comprobantes",
+    "bodyHead": "Tio Rico - Validador\nPrincipal\nOCR Sandbox\n📊 Estado\nBackend\nConectado\nOllama\nCorriendo\nModelo Vision\nllava:latest\nModelo activo:\nllava:latest\nOCR rapido: 0% · OCR agresivo: 0% · Ollama: 0% · Fallidos: 100% (total 1)\n⚙️ Configuracion Inicial\n✅\nOllama (Motor de IA)\n\nOllama esta corriendo\n\n🔄 Verificar\n✅\nModelo de Vision\n\nModelo listo: llava:latest\n\n✅\nConexion al Servidor\nURL del Backend\nAPI Key\nDes",
+    "file": "/Users/nahuelsantillan/Trabajo/Codigo/Misc/game-automation-platform/tests/fixtures/screenshots/e2e-validator-app.png"
+  }
+]

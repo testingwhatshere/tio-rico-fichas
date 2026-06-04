@@ -1,0 +1,29 @@
+{
+  "title": "Panel de Operadores",
+  "bodyHead": "Tio Rico\nPanel de Operadores\nDashboard\nFallos\n1\nTrabajos\nSolicitudes\nChats\nActividad\nBilleteras\nPremios\nPagos\nUsuarios\nPaneles\nExtensiones\nConfiguración\nConectado\n⌨️ Enter: Aprobar • R: Rechazar (motivo) • Esc: Cerrar\nConfiguración\nBot Offline\nValidador Online\nSin AI\n55s\nKill Switch\nConexión al Backend\nURL del Backend\nAPI Key del Operador\nNombre del Operador\nGuardar y Conectar\nProbar Conexión\nContacto de Soporte\n\nEste numero se muestra a los usuarios en la app cuando necesitan ayuda.\n\nNumero de Soporte\nGuardar\nNotificaciones\nSonidos de alerta\nValidaciones fallidas\nTrabajos fallidos\nNuevos mensajes de chat\nEstado de conexión\nTrabajos completados\nConfiguracion del Sistema\n\nAjustes de validacion, cola de trabajos y limites del sistema.\n\nUmbral de validacion (0-1)\nTimeout de validacion (segundos)\nCooldown entre trabajos (segundos)\nMax solicitudes por usuario/hora\nAlerta fichas bajas (umbral)\nEl sistema alerta cuando las fichas del panel bajan de este monto. 0 = desactivado.\nPanel para nuevos usuarios\n-- No crear automaticamente --\nE2E Panel\nCuando un usuario no existe en ningun panel, se crea automaticamente en el panel seleccionado.\nVentana actividad (inicio)\nVentana actividad (fin)\nBot habilitado\nPagos Automaticos\nPago automatico de premios\nRequiere confirmacion manual\nMonto maximo auto-pago ($)\nGuardar Configuracion\nEnviar Promocion\n\nEnvia un mensaje promocional a todos los usuarios de la app (push notification + alerta en app).\n\nTitulo\nMensaje\nEnviar a Todos\nPublicar Actualiz",
+  "visibleButtons": [
+    "Dashboard",
+    "Fallos\n          1",
+    "Trabajos",
+    "Solicitudes",
+    "Chats\n          0",
+    "Actividad",
+    "Billeteras",
+    "Premios\n          0",
+    "Pagos",
+    "Usuarios",
+    "Paneles",
+    "Extensiones",
+    "Configuración",
+    "Kill Switch",
+    "Guardar y Conectar",
+    "Probar Conexión",
+    "Guardar",
+    "Guardar Configuracion",
+    "Enviar a Todos",
+    "Publicar y Notificar",
+    "Agregar",
+    "Restaurar predeterminadas",
+    "Test Conexion"
+  ]
+}

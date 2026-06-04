@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plataforma de Carga Automatizada de Fichas</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+
+  :root {
+    --bg: #0B0F15;
+    --surface: #111827;
+    --surface-light: #1a2332;
+    --emerald: #10B981;
+    --emerald-dim: rgba(16,185,129,0.12);
+    --gold: #F59E0B;
+    --gold-dim: rgba(245,158,11,0.12);
+    --text: #F1F5F9;
+    --muted: rgba(241,245,249,0.55);
+    --faint: rgba(241,245,249,0.2);
+    --border: rgba(241,245,249,0.08);
+    --red: #EF4444;
+    --red-dim: rgba(239,68,68,0.12);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  body {
+    font-family: 'Outfit', system-ui, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    line-height: 1.65;
+    font-size: 16px;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 0 auto;
+    padding: 0;
+    page-break-after: always;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  .page:last-child { page-break-after: auto; }
+
+  /* ===== COVER ===== */
+  .cover {
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 60px 50px;
+    position: relative;
+  }
+
+  .cover::before {
+    content: '';
+    position: absolute;
+    top: -200px;
+    right: -200px;
+    width: 500px;
+    height: 500px;
+    background: radial-gradient(circle, rgba(16,185,129,0.06) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+
+  .cover::after {
+    content: '';
+    position: absolute;
+    bottom: -150px;
+    left: -150px;
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, rgba(245,158,11,0.04) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--emerald);
+    text-transform: uppercase;
+    letter-spacing: 2.5px;
+    padding: 6px 18px;
+    background: var(--emerald-dim);
+    border: 1px solid rgba(16,185,129,0.2);
+    border-radius: 100px;
+    margin-bottom: 40px;
+    position: relative;
+  }
+
+  .badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--emerald);
+  }
+
+  .cover h1 {
+    font-size: 44px;
+    font-weight: 900;
+    line-height: 1.08;
+    margin-bottom: 22px;
+    letter-spacing: -0.04em;
+    position: relative;
+  }
+
+  .accent {
+    background: linear-gradient(135deg, var(--emerald), #34D399, var(--gold));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .cover .subtitle {
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--muted);
+    max-width: 480px;
+    margin-bottom: 55px;
+    line-height: 1.7;
+    position: relative;
+  }
+
+  .cover-stats {
+    display: flex;
+    gap: 40px;
+    position: relative;
+  }
+
+  .cover-stat {
+    text-align: center;
+    padding: 20px 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+  }
+
+  .cover-stat .number {
+    font-size: 34px;
+    font-weight: 900;
+    color: var(--emerald);
+    display: block;
+    line-height: 1.1;
+  }
+
+  .cover-stat .label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--muted);
+    font-weight: 600;
+    margin-top: 4px;
+  }
+
+  .cover-footer {
+    position: absolute;
+    bottom: 30px;
+    font-size: 11px;
+    color: var(--faint);
+    letter-spacing: 0.5px;
+  }
+
+  /* ===== INNER PAGES ===== */
+  .inner { padding: 42px 50px; }
+
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 32px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .page-header h2 {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2.5px;
+    color: var(--emerald);
+  }
+
+  .page-header .page-num {
+    font-size: 11px;
+    color: var(--faint);
+    font-weight: 600;
+  }
+
+  h3 {
+    font-size: 28px;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+    margin-bottom: 8px;
+  }
+
+  h4 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    margin-top: 24px;
+  }
+
+  .section-intro {
+    font-size: 15px;
+    color: var(--muted);
+    margin-bottom: 26px;
+    line-height: 1.7;
+    max-width: 560px;
+  }
+
+  p { margin-bottom: 12px; line-height: 1.7; font-size: 15px; }
+
+  /* Problem / Solution */
+  .problem-box {
+    background: var(--red-dim);
+    border-left: 3px solid var(--red);
+    padding: 15px 20px;
+    border-radius: 0 10px 10px 0;
+    margin-bottom: 12px;
+  }
+
+  .problem-box .label {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--red);
+    margin-bottom: 4px;
+  }
+
+  .problem-box p { font-size: 14.5px; margin: 0; }
+
+  .solution-box {
+    background: var(--emerald-dim);
+    border-left: 3px solid var(--emerald);
+    padding: 18px 22px;
+    border-radius: 0 10px 10px 0;
+    margin-top: 18px;
+  }
+
+  .solution-box .label {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--emerald);
+    margin-bottom: 4px;
+  }
+
+  .solution-box p { font-size: 14.5px; margin: 0; }
+
+  /* Flow steps */
+  .flow-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 18px 0;
+  }
+
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 14px 18px;
+    border-radius: 12px;
+  }
+
+  .flow-step .step-num {
+    background: var(--emerald);
+    color: var(--bg);
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 800;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .flow-step .step-num.gold {
+    background: var(--gold);
+  }
+
+  .flow-step h5 {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+
+  .flow-step p {
+    font-size: 13.5px;
+    color: var(--muted);
+    margin: 0;
+    line-height: 1.55;
+  }
+
+  /* Component cards */
+  .component-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 18px 0;
+  }
+
+  .component-card {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    background: var(--surface);
+  }
+
+  .component-card .card-icon {
+    font-size: 20px;
+    margin-bottom: 6px;
+  }
+
+  .component-card h5 {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .component-card p {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0;
+    line-height: 1.55;
+  }
+
+  .component-card .card-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-top: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .tag-user { background: var(--emerald-dim); color: var(--emerald); }
+  .tag-operator { background: rgba(99,102,241,0.12); color: #818CF8; }
+  .tag-auto { background: var(--gold-dim); color: var(--gold); }
+  .tag-owner { background: rgba(168,85,247,0.12); color: #C084FC; }
+  .tag-marketing { background: rgba(236,72,153,0.12); color: #F472B6; }
+
+  .component-card.full { grid-column: 1 / -1; }
+
+  /* Metrics */
+  .metrics-row {
+    display: flex;
+    gap: 14px;
+    margin: 22px 0;
+  }
+
+  .metric-box {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    text-align: center;
+  }
+
+  .metric-box .value {
+    font-size: 28px;
+    font-weight: 900;
+    color: var(--emerald);
+  }
+
+  .metric-box .desc {
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-top: 4px;
+    font-weight: 500;
+  }
+
+  /* ROI Table */
+  .roi-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 18px 0;
+    font-size: 14px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .roi-table th {
+    background: var(--surface);
+    padding: 11px 16px;
+    text-align: left;
+    font-weight: 700;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .roi-table td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .roi-table tr:last-child td { border-bottom: none; }
+  .roi-table tr:nth-child(even) td { background: rgba(17,24,39,0.3); }
+
+  .highlight { color: var(--emerald); font-weight: 600; }
+  .dim { color: var(--red); font-weight: 500; }
+
+  /* Guarantee grid */
+  .guarantee-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 16px 0;
+  }
+
+  .guarantee-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 13px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+
+  .guarantee-item .check {
+    color: var(--emerald);
+    font-size: 16px;
+    font-weight: 800;
+    flex-shrink: 0;
+    line-height: 1.2;
+  }
+
+  .guarantee-item h5 {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+
+  .guarantee-item p {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin: 0;
+    line-height: 1.4;
+  }
+
+  /* Cost grid */
+  .cost-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin: 14px 0;
+  }
+
+  .cost-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+
+  .cost-item .icon { font-size: 16px; flex-shrink: 0; }
+
+  .cost-item h5 {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 1px;
+  }
+
+  .cost-item p {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin: 0;
+    line-height: 1.4;
+  }
+
+  /* CTA page */
+  .cta-page {
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 60px 50px;
+    position: relative;
+  }
+
+  .cta-page::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 500px;
+    height: 500px;
+    background: radial-gradient(circle, rgba(16,185,129,0.05) 0%, transparent 60%);
+    border-radius: 50%;
+  }
+
+  .cta-page h3 {
+    font-size: 32px;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+    margin-bottom: 14px;
+    position: relative;
+  }
+
+  .cta-page .subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    max-width: 460px;
+    margin-bottom: 40px;
+    position: relative;
+  }
+
+  .cta-includes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 24px;
+    margin-bottom: 50px;
+    text-align: left;
+    max-width: 480px;
+    position: relative;
+  }
+
+  .cta-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--muted);
+  }
+
+  .cta-item .check {
+    color: var(--emerald);
+    font-weight: 800;
+    font-size: 14px;
+  }
+
+  .cta-contact {
+    border-top: 1px solid var(--border);
+    padding-top: 30px;
+    position: relative;
+  }
+
+  .cta-contact .label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 2.5px;
+    color: var(--faint);
+    margin-bottom: 8px;
+    font-weight: 700;
+  }
+
+  .cta-contact .info {
+    font-size: 15px;
+    color: var(--emerald);
+    font-weight: 700;
+  }
+
+  /* Optional feature callout */
+  .optional-box {
+    background: var(--gold-dim);
+    border: 1px solid rgba(245,158,11,0.2);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin-top: 20px;
+  }
+
+  .optional-box .label {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--gold);
+    margin-bottom: 6px;
+  }
+
+  .optional-box p { font-size: 14.5px; margin: 0; line-height: 1.6; }
+
+  /* Print */
+  @media print {
+    body { margin: 0; }
+    .page { margin: 0; box-shadow: none; zoom: 1; }
+  }
+
+  @media screen {
+    body { background: #060810; }
+    .page {
+      box-shadow: 0 4px 40px rgba(0,0,0,0.5);
+      margin: 20px auto;
+      /* Scale up for comfortable screen reading — print stays at A4 size */
+      zoom: 1.4;
+    }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ PAGE 1: COVER ============ -->
+<div class="page cover">
+  <div class="badge">
+    <span class="badge-dot"></span>
+    Documento Informativo &middot; Confidencial
+  </div>
+  <h1>Carga de fichas<br><span class="accent">100% automatizada.</span></h1>
+  <p class="subtitle">
+    Un sistema integral que automatiza el 95% del proceso de carga de fichas
+    en paneles de juego online, reduciendo tiempos de minutos a segundos
+    y eliminando errores humanos.
+  </p>
+  <div class="cover-stats">
+    <div class="cover-stat">
+      <span class="number">95%</span>
+      <span class="label">Automatizado</span>
+    </div>
+    <div class="cover-stat">
+      <span class="number">30s</span>
+      <span class="label">Tiempo promedio</span>
+    </div>
+    <div class="cover-stat">
+      <span class="number">24/7</span>
+      <span class="label">Operativo</span>
+    </div>
+  </div>
+  <div class="cover-footer">Confidencial &mdash; 2026</div>
+</div>
+
+<!-- ============ PAGE 2: EL PROBLEMA ============ -->
+<div class="page inner">
+  <div class="page-header">
+    <h2>El Problema</h2>
+    <span class="page-num">02</span>
+  </div>
+
+  <h3>El proceso manual ya no escala</h3>
+  <p class="section-intro">
+    La carga de fichas depende de cajeros humanos que verifican pagos,
+    buscan usuarios en el panel y cargan cr&eacute;ditos manualmente.
+    Esto genera cuellos de botella que frenan el crecimiento.
+  </p>
+
+  <div class="problem-box">
+    <div class="label">Lentitud</div>
+    <p>Cada carga tarda entre <strong>5 y 15 minutos</strong>. Los usuarios esperan, se frustran y buscan alternativas m&aacute;s r&aacute;pidas.</p>
+  </div>
+
+  <div class="problem-box">
+    <div class="label">Errores constantes</div>
+    <p>Montos equivocados, usuarios confundidos, comprobantes duplicados que pasan desapercibidos. Cada error genera reclamos y p&eacute;rdidas.</p>
+  </div>
+
+  <div class="problem-box">
+    <div class="label">Horario limitado</div>
+    <p>Sin cajeros de madrugada o fines de semana, se pierden cargas. <strong>Los usuarios m&aacute;s activos juegan de noche</strong> y quedan sin servicio.</p>
+  </div>
+
+  <div class="problem-box">
+    <div class="label">Costo de personal</div>
+    <p>M&aacute;s usuarios = m&aacute;s cajeros = m&aacute;s sueldos. El costo crece linealmente con la demanda y <strong>no hay forma de optimizarlo</strong>.</p>
+  </div>
+
+  <div class="solution-box">
+    <div class="label">Nuestra soluci&oacute;n</div>
+    <p>
+      Una plataforma que <strong>automatiza todo el proceso de punta a punta</strong>:
+      desde que el usuario sube su comprobante de pago hasta que las fichas
+      aparecen en su cuenta. Los humanos solo intervienen
+      cuando algo falla &mdash; menos del 5% de los casos.
+    </p>
+  </div>
+</div>
+
+<!-- ============ PAGE 3: COMO FUNCIONA ============ -->
+<div class="page inner">
+  <div class="page-header">
+    <h2>C&oacute;mo Funciona</h2>
+    <span class="page-num">03</span>
+  </div>
+
+  <h3>Tres pasos para el usuario.</h3>
+  <p class="section-intro">
+    La experiencia del usuario final es extremadamente simple.
+    Todo el proceso ocurre en menos de un minuto.
+  </p>
+
+  <div class="flow-steps">
+    <div class="flow-step">
+      <div class="step-num">1</div>
+      <div class="step-content">
+        <h5>Elige su monto</h5>
+        <p>Abre la app, ingresa su usuario del panel de juego y selecciona cu&aacute;ntas fichas quiere cargar. Montos preestablecidos o personalizados.</p>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="step-num">2</div>
+      <div class="step-content">
+        <h5>Transfiere y sube el comprobante</h5>
+        <p>Realiza la transferencia (MercadoPago, CBU, billetera virtual) y sube la foto o PDF del comprobante directamente desde la app.</p>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="step-num">3</div>
+      <div class="step-content">
+        <h5>Recibe sus fichas autom&aacute;ticamente</h5>
+        <p>Las fichas se cargan en ~30 segundos. Recibe notificaci&oacute;n en tiempo real confirmando la carga exitosa.</p>
+      </div>
+    </div>
+  </div>
+
+  <h4>Qu&eacute; pasa internamente (4 etapas autom&aacute;ticas)</h4>
+  <div class="flow-steps">
+    <div class="flow-step">
+      <div class="step-num gold">A</div>
+      <div class="step-content">
+        <h5>Validaci&oacute;n con Inteligencia Artificial</h5>
+        <p>Un modelo de IA analiza el comprobante: verifica monto, fecha, autenticidad y detecta duplicados. Aprueba autom&aacute;ticamente en el 90%+ de los casos.</p>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="step-num gold">B</div>
+      <div class="step-content">
+        <h5>Verificaci&oacute;n real del pago</h5>
+        <p>Una extensi&oacute;n dedicada ingresa a la billetera digital y confirma que el dinero efectivamente lleg&oacute;. Hasta que no se verifica la transferencia real, no se aprueba la carga.</p>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="step-num gold">C</div>
+      <div class="step-content">
+        <h5>Carga autom&aacute;tica en el panel</h5>
+        <p>Un navegador real (no un bot detectable) opera el panel de juego como lo har&iacute;a un humano: busca al usuario, ingresa el monto y confirma la carga. Indetectable y seguro.</p>
+      </div>
+    </div>
+
+    <div class="flow-step">
+      <div class="step-num gold">D</div>
+      <div class="step-content">
+        <h5>Confirmaci&oacute;n instant&aacute;nea</h5>
+        <p>El usuario recibe notificaci&oacute;n en la app. El operador ve todo en su dashboard en tiempo real. Todo queda registrado con captura de pantalla.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PAGE 4: COMPONENTES 1/2 ============ -->
+<div class="page inner">
+  <div class="page-header">
+    <h2>Componentes del Sistema</h2>
+    <span class="page-num">04</span>
+  </div>
+
+  <h3>9 aplicaciones integradas</h3>
+  <p class="section-intro">
+    Una suite completa que cubre todo el ciclo: desde la solicitud del
+    usuario hasta la carga efectiva y el monitoreo del negocio.
+  </p>
+
+  <div class="component-grid">
+    <div class="component-card">
+      <div class="card-icon">&#128241;</div>
+      <h5>App de Chat (M&oacute;vil)</h5>
+      <p>Aplicaci&oacute;n para Android con interfaz tipo WhatsApp. El usuario chatea, elige montos, sube comprobantes y recibe notificaciones en tiempo real.</p>
+      <span class="card-tag tag-user">Usuario final</span>
+    </div>
+
+    <div class="component-card">
+      <div class="card-icon">&#127760;</div>
+      <h5>App de Chat (Web)</h5>
+      <p>Versi&oacute;n web accesible desde cualquier navegador. Ideal para usuarios de iOS o quienes prefieren no descargar la app.</p>
+      <span class="card-tag tag-user">Usuario final</span>
+    </div>
+
+    <div class="component-card">
+      <div class="card-icon">&#128187;</div>
+      <h5>Panel de Operadores (Escritorio)</h5>
+      <p>App de escritorio para supervisar el sistema. Dashboard en tiempo real, gesti&oacute;n de fallos, chat con usuarios y bot&oacute;n de emergencia.</p>
+      <span class="card-tag tag-operator">Operador</span>
+    </div>
+
+    <div class="component-card">
+      <div class="card-icon">&#128242;</div>
+      <h5>Panel de Operadores (M&oacute;vil)</h5>
+      <p>Versi&oacute;n m&oacute;vil del panel. Monitorea y responde a fallos desde el celular. Ideal para supervisi&oacute;n fuera de horario.</p>
+      <span class="card-tag tag-operator">Operador</span>
+    </div>
+
+    <div class="component-card">
+      <div class="card-icon">&#129302;</div>
+      <h5>Validador con IA</h5>
+      <p>Inteligencia artificial que analiza comprobantes de pago autom&aacute;ticamente. Verifica monto, fecha, autenticidad y detecta duplicados con +90% de precisi&oacute;n.</p>
+      <span class="card-tag tag-auto">Autom&aacute;tico</span>
+    </div>
+
+    <div class="component-card">
+      <div class="card-icon">&#9989;</div>
+      <h5>Verificador de Pagos</h5>
+      <p>Extensi&oacute;n que verifica en la billetera digital que el dinero efectivamente lleg&oacute;. Cruza datos con el comprobante para prevenir fraudes.</p>
+      <span class="card-tag tag-auto">Autom&aacute;tico</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PAGE 5: COMPONENTES 2/2 ============ -->
+<div class="page inner">
+  <div class="page-header">
+    <h2>Componentes del Sistema</h2>
+    <span class="page-num">05</span>
+  </div>
+
+  <div class="component-grid">
+    <div class="component-card">
+      <div class="card-icon">&#9881;&#65039;</div>
+      <h5>Bot de Carga Autom&aacute;tica</h5>
+      <p>Extensi&oacute;n de navegador que opera el panel como un humano real: busca usuarios, ingresa montos, confirma cargas. Usa Chrome real &mdash; pr&aacute;cticamente indetectable.</p>
+      <span class="card-tag tag-auto">Autom&aacute;tico</span>
+    </div>
+
+    <div class="component-card">
+      <div class="card-icon">&#128200;</div>
+      <h5>Dashboard del Due&ntilde;o</h5>
+      <p>Panel de anal&iacute;ticas con m&eacute;tricas del negocio: ingresos, volumen, tasa de &eacute;xito, rendimiento. Informaci&oacute;n ejecutiva para tomar decisiones.</p>
+      <span class="card-tag tag-owner">Due&ntilde;o</span>
+    </div>
+
+    <div class="component-card full">
+      <div class="card-icon">&#127959;&#65039;</div>
+      <h5>Landing Page</h5>
+      <p>P&aacute;gina web de presentaci&oacute;n donde los usuarios descargan la app. Incluye link de descarga del APK para Android y acceso a la versi&oacute;n web. Personalizable con su marca.</p>
+      <span class="card-tag tag-marketing">Marketing</span>
+    </div>
+  </div>
+
+  <h4>C&oacute;mo se conectan</h4>
+  <p style="color: var(--muted); font-size: 14.5px;">Todas las aplicaciones est&aacute;n conectadas en tiempo real. Cuando un usuario sube un comprobante, todo el sistema se activa instant&aacute;neamente:</p>
+
+  <div class="flow-steps" style="margin-top: 14px;">
+    <div class="flow-step">
+      <div class="step-num">1</div>
+      <div class="step-content">
+        <h5>Usuario sube comprobante</h5>
+        <p>La app de chat env&iacute;a el comprobante al servidor central.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">2</div>
+      <div class="step-content">
+        <h5>IA valida el comprobante</h5>
+        <p>El validador analiza el comprobante y verifica monto, fecha y autenticidad.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">3</div>
+      <div class="step-content">
+        <h5>Extensi&oacute;n verifica el pago real</h5>
+        <p>Se confirma en la billetera digital que la transferencia efectivamente lleg&oacute;.</p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="step-num">4</div>
+      <div class="step-content">
+        <h5>Bot carga las fichas</h5>
+        <p>Las fichas se cargan autom&aacute;ticamente en el panel. El operador ve todo en su dashboard. El usuario recibe notificaci&oacute;n.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="optional-box">
+    <div class="label">Funcionalidad adicional</div>
+    <p>
+      <strong>Pago autom&aacute;tico de premios:</strong> opcionalmente, el sistema tambi&eacute;n puede
+      procesar el cobro de premios de los jugadores. El usuario reclama su premio desde la app,
+      el sistema verifica las fichas disponibles y realiza la transferencia autom&aacute;ticamente,
+      eliminando otro proceso manual.
+    </p>
+  </div>
+</div>
+
+<!-- ============ PAGE 6: METRICAS Y ROI ============ -->
+<div class="page inner">
+  <div class="page-header">
+    <h2>M&eacute;tricas y Retorno</h2>
+    <span class="page-num">06</span>
+  </div>
+
+  <h3>N&uacute;meros que hablan solos</h3>
+  <p class="section-intro">
+    Comparativa directa entre el proceso manual actual y la plataforma automatizada.
+  </p>
+
+  <table class="roi-table">
+    <thead>
+      <tr>
+        <th>M&eacute;trica</th>
+        <th>Proceso Manual</th>
+        <th>Con la Plataforma</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Tiempo por carga</td>
+        <td class="dim">5 - 15 minutos</td>
+        <td class="highlight">~30 segundos</td>
+      </tr>
+      <tr>
+        <td>Capacidad diaria</td>
+        <td class="dim">50 - 100 cargas (con 2 cajeros)</td>
+        <td class="highlight">500+ cargas (sin l&iacute;mite pr&aacute;ctico)</td>
+      </tr>
+      <tr>
+        <td>Disponibilidad</td>
+        <td class="dim">Solo en horario laboral</td>
+        <td class="highlight">24 horas, 7 d&iacute;as</td>
+      </tr>
+      <tr>
+        <td>Personal necesario</td>
+        <td class="dim">2-3 cajeros a tiempo completo</td>
+        <td class="highlight">1 supervisor part-time</td>
+      </tr>
+      <tr>
+        <td>Errores humanos</td>
+        <td class="dim">Frecuentes (montos, usuarios)</td>
+        <td class="highlight">Pr&aacute;cticamente eliminados</td>
+      </tr>
+      <tr>
+        <td>Intervenci&oacute;n humana</td>
+        <td class="dim">100% de las cargas</td>
+        <td class="highlight">&lt;5% de las cargas</td>
+      </tr>
+      <tr>
+        <td>Detecci&oacute;n de fraude</td>
+        <td class="dim">Manual, se escapan</td>
+        <td class="highlight">IA + verificaci&oacute;n real, 100%</td>
+      </tr>
+      <tr>
+        <td>Auditor&iacute;a</td>
+        <td class="dim">Parcial o inexistente</td>
+        <td class="highlight">Completa con capturas</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="metrics-row">
+    <div class="metric-box">
+      <div class="value">500+</div>
+      <div class="desc">Cargas diarias posibles</div>
+    </div>
+    <div class="metric-box">
+      <div class="value">95%</div>
+      <div class="desc">Totalmente autom&aacute;tico</div>
+    </div>
+    <div class="metric-box">
+      <div class="value">24/7</div>
+      <div class="desc">Sin pausas ni horarios</div>
+    </div>
+  </div>
+
+  <h4>Ahorro real en personal</h4>
+  <p>
+    El mayor costo operativo es el personal: cajeros que verifican pagos, buscan usuarios
+    y cargan fichas todo el d&iacute;a. Con la plataforma, <strong>esos puestos se eliminan casi
+    por completo</strong>. Solo se necesita un supervisor que revise los casos excepcionales
+    (&lt;5%), una tarea que puede hacer desde el celular en minutos por d&iacute;a.
+  </p>
+
+  <h4>Costos operativos m&iacute;nimos</h4>
+  <p style="color: var(--muted); font-size: 14.5px; margin-bottom: 10px;">
+    El sistema se entrega instalado en una computadora dedicada, lista para funcionar.
+    Los &uacute;nicos costos recurrentes son:
+  </p>
+  <div class="cost-grid">
+    <div class="cost-item">
+      <span class="icon">&#9729;&#65039;</span>
+      <div>
+        <h5>Hosting del servidor</h5>
+        <p>Un servicio en la nube de bajo costo para el backend.</p>
+      </div>
+    </div>
+    <div class="cost-item">
+      <span class="icon">&#127760;</span>
+      <div>
+        <h5>Dominio web</h5>
+        <p>Un dominio propio para la landing y la app web.</p>
+      </div>
+    </div>
+    <div class="cost-item">
+      <span class="icon">&#128274;</span>
+      <div>
+        <h5>VPN (opcional)</h5>
+        <p>Conexi&oacute;n segura entre el equipo y el servidor.</p>
+      </div>
+    </div>
+    <div class="cost-item">
+      <span class="icon">&#10003;</span>
+      <div>
+        <h5>Nada m&aacute;s</h5>
+        <p>Sin licencias mensuales, sin costos ocultos.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PAGE 7: GARANTIAS ============ -->
+<div class="page inner">
+  <div class="page-header">
+    <h2>Seguridad y Garant&iacute;as</h2>
+    <span class="page-num">07</span>
+  </div>
+
+  <h3>Dise&ntilde;ado para ser seguro</h3>
+  <p class="section-intro">
+    Cada componente fue construido con la seguridad y la confiabilidad
+    como prioridad absoluta.
+  </p>
+
+  <div class="guarantee-grid">
+    <div class="guarantee-item">
+      <span class="check">&#10003;</span>
+      <div>
+        <h5>Navegador real, indetectable</h5>
+        <p>Usa Chrome real, no herramientas de automatizaci&oacute;n. Pr&aacute;cticamente imposible de detectar.</p>
+      </div>
+    </div>
+
+    <div class="guarantee-item">
+      <span class="check">&#10003;</span>
+      <div>
+        <h5>Comportamiento humano</h5>
+        <p>Delays aleatorios, escritura natural, movimientos de mouse. Imita a un operador real.</p>
+      </div>
+    </div>
+
+    <div class="guarantee-item">
+      <span class="check">&#10003;</span>
+      <div>
+        <h5>Bot&oacute;n de emergencia</h5>
+        <p>Kill switch desde el panel y desde el celular. Detiene todo instant&aacute;neamente.</p>
+      </div>
+    </div>
+
+    <div class="guarantee-item">
+      <span class="check">&#10003;</span>
+      <div>
+        <h5>Auditor&iacute;a completa</h5>
+        <p>Cada acci&oacute;n registrada con fecha, hora y captura de pantalla.</p>
+      </div>
+    </div>
+
+    <div class="guarantee-item">
+      <span class="check">&#10003;</span>
+      <div>
+        <h5>Una carga a la vez</h5>
+        <p>Procesa de a una, con cooldown entre operaciones. Sin patrones sospechosos.</p>
+      </div>
+    </div>
+
+    <div class="guarantee-item">
+      <span class="check">&#10003;</span>
+      <div>
+        <h5>Detecci&oacute;n de fraude</h5>
+        <p>IA detecta duplicados y montos alterados. Verificaci&oacute;n real en billetera.</p>
+      </div>
+    </div>
+
+    <div class="guarantee-item">
+      <span class="check">&#10003;</span>
+      <div>
+        <h5>Alertas en tiempo real</h5>
+        <p>Notificaciones via Telegram y en la app cuando algo requiere atenci&oacute;n.</p>
+      </div>
+    </div>
+
+    <div class="guarantee-item">
+      <span class="check">&#10003;</span>
+      <div>
+        <h5>Sin reintentos autom&aacute;ticos</h5>
+        <p>Si algo falla, se detiene y alerta. Nunca reintenta solo.</p>
+      </div>
+    </div>
+  </div>
+
+  <h4>Personalizaci&oacute;n completa</h4>
+  <p>
+    La plataforma se entrega personalizada con la marca de su negocio:
+    nombre, colores, logo, app con su identidad visual. Sus usuarios nunca ver&aacute;n
+    una marca ajena &mdash; es como si fuera un desarrollo propio.
+  </p>
+
+  <h4>Campa&ntilde;a de promoci&oacute;n incluida</h4>
+  <p>
+    La entrega incluye una <strong>campa&ntilde;a de comunicaci&oacute;n lista para usar</strong>:
+    material gr&aacute;fico para redes sociales y grupos, instrucciones paso a paso para los
+    usuarios, y un plan de transici&oacute;n gradual para que los clientes actuales adopten
+    el nuevo sistema de forma natural y sin fricci&oacute;n.
+  </p>
+</div>
+
+<!-- ============ PAGE 8: CTA ============ -->
+<div class="page cta-page">
+  <div class="badge" style="margin-bottom: 30px;">
+    <span class="badge-dot"></span>
+    Pr&oacute;ximos pasos
+  </div>
+
+  <h3>Automatice su operaci&oacute;n<br>de <span class="accent">fichas hoy</span></h3>
+  <p class="subtitle">
+    Todo lo que necesita para transformar su proceso de carga manual
+    en una operaci&oacute;n autom&aacute;tica, confiable y escalable.
+  </p>
+
+  <div class="cta-includes">
+    <div class="cta-item"><span class="check">&#10003;</span> App m&oacute;vil personalizada</div>
+    <div class="cta-item"><span class="check">&#10003;</span> App web para iOS</div>
+    <div class="cta-item"><span class="check">&#10003;</span> Panel de operadores</div>
+    <div class="cta-item"><span class="check">&#10003;</span> Validador con IA</div>
+    <div class="cta-item"><span class="check">&#10003;</span> Verificador de pagos</div>
+    <div class="cta-item"><span class="check">&#10003;</span> Bot de carga autom&aacute;tica</div>
+    <div class="cta-item"><span class="check">&#10003;</span> Dashboard de anal&iacute;ticas</div>
+    <div class="cta-item"><span class="check">&#10003;</span> Landing page con su marca</div>
+    <div class="cta-item"><span class="check">&#10003;</span> Computadora con sistema instalado</div>
+    <div class="cta-item"><span class="check">&#10003;</span> Campa&ntilde;a de promoci&oacute;n</div>
+    <div class="cta-item"><span class="check">&#10003;</span> Soporte y mantenimiento</div>
+    <div class="cta-item"><span class="check">&#10003;</span> Actualizaciones incluidas</div>
+  </div>
+
+  <div class="cta-contact">
+    <div class="label">Contacto</div>
+    <div class="info" style="margin-bottom: 30px;">Consulte por disponibilidad y planes</div>
+    <div style="font-size: 11px; color: var(--faint);">
+      Confidencial &mdash; 2026
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,569 @@
+.form-dark input[type='password'],
+.form-dark input[type='text'] {
+  color: var(--color-dark);
+}
+.form-dark .md-form label {
+  color: var(--color-dark);
+}
+/*---------------*/
+
+.fanpoker {
+  background: var(--bg-fanpoker) !important;
+  background-size: cover !important;
+}
+.fanpoker .card.card-cascade.narrower {
+  margin-top: 0;
+  background: transparent !important;
+  max-width: 300px;
+  margin: auto;
+  box-shadow: none;
+}
+.fanpoker .card-header-title {
+  color: var(--color) !important;
+  font-weight: 700 !important;
+}
+.fanpoker .fanpoker .form-dark input[type='password'],
+.fanpoker .form-dark input[type='text'] {
+  color: var(--color-dark) !important;
+}
+.fanpoker .form-dark .md-form label {
+  color: var(--color-dark) !important;
+}
+
+.fanpoker .text-white {
+  color: var(--color-dark) !important;
+}
+.fanpoker .card.card-cascade.narrower .view.view-cascade {
+  background: (0deg, var(--header-gradient-login));
+  border: 1px solid #7101b5;
+}
+
+/*---------------*/
+
+.apuestoenvivo {
+  background: var(--bg-apuesto) !important;
+  background-size: cover !important;
+}
+.apuestoenvivo .img-login {
+  margin-top: 20px !important;
+}
+
+.apuestaenvivo {
+  background: var(--bg-apuesto) !important;
+  background-size: cover !important;
+}
+.apuestaenvivo .img-login {
+  margin-top: 20px !important;
+}
+.apuestaenvivo-mode .form-dark .md-form label {
+  color: var(--color-header) !important;
+}
+.apuestaenvivo-mode .text-white {
+  color: var(--color-header) !important;
+}
+.apuestaenvivo-mode .form-dark input[type='password'],
+.apuestaenvivo-mode .form-dark input[type='text'] {
+  color: var(--color-header) !important;
+}
+
+/*---------------*/
+
+.granmontecarlo .img-login {
+  margin-top: 20px !important;
+}
+.granmontecarlo-mode .granmontecarlo {
+  background: var(--bg-granmontecarlo) !important;
+  background-size: cover !important;
+}
+.granmontecarlo-mode .form-dark .md-form label {
+  color: var(--color-header) !important;
+}
+.granmontecarlo-mode .text-white {
+  color: var(--color-header) !important;
+}
+.granmontecarlo-mode .form-dark input[type='password'],
+.granmontecarlo-mode .form-dark input[type='text'] {
+  color: var(--color-header) !important;
+}
+
+/*---------------*/
+
+.alhibet .img-login {
+  margin-top: 20px !important;
+}
+
+.alhibet-mode .alhibet {
+  background: var(--bg-alhibet) !important;
+  background-size: cover !important;
+}
+.alhibet-mode .form-dark .md-form label {
+  color: var(--color-header) !important;
+}
+.alhibet-mode .text-white {
+  color: var(--color-header) !important;
+}
+.alhibet-mode .form-dark input[type='password'],
+.alhibet-mode .form-dark input[type='text'] {
+  color: var(--color-header) !important;
+}
+
+/*---------------*/
+
+.areabet .img-login {
+  margin-top: 20px !important;
+}
+
+.areabet-mode .areabet {
+  background: var(--bg-areabet) !important;
+  background-size: cover !important;
+}
+.areabet-mode .form-dark .md-form label {
+  color: var(--color-header) !important;
+}
+.areabet-mode .text-white {
+  color: var(--color-header) !important;
+}
+.areabet-mode .form-dark input[type='password'],
+.areabet-mode .form-dark input[type='text'] {
+  color: var(--color-header) !important;
+}
+
+/*---------------*/
+
+.starwin .img-login {
+  margin-top: 20px !important;
+}
+
+.starwin-mode .starwin {
+  background: var(--bg-starwin) !important;
+  background-size: cover !important;
+}
+.starwin-mode .form-dark .md-form label {
+  color: var(--color-header) !important;
+}
+.starwin-mode .text-white {
+  color: var(--color-header) !important;
+}
+.starwin-mode .form-dark input[type='password'],
+.starwin-mode .form-dark input[type='text'] {
+  color: var(--color-header) !important;
+}
+
+/*---------------*/
+
+.dark .form-dark .md-form label {
+  color: var(--color-dark) !important;
+}
+.dark .text-white {
+  color: var(--color-dark) !important;
+}
+.dark .form-dark input[type='password'],
+.dark .form-dark input[type='text'] {
+  color: var(--color-dark) !important;
+}
+
+/*---------------*/
+
+.darked-mode .form-dark .md-form label {
+  color: var(--color-header) !important;
+}
+.darked-mode .text-white {
+  color: var(--color-header) !important;
+}
+.darked-mode .form-dark input[type='password'],
+.darked-mode .form-dark input[type='text'] {
+  color: var(--color-header) !important;
+}
+
+/*---------------*/
+
+.brossbet .img-login {
+  margin-top: 20px !important;
+}
+
+.brossbet-mode .brossbet {
+  background: var(--bg-brossbet) !important;
+  background-size: cover !important;
+}
+
+/*---------------*/
+
+.grancasino-mode .grancasino {
+  background: var(--bg-grancasino) !important;
+  background-size: cover !important;
+}
+.grancasino .img-login {
+  margin-top: 20px !important;
+}
+
+/*---------------*/
+.tiorico-mode .tiorico {
+  background: var(--bg-tiorico) !important;
+  background-size: cover !important;
+}
+.tiorico .img-login {
+  margin-top: 20px !important;
+}
+.tiorico-mode .form-dark .md-form label {
+  color: var(--color-header) !important;
+}
+.tiorico-mode .text-white {
+  color: var(--color-header) !important;
+}
+.tiorico-mode .form-dark input[type='password'],
+.tiorico-mode .form-dark input[type='text'] {
+  color: var(--color-header) !important;
+}
+
+/*---------------*/
+.zebra-mode .zebra {
+  background: var(--bg-zebra) !important;
+  background-size: cover !important;
+}
+.zebra-mode .casinozebra {
+  background: var(--bg-zebra) !important;
+  background-size: cover !important;
+}
+.zebra .img-login {
+  margin-top: 20px !important;
+}
+.zebra-mode .form-dark .md-form label {
+  color: var(--color-header) !important;
+}
+.zebra-mode .text-white {
+  color: var(--color-header) !important;
+}
+.zebra-mode .form-dark input[type='password'],
+.zebra-mode .form-dark input[type='text'] {
+  color: var(--color-header) !important;
+}
+
+/*---------------*/
+.casinohorus-mode .casinohorus {
+  background: var(--bg-casinohorus) !important;
+  background-size: cover !important;
+}
+
+.casinohorus-mode .form-dark .md-form label {
+  color: var(--color-header) !important;
+}
+.casinohorus-mode .text-white {
+  color: var(--color-header) !important;
+}
+.casinohorus-mode .form-dark input[type='password'],
+.casinohorus-mode .form-dark input[type='text'] {
+  color: var(--color-header) !important;
+}
+
+/*---------------*/
+
+.black-mode .form-dark .md-form label {
+  color: var(--color-header) !important;
+}
+.black-mode .text-white {
+  color: var(--color-header) !important;
+}
+.black-mode .form-dark input[type='password'],
+.black-mode .form-dark input[type='text'] {
+  color: var(--color-header) !important;
+}
+
+/*---------------*/
+
+.juegodorado-mode .form-dark .md-form label {
+  color: var(--color-header) !important;
+}
+.juegodorado-mode .text-white {
+  color: var(--color-header) !important;
+}
+.juegodorado-mode .form-dark input[type='password'],
+.juegodorado-mode .form-dark input[type='text'] {
+  color: var(--color-header) !important;
+}
+
+.betsecret-mode {
+  background: var(--bg-betsecret) !important;
+}
+.betsecret-mode .login .card.card-cascade.narrower {
+  background: #3a3a3a !important;
+}
+.betsecret-mode .login .form-dark .md-form label {
+  color: #ffffff !important;
+}
+
+.ganaencasa-mode {
+  background: var(--bg-gana) !important;
+}
+.ganaencasa-mode .login .card.card-cascade.narrower {
+  background: #3a3a3a !important;
+}
+.ganaencasa-mode .login .form-dark .md-form label {
+  color: #ffffff !important;
+}
+
+.ganaencasaa-mode {
+  background: var(--bg-gana) !important;
+}
+.ganaencasaa-mode .login .card.card-cascade.narrower {
+  background: #3a3a3a !important;
+}
+.ganaencasaa-mode .login .form-dark .md-form label {
+  color: #ffffff !important;
+}
+
+.fortunagaucha-mode {
+  background: var(--bg-gaucha) !important;
+}
+.fortunagaucha-mode .login .card.card-cascade.narrower {
+  background: #3a3a3a14 !important;
+}
+.fortunagaucha-mode .login .form-dark .md-form label {
+  color: #ffffff !important;
+}
+.fortunagaucha-mode body {
+  background: transparent !important;
+  background-size: cover !important;
+}
+/*---*/
+.supervikingo-mode {
+  background: var(--bg-vikingo) !important;
+}
+.supervikingo-mode .login .card.card-cascade.narrower {
+  background: #0000008a !important;
+}
+.supervikingo-mode .login .form-dark .md-form label {
+  color: #ffffff !important;
+}
+.supervikingo-mode body {
+  background: transparent !important;
+  background-size: cover !important;
+}
+/*---*/
+.casino77-mode {
+  background: var(--bg-casino77) !important;
+}
+.casino77-mode .login .card.card-cascade.narrower {
+  background: #000000e0 !important;
+}
+.casino77-mode .login .form-dark .md-form label {
+  color: #ffffff !important;
+}
+.casino77-mode body {
+  background: transparent !important;
+  background-size: cover !important;
+}
+/*---*/
+.barbaroja-mode {
+  background: var(--bg-barbaroja) !important;
+}
+.barbaroja-mode .login .card.card-cascade.narrower {
+  background: #262626e0 !important;
+}
+.barbaroja-mode .login .form-dark .md-form label {
+  color: #ffffff !important;
+}
+.barbaroja-mode body {
+  background: transparent !important;
+  background-size: cover !important;
+}
+.barbaroja-mode .peach-gradient {
+  background: linear-gradient(40deg, #5a0707, #ff0000) !important;
+}
+/*---*/
+.allwin-mode {
+  background: var(--bg-barbaroja) !important;
+}
+.allwin-mode .login .card.card-cascade.narrower {
+  background: #242424 !important;
+  box-shadow: none;
+}
+.allwin-mode .login .form-dark .md-form label {
+  color: #6d6b6b !important;
+}
+.allwin-mode body {
+  background: #242424 !important;
+  background-size: cover !important;
+}
+.allwin-mode .peach-gradient {
+  background: #fa5b0f !important;
+  border-radius: 20px;
+}
+.allwin-mode .form-control {
+  background-color: #3a3a3a;
+  padding-left: 10px !important;
+}
+.allwin-mode .md-form .prefix {
+  display: none;
+}
+.allwin-mode .md-form input[type='text']:not(.browser-default),
+.allwin-mode .md-form input[type='password']:not(.browser-default) {
+  background-color: #343434 !important;
+  border: none !important;
+  width: 100% !important;
+  margin-left: 0 !important;
+}
+/*---*/
+.queenpanther-mode {
+  background: var(--bg-barbaroja) !important;
+}
+.queenpanther-mode .login .card.card-cascade.narrower {
+  background: #1b2b2a !important;
+  box-shadow: none;
+}
+.queenpanther-mode .login .form-dark .md-form label {
+  color: #fff !important;
+}
+.queenpanther-mode body {
+  background: #223c3b
+    url('https://queenpanther.bet/assets/template/queenpanter/img/background.jpg') !important;
+  background-size: cover !important;
+}
+.queenpanther-mode .md-form .prefix ~ label {
+  margin-left: 0 !important;
+}
+.queenpanther-mode .peach-gradient {
+  background: #807e5a !important;
+  border-radius: 20px;
+}
+.queenpanther-mode .form-control {
+  background-color: #3a3a3a;
+  padding-left: 10px !important;
+}
+.queenpanther-mode .md-form .prefix {
+  display: none;
+}
+.queenpanther-mode .md-form input[type='text']:not(.browser-default),
+.queenpanther-mode .md-form input[type='password']:not(.browser-default) {
+  background-color: #343434 !important;
+  border: none !important;
+  width: 100% !important;
+  margin-left: 0 !important;
+}
+/*---*/
+.fortubet-mode {
+  background: var(--bg-fortubet) !important;
+}
+.fortubet-mode .login .card.card-cascade.narrower {
+  background: #000000e0 !important;
+}
+.fortubet-mode .login .form-dark .md-form label {
+  color: #ffffff !important;
+}
+.fortubet-mode body {
+  background: transparent !important;
+  background-size: cover !important;
+}
+.fortubet-mode .peach-gradient {
+  background: linear-gradient(40deg, #7526d1, #673ab7) !important;
+}
+
+.ganabiz-mode body {
+  background: var(--bg-ganabiz) !important;
+}
+.ganabiz-mode .login .card.card-cascade.narrower {
+  background: #5d5d5d !important;
+}
+.ganabiz-mode .login .form-dark .md-form label {
+  color: #fff !important;
+}
+.ganabiz-mode .form-control {
+  background-color: #3a3a3a;
+  color: #fff !important;
+  padding-left: 10px !important;
+}
+.ganabiz-mode .md-form input[type='text']:not(.browser-default),
+.ganabiz-mode .md-form input[type='password']:not(.browser-default) {
+  background-color: #343434 !important;
+  border: none !important;
+}
+.ganabiz-mode .peach-gradient {
+  background: linear-gradient(40deg, #ffc107, #65410c) !important;
+}
+
+/*---------------*/
+.tab-pane-1 .md-form .active {
+  color: var(--color-dark) !important;
+  font-family: 'Font Awesome 5 Free';
+}
+.prefix.active {
+  font-family: 'Font Awesome 5 Free';
+}
+@media screen and (max-width: 1200px) {
+  .fanpoker {
+    background: var(--bg-fanpoker-admin);
+    background-size: cover !important;
+  }
+  .fanpoker .card.card-cascade.narrower {
+    margin-top: 0;
+    background: var(--color) !important;
+  }
+  .fanpoker .card-header-title {
+    color: var(--color) !important;
+    font-weight: 700 !important;
+  }
+  .fanpoker .fanpoker .form-dark input[type='password'],
+  .fanpoker .form-dark input[type='text'] {
+    color: var(--color-dark) !important;
+  }
+  .form-dark .md-form label {
+    color: var(--color-dark) !important;
+  }
+  .fanpoker .text-white {
+    color: var(--color-dark) !important;
+  }
+  .fanpoker .card.card-cascade.narrower .view.view-cascade {
+    background: (0deg, var(--header-gradient-login));
+    border: 1px solid #7101b5;
+  }
+  .dark .form-dark .md-form label {
+    color: var(--color-dark) !important;
+  }
+  .dark .text-white {
+    color: var(--color-dark) !important;
+  }
+  .dark .form-dark input[type='password'],
+  .dark .form-dark input[type='text'] {
+    color: var(--color-dark) !important;
+  }
+}
+@media screen and (min-width: 1200px) {
+  .fanpoker {
+    background: var(--bg-fanpoker);
+    background-size: cover !important;
+  }
+  .fanpoker .card.card-cascade.narrower {
+    margin-top: 0;
+    background: var(--color) !important;
+    max-width: 300px;
+    margin: auto;
+    box-shadow: none;
+  }
+  .fanpoker .card-header-title {
+    color: var(--color) !important;
+    font-weight: 700 !important;
+  }
+  .fanpoker .fanpoker .form-dark input[type='password'],
+  .fanpoker .form-dark input[type='text'] {
+    color: var(--color-dark) !important;
+  }
+  .fanpoker .form-dark .md-form label {
+    color: var(--color-dark) !important;
+  }
+  .fanpoker .text-white {
+    color: var(--color-dark) !important;
+  }
+  .fanpoker .card.card-cascade.narrower .view.view-cascade {
+    background: (0deg, var(--header-gradient-login));
+    border: 1px solid #7101b5;
+  }
+  .dark .form-dark .md-form label {
+    color: var(--color-dark) !important;
+  }
+  .dark .text-white {
+    color: var(--color-dark) !important;
+  }
+  .dark .form-dark input[type='password'],
+  .dark .form-dark input[type='text'] {
+    color: var(--color-dark) !important;
+  }
+}

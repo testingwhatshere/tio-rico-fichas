@@ -1,0 +1,77 @@
+# ============================================
+# RENDER BLUEPRINT - Game Automation Platform
+# ============================================
+# Deploy: Dashboard > New > Blueprint > connect repo
+# Render reads this file from the repo root.
+#
+# PostgreSQL only (no Redis). BullMQ replaced by
+# Prisma-backed queue for simplicity on free tier.
+
+services:
+  - type: web
+    name: tiorico-api
+    runtime: node
+    region: oregon
+    plan: free
+    rootDir: apps/backend-api
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npx prisma migrate deploy && npm run start:prod
+    healthCheckPath: /api/health
+    envVars:
+      # ---- Core ----
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+
+      # ---- Database (auto-linked from Render Postgres) ----
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tiorico-db
+          property: connectionString
+
+      # ---- Auth ----
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+
+      # ---- API Keys (auto-generated, copy to extension/panel/validator after deploy) ----
+      - key: BOT_API_KEY
+        generateValue: true
+      - key: OPERATOR_API_KEY
+        generateValue: true
+      - key: VALIDATOR_API_KEY
+        generateValue: true
+
+      # ---- Cloudinary (for payment proof uploads) ----
+      # Set manually after deploy: CLOUDINARY_URL=cloudinary://key:secret@cloud
+      - key: CLOUDINARY_URL
+        sync: false
+
+      # ---- CORS (set to your frontend URLs, comma-separated) ----
+      # Example: https://tiorico-chat.expo.dev,https://your-panel-url.com
+      - key: CORS_ORIGIN
+        value: "*"
+
+      # ---- Queue & Limits ----
+      - key: QUEUE_COOLDOWN_MS
+        value: "30000"
+      - key: MAX_REQUEST_AMOUNT
+        value: "10000"
+      - key: MAX_REQUESTS_PER_HOUR
+        value: "10"
+
+      # ---- Automation ----
+      - key: AUTOMATION_ENABLED
+        value: "true"
+      - key: VALIDATION_THRESHOLD
+        value: "0.8"
+      - key: VALIDATION_TIMEOUT_MS
+        value: "90000"
+
+databases:
+  - name: tiorico-db
+    plan: free
+    region: oregon
+    postgresMajorVersion: 16

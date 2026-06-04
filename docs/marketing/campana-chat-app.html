@@ -1,0 +1,2099 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Campaña de Marketing - App de Recarga de Saldo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+
+  :root {
+    --bg-dark: #0B0F15;
+    --bg-surface: #111827;
+    --bg-card: #1a2332;
+    --green: #10B981;
+    --green-dark: #2D8B4E;
+    --gold: #F59E0B;
+    --gold-dark: #D4A020;
+    --white: #F1F5F9;
+    --muted: #A8B8A0;
+    --border: rgba(241,245,249,0.08);
+    --green-glow: rgba(16,185,129,0.15);
+    --gold-glow: rgba(245,158,11,0.15);
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg-dark);
+    color: var(--white);
+    line-height: 1.6;
+    font-size: 14px;
+  }
+
+  /* Page break utilities */
+  .page-break {
+    page-break-before: always;
+    break-before: page;
+  }
+
+  .no-break {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Header */
+  .hero {
+    text-align: center;
+    padding: 80px 40px 60px;
+    background: linear-gradient(180deg, var(--bg-dark) 0%, var(--bg-surface) 100%);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, var(--gold-glow) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .hero-badge {
+    display: inline-block;
+    padding: 6px 18px;
+    background: rgba(245,158,11,0.1);
+    border: 1px solid rgba(245,158,11,0.2);
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--gold);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 24px;
+  }
+
+  .hero h1 {
+    font-size: 42px;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+    margin-bottom: 12px;
+    position: relative;
+  }
+
+  .hero h1 span {
+    background: linear-gradient(135deg, var(--gold), var(--gold-dark));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero .subtitle {
+    font-size: 18px;
+    color: var(--muted);
+    font-weight: 400;
+    max-width: 500px;
+    margin: 0 auto 30px;
+  }
+
+  .hero-meta {
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+    flex-wrap: wrap;
+  }
+
+  .hero-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .hero-meta-item .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+  }
+
+  /* Container */
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 40px;
+  }
+
+  /* Section */
+  .section {
+    padding: 50px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section:last-child {
+    border-bottom: none;
+  }
+
+  .section-number {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--gold);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+
+  .section-title {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+  }
+
+  .section-subtitle {
+    font-size: 15px;
+    color: var(--muted);
+    margin-bottom: 32px;
+    max-width: 600px;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+
+  .card-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .card-title .icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .icon-green {
+    background: rgba(16,185,129,0.15);
+    color: var(--green);
+  }
+
+  .icon-gold {
+    background: rgba(245,158,11,0.15);
+    color: var(--gold);
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    font-size: 13px;
+  }
+
+  thead th {
+    text-align: left;
+    padding: 10px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-surface);
+  }
+
+  tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* Tags */
+  .tag {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .tag-green {
+    background: rgba(16,185,129,0.15);
+    color: var(--green);
+  }
+
+  .tag-gold {
+    background: rgba(245,158,11,0.15);
+    color: var(--gold);
+  }
+
+  .tag-red {
+    background: rgba(229,57,53,0.15);
+    color: #E53935;
+  }
+
+  /* Color swatches */
+  .color-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .color-swatch {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    text-align: center;
+  }
+
+  .color-circle {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    margin: 0 auto 10px;
+    border: 2px solid rgba(255,255,255,0.1);
+  }
+
+  .color-name {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 2px;
+  }
+
+  .color-hex {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: monospace;
+  }
+
+  .color-use {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* Piece cards */
+  .piece-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    margin-bottom: 24px;
+    position: relative;
+    overflow: hidden;
+    page-break-inside: avoid;
+  }
+
+  .piece-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: linear-gradient(180deg, var(--green), var(--gold));
+    border-radius: 4px 0 0 4px;
+  }
+
+  .piece-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+    gap: 12px;
+  }
+
+  .piece-number {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--green), var(--gold));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 16px;
+    color: var(--bg-dark);
+    flex-shrink: 0;
+  }
+
+  .piece-info {
+    flex: 1;
+  }
+
+  .piece-name {
+    font-size: 17px;
+    font-weight: 700;
+  }
+
+  .piece-objective {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .piece-format {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .piece-detail {
+    margin-bottom: 16px;
+  }
+
+  .piece-detail-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--gold);
+    margin-bottom: 6px;
+  }
+
+  .piece-detail p, .piece-detail li {
+    font-size: 13px;
+    color: var(--white);
+    line-height: 1.7;
+  }
+
+  .piece-detail ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .piece-detail ul li::before {
+    content: '→ ';
+    color: var(--green);
+    font-weight: 700;
+  }
+
+  .copy-block {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 14px;
+    font-style: italic;
+    color: var(--white);
+    margin: 8px 0;
+    border-left: 3px solid var(--gold);
+  }
+
+  .caption-block {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 12px;
+    color: var(--muted);
+    margin: 8px 0;
+  }
+
+  .note-block {
+    background: rgba(245,158,11,0.05);
+    border: 1px solid rgba(245,158,11,0.15);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 12px;
+    color: var(--gold);
+    margin-top: 12px;
+  }
+
+  .note-block strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Wireframe blocks */
+  .wireframe {
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    font-family: monospace;
+    font-size: 12px;
+    white-space: pre;
+    color: var(--muted);
+    line-height: 1.5;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+
+  /* Steps */
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 12px 0;
+  }
+
+  .step {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .step-num {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--gold-dark), var(--gold));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 14px;
+    color: var(--bg-dark);
+    flex-shrink: 0;
+  }
+
+  .step-content {
+    flex: 1;
+  }
+
+  .step-title {
+    font-weight: 700;
+    font-size: 14px;
+  }
+
+  .step-desc {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* Grid layouts */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  /* Word bank */
+  .word-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+
+  .word-col {
+    padding: 16px 20px;
+  }
+
+  .word-col:first-child {
+    background: rgba(16,185,129,0.05);
+    border-right: 1px solid var(--border);
+  }
+
+  .word-col:last-child {
+    background: rgba(229,57,53,0.05);
+  }
+
+  .word-col h4 {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+  }
+
+  .word-col:first-child h4 {
+    color: var(--green);
+  }
+
+  .word-col:last-child h4 {
+    color: #E53935;
+  }
+
+  .word-list {
+    list-style: none;
+    padding: 0;
+    font-size: 13px;
+  }
+
+  .word-list li {
+    padding: 3px 0;
+  }
+
+  /* Tagline cards */
+  .tagline-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .tagline-num {
+    font-size: 20px;
+    font-weight: 900;
+    color: var(--gold);
+    min-width: 28px;
+  }
+
+  .tagline-text {
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .tagline-use {
+    font-size: 11px;
+    color: var(--muted);
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  /* Pillar sections */
+  .pillar {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+
+  .pillar-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .pillar-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+  }
+
+  .pillar-name {
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .pillar-subtitle {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .phrase-list {
+    list-style: none;
+    padding: 0;
+  }
+
+  .phrase-list li {
+    padding: 6px 0;
+    font-size: 13px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+  }
+
+  .phrase-list li:last-child {
+    border-bottom: none;
+  }
+
+  .phrase-list li::before {
+    content: '"';
+    color: var(--gold);
+    font-weight: 700;
+    font-size: 16px;
+  }
+
+  .phrase-list li::after {
+    content: '"';
+    color: var(--gold);
+    font-weight: 700;
+    font-size: 16px;
+  }
+
+  /* Calendar */
+  .calendar-week {
+    margin-bottom: 24px;
+  }
+
+  .calendar-week-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .week-badge {
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .week-name {
+    font-weight: 600;
+    font-size: 15px;
+  }
+
+  .calendar-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .calendar-row:last-child {
+    border-bottom: none;
+  }
+
+  .cal-day {
+    width: 36px;
+    font-weight: 600;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .cal-platform {
+    width: 100px;
+    flex-shrink: 0;
+  }
+
+  .cal-piece {
+    flex: 1;
+    font-weight: 500;
+  }
+
+  /* Storyboard */
+  .storyboard {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 12px 0;
+  }
+
+  .storyboard-row {
+    display: grid;
+    grid-template-columns: 60px 1fr 1fr;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+
+  .storyboard-row:last-child {
+    border-bottom: none;
+  }
+
+  .storyboard-row.header {
+    background: var(--bg-surface);
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+  }
+
+  .storyboard-cell {
+    padding: 8px 12px;
+    border-right: 1px solid var(--border);
+  }
+
+  .storyboard-cell:last-child {
+    border-right: none;
+  }
+
+  /* Specs */
+  .spec-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .spec-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+
+  .spec-card h4 {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: var(--gold);
+  }
+
+  /* Zone diagram */
+  .zone-diagram {
+    background: var(--bg-dark);
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 0;
+    margin: 16px auto;
+    max-width: 240px;
+    overflow: hidden;
+  }
+
+  .zone-danger {
+    background: rgba(229,57,53,0.08);
+    padding: 16px;
+    text-align: center;
+    font-size: 11px;
+    color: #E53935;
+    border-bottom: 1px dashed rgba(229,57,53,0.2);
+  }
+
+  .zone-safe {
+    background: rgba(16,185,129,0.05);
+    padding: 40px 16px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--green);
+  }
+
+  .zone-danger:last-child {
+    border-bottom: none;
+    border-top: 1px dashed rgba(229,57,53,0.2);
+  }
+
+  /* Checklist */
+  .checklist {
+    list-style: none;
+    padding: 0;
+  }
+
+  .checklist li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .checklist li:last-child {
+    border-bottom: none;
+  }
+
+  .check-box {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border);
+    border-radius: 5px;
+    flex-shrink: 0;
+  }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    padding: 40px;
+    border-top: 1px solid var(--border);
+    margin-top: 40px;
+  }
+
+  .footer-stats {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .footer-stat {
+    text-align: center;
+  }
+
+  .footer-stat-value {
+    font-size: 28px;
+    font-weight: 900;
+    background: linear-gradient(135deg, var(--green), var(--gold));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .footer-stat-label {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .footer p {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* Placeholder highlight */
+  .ph {
+    color: var(--gold);
+    font-weight: 600;
+    background: rgba(245,158,11,0.1);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.95em;
+  }
+
+  /* Separator */
+  .sep {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 40px 0;
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  .sep::before, .sep::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* Print styles */
+  @media print {
+    body {
+      background: #0B0F15;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .piece-card, .card, .pillar {
+      page-break-inside: avoid;
+    }
+
+    .page-break {
+      page-break-before: always;
+    }
+  }
+
+  /* Hashtag pills */
+  .hashtag-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+  }
+
+  .hashtag {
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .hashtag-primary {
+    background: rgba(16,185,129,0.15);
+    color: var(--green);
+  }
+
+  .hashtag-secondary {
+    background: rgba(245,158,11,0.1);
+    color: var(--gold);
+  }
+
+  .hashtag-engage {
+    background: rgba(66,165,245,0.1);
+    color: #42A5F5;
+  }
+</style>
+</head>
+<body>
+
+<!-- ======================== HERO ======================== -->
+<div class="hero">
+  <div class="hero-badge">Propuesta de Campaña</div>
+  <h1>Campaña de Marketing<br><span>App de Recarga de Saldo</span></h1>
+  <p class="subtitle">Propuesta completa para diseñadora gráfica — 32+ piezas, copy, calendario y specs técnicas.</p>
+  <div class="hero-meta">
+    <div class="hero-meta-item"><span class="dot"></span> Instagram / TikTok</div>
+    <div class="hero-meta-item"><span class="dot"></span> WhatsApp / Telegram</div>
+    <div class="hero-meta-item"><span class="dot"></span> Template personalizable</div>
+    <div class="hero-meta-item"><span class="dot"></span> 32+ piezas</div>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ======================== SECTION 1: BRIEF ======================== -->
+<div class="section">
+  <div class="section-number">Sección 01</div>
+  <h2 class="section-title">Brief Creativo</h2>
+  <p class="section-subtitle">Todo lo que necesitás saber antes de diseñar.</p>
+
+  <!-- Sobre la app -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-green">📱</span> Sobre la app</div>
+    <p style="font-size:13px; color:var(--muted);">Es una <strong style="color:var(--white)">app móvil para recargar saldo/créditos</strong> en una plataforma digital. Los usuarios eligen cuánto recargar, hacen una transferencia bancaria, suben el comprobante, y el saldo se acredita automáticamente. También pueden retirar saldo a una cuenta bancaria.</p>
+  </div>
+
+  <!-- Objetivo -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-gold">🎯</span> Objetivo de la campaña</div>
+    <p style="font-size:13px; color:var(--muted);">Dar a conocer la app, comunicar cómo funciona, generar confianza y lograr descargas. <strong style="color:var(--white)">Sin promo de lanzamiento</strong> — la campaña se basa 100% en los beneficios del servicio.</p>
+  </div>
+
+  <!-- Audiencia -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-green">👥</span> Público objetivo</div>
+    <table>
+      <thead>
+        <tr><th>Perfil</th><th>Descripción</th><th>Qué le importa</th><th>Cómo le hablamos</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Casual</strong></td><td>Recarga de vez en cuando</td><td>Facilidad y rapidez</td><td>"Es re simple, mirá"</td></tr>
+        <tr><td><strong>Frecuente</strong></td><td>Recarga seguido</td><td>Confiabilidad y disponibilidad</td><td>"Olvidate de esperar"</td></tr>
+        <tr><td><strong>Nuevo</strong></td><td>Recién arranca</td><td>Explicación paso a paso</td><td>"Te guiamos"</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size:12px; color:var(--muted);">Rango: 18-45 años · Todos los géneros · Argentina</p>
+  </div>
+
+  <!-- Tono -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-gold">🗣️</span> Tono y voz</div>
+    <p style="font-size:13px; color:var(--muted); margin-bottom:14px;"><strong style="color:var(--white)">Estilo: amigo que te recomienda algo.</strong> Confianzudo pero no irrespetuoso. Argentino puro, voseo, imperativo argentino.</p>
+
+    <div class="grid-2">
+      <div>
+        <p style="font-size:11px; font-weight:700; color:var(--green); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Frases que SÍ van</p>
+        <ul style="list-style:none; padding:0; font-size:12px;">
+          <li style="padding:3px 0;">✓ "Recargá saldo sin moverte del sillón"</li>
+          <li style="padding:3px 0;">✓ "Tres pasos y listo, pa"</li>
+          <li style="padding:3px 0;">✓ "Tu plata, segura. Siempre."</li>
+          <li style="padding:3px 0;">✓ "¿A las 3 de la mañana? También."</li>
+          <li style="padding:3px 0;">✓ "Más simple que pedir un delivery"</li>
+          <li style="padding:3px 0;">✓ "Sin vueltas, sin esperas"</li>
+          <li style="padding:3px 0;">✓ "Cargá cuando se te cante"</li>
+        </ul>
+      </div>
+      <div>
+        <p style="font-size:11px; font-weight:700; color:#E53935; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Frases que NO van</p>
+        <ul style="list-style:none; padding:0; font-size:12px;">
+          <li style="padding:3px 0;">✗ "Nuestra plataforma ofrece..."</li>
+          <li style="padding:3px 0;">✗ "Optimice su experiencia..."</li>
+          <li style="padding:3px 0;">✗ "Revolucionamos la industria..."</li>
+          <li style="padding:3px 0;">✗ Nada que suene a publicidad de banco</li>
+          <li style="padding:3px 0;">✗ Nada corporativo ni robótico</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Vocabulario de tono -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-green">📝</span> Vocabulario y estilo de escritura</div>
+    <div class="word-grid">
+      <div class="word-col">
+        <h4>✓ Palabras que van</h4>
+        <ul class="word-list">
+          <li>Saldo / Créditos</li>
+          <li>Recargar / Cargar</li>
+          <li>Tu cuenta</li>
+          <li>Plataforma</li>
+          <li>Cobrar / Retirar</li>
+          <li>Plata / Guita</li>
+          <li>Comprobante</li>
+        </ul>
+      </div>
+      <div class="word-col">
+        <h4>✗ Evitar estas palabras</h4>
+        <ul class="word-list">
+          <li>Dinero (suena formal, usar "plata")</li>
+          <li>Transacción (muy técnico)</li>
+          <li>Plataforma digital (redundante)</li>
+          <li>Depósito (bancario, frío)</li>
+          <li>Servicio financiero</li>
+          <li>Acreditación (burocrático)</li>
+          <li>Operación (suena a banco)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Colores -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-gold">🎨</span> Paleta de colores</div>
+    <div class="color-grid">
+      <div class="color-swatch">
+        <div class="color-circle" style="background:#0B0F15;"></div>
+        <div class="color-name">Negro profundo</div>
+        <div class="color-hex">#0B0F15</div>
+        <div class="color-use">Fondos principales</div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-circle" style="background:#10B981;"></div>
+        <div class="color-name">Verde esmeralda</div>
+        <div class="color-hex">#10B981</div>
+        <div class="color-use">Éxito, validación</div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-circle" style="background:#2D8B4E;"></div>
+        <div class="color-name">Verde oscuro</div>
+        <div class="color-hex">#2D8B4E</div>
+        <div class="color-use">Acentos, degradados</div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-circle" style="background:linear-gradient(135deg,#D4A020,#F59E0B);"></div>
+        <div class="color-name">Dorado</div>
+        <div class="color-hex">#D4A020 / #F59E0B</div>
+        <div class="color-use">CTAs, títulos, valor</div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-circle" style="background:#F1F5F9;"></div>
+        <div class="color-name">Blanco</div>
+        <div class="color-hex">#F1F5F9</div>
+        <div class="color-use">Texto principal</div>
+      </div>
+      <div class="color-swatch">
+        <div class="color-circle" style="background:#A8B8A0;"></div>
+        <div class="color-name">Verde grisáceo</div>
+        <div class="color-hex">#A8B8A0</div>
+        <div class="color-use">Texto secundario</div>
+      </div>
+    </div>
+    <p style="font-size:12px; color:var(--muted);"><strong>Regla:</strong> Fondos siempre oscuros. Texto siempre claro. Dorado para lo importante. Verde para éxito/confirmación.</p>
+  </div>
+
+  <!-- Tipografía -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-green">Aa</span> Tipografía</div>
+    <p style="font-size:13px; margin-bottom:8px;"><strong>Principal:</strong> Outfit (Google Fonts) — <span style="color:var(--muted);">alternativas: Inter, DM Sans, Poppins</span></p>
+    <p style="font-size:13px; color:var(--muted);">Pesos: 400 (body), 600 (subtítulos), 700-900 (títulos). Estilo clean, redondeada, moderna.</p>
+  </div>
+
+  <!-- Placeholders -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-gold">🏷️</span> Placeholders editables</div>
+    <p style="font-size:12px; color:var(--muted); margin-bottom:12px;">Cada cliente reemplaza estos valores con su marca:</p>
+    <table>
+      <thead><tr><th>Placeholder</th><th>Descripción</th></tr></thead>
+      <tbody>
+        <tr><td><span class="ph">[TU LOGO]</span></td><td>Logo de la marca</td></tr>
+        <tr><td><span class="ph">[NOMBRE]</span></td><td>Nombre del servicio/app</td></tr>
+        <tr><td><span class="ph">[LINK DE DESCARGA]</span></td><td>URL o QR para descargar</td></tr>
+        <tr><td><span class="ph">[WHATSAPP]</span></td><td>Número de soporte</td></tr>
+        <tr><td><span class="ph">[INSTAGRAM]</span></td><td>@ de Instagram</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Estilo visual -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-green">✨</span> Estilo visual general</div>
+    <ul style="list-style:none; padding:0; font-size:13px;">
+      <li style="padding:4px 0;">→ <strong>Sin mascota ni personaje.</strong> Enfoque limpio y moderno.</li>
+      <li style="padding:4px 0;">→ Iconografía minimalista (línea fina, monocolor o bicolor)</li>
+      <li style="padding:4px 0;">→ <strong>Mockups genéricos de celular</strong> como recurso visual principal (NO screenshots reales)</li>
+      <li style="padding:4px 0;">→ Elementos decorativos sutiles: monedas, íconos de dinero, checks</li>
+      <li style="padding:4px 0;">→ Glassmorphism sutil en algunos elementos</li>
+      <li style="padding:4px 0;">→ Bordes redondeados en todo (8-20px)</li>
+    </ul>
+  </div>
+
+  <!-- Wireframes -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-gold">📐</span> Wireframes de referencia para mockups</div>
+    <p style="font-size:12px; color:var(--muted); margin-bottom:12px;">Los mockups deben representar pantallas genéricas. NO usar screenshots reales. Diseñar desde cero basándose en estos wireframes:</p>
+    <div class="grid-3">
+      <div>
+        <p style="font-size:11px; font-weight:700; color:var(--green); margin-bottom:6px;">PANTALLA HOME</p>
+        <div class="wireframe" style="font-size:10px;">┌──────────────────┐
+│ [LOGO]    ⚙️ 💬  │
+│                  │
+│ Bienvenido,      │
+│ Usuario          │
+│                  │
+│ ┌────┐  ┌────┐  │
+│ │ 💰 │  │ 🏆 │  │
+│ │Carg│  │Cobr│  │
+│ │ ar │  │ ar │  │
+│ └────┘  └────┘  │
+│                  │
+│ Estado: OK       │
+│                  │
+│ ┌────────────┐   │
+│ │Chat soporte│   │
+│ └────────────┘   │
+└──────────────────┘</div>
+      </div>
+      <div>
+        <p style="font-size:11px; font-weight:700; color:var(--green); margin-bottom:6px;">PANTALLA CARGA</p>
+        <div class="wireframe" style="font-size:10px;">┌──────────────────┐
+│ ← Chat           │
+│ ─────────────── │
+│                  │
+│ 🤖 ¿Cuánto      │
+│    querés cargar?│
+│                  │
+│ [$1k][$2k][$5k] │
+│ [$10k] [Otro]   │
+│                  │
+│ 🤖 Datos pago:  │
+│ CBU: XX [Copiar] │
+│                  │
+│ 📸 Subir compro-│
+│    bante         │
+│ [Cámara][Archivo]│
+│                  │
+│ [Escribí un msg] │
+└──────────────────┘</div>
+      </div>
+      <div>
+        <p style="font-size:11px; font-weight:700; color:var(--green); margin-bottom:6px;">PANTALLA COBRO</p>
+        <div class="wireframe" style="font-size:10px;">┌──────────────────┐
+│ ← Cobrar         │
+│                  │
+│ Tu saldo:        │
+│ $XX.XXX          │
+│                  │
+│ Monto a retirar: │
+│ [$3k][$5k][$10k]│
+│ [$ Otro monto  ] │
+│                  │
+│ Método:          │
+│ (●)CBU ( )Alias  │
+│                  │
+│ CBU: [_________] │
+│ Titular: [_____] │
+│                  │
+│ [SOLICITAR      ]│
+│ [  RETIRO       ]│
+└──────────────────┘</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================== SECTION 2: COPY BANK ======================== -->
+<div class="section page-break">
+  <div class="section-number">Sección 02</div>
+  <h2 class="section-title">Mensajes Clave</h2>
+  <p class="section-subtitle">Copy bank con taglines, frases por pilar, CTAs y hashtags.</p>
+
+  <!-- Taglines -->
+  <h3 style="font-size:16px; font-weight:700; margin-bottom:16px;">Taglines principales</h3>
+
+  <div class="tagline-card"><span class="tagline-num">1</span><span class="tagline-text">Recargá saldo. Sin vueltas.</span><span class="tagline-use">Principal</span></div>
+  <div class="tagline-card"><span class="tagline-num">2</span><span class="tagline-text">Tres pasos. Cero drama.</span><span class="tagline-use">Cómo funciona</span></div>
+  <div class="tagline-card"><span class="tagline-num">3</span><span class="tagline-text">Tu plata, segura. Siempre.</span><span class="tagline-use">Confianza</span></div>
+  <div class="tagline-card"><span class="tagline-num">4</span><span class="tagline-text">Cuando vos quieras. 24/7.</span><span class="tagline-use">Disponibilidad</span></div>
+  <div class="tagline-card"><span class="tagline-num">5</span><span class="tagline-text">Más fácil que mandar un audio</span><span class="tagline-use">Simplicidad</span></div>
+  <div class="tagline-card"><span class="tagline-num">6</span><span class="tagline-text">Cargá y listo. Así de simple.</span><span class="tagline-use">General</span></div>
+  <div class="tagline-card"><span class="tagline-num">7</span><span class="tagline-text">Tu saldo, en tu cuenta.</span><span class="tagline-use">Éxito</span></div>
+  <div class="tagline-card"><span class="tagline-num">8</span><span class="tagline-text">¿Saldo a favor? Retiralo.</span><span class="tagline-use">Cobro</span></div>
+
+  <div class="sep">Pilares de comunicación</div>
+
+  <!-- Pilar 1 -->
+  <div class="pillar no-break">
+    <div class="pillar-header">
+      <div class="pillar-icon" style="background:rgba(16,185,129,0.15);">✨</div>
+      <div>
+        <div class="pillar-name">Simplicidad</div>
+        <div class="pillar-subtitle">"Sin vueltas"</div>
+      </div>
+    </div>
+    <ul class="phrase-list">
+      <li>Elegí, pagá, listo. Saldo en tu cuenta.</li>
+      <li>Si sabés mandar una foto por WhatsApp, sabés recargar.</li>
+      <li>Tres pasos. En serio, tres.</li>
+      <li>No necesitás ser ingeniero. Abrí la app y seguí los pasos.</li>
+      <li>Todo desde el celu. Sin llamar a nadie.</li>
+      <li>La app te guía. Vos solo seguí.</li>
+    </ul>
+  </div>
+
+  <!-- Pilar 2 -->
+  <div class="pillar no-break">
+    <div class="pillar-header">
+      <div class="pillar-icon" style="background:rgba(245,158,11,0.15);">🛡️</div>
+      <div>
+        <div class="pillar-name">Seguridad</div>
+        <div class="pillar-subtitle">"Tu plata, segura"</div>
+      </div>
+    </div>
+    <ul class="phrase-list">
+      <li>Cada pago se valida automáticamente. Cero errores.</li>
+      <li>Soporte real. Si algo pasa, estamos.</li>
+      <li>Tu comprobante se verifica al toque.</li>
+      <li>Nada se pierde. Todo queda registrado.</li>
+      <li>Confiá tranquilo. Nosotros nos encargamos.</li>
+    </ul>
+  </div>
+
+  <!-- Pilar 3 -->
+  <div class="pillar no-break">
+    <div class="pillar-header">
+      <div class="pillar-icon" style="background:rgba(66,165,245,0.15);">🕐</div>
+      <div>
+        <div class="pillar-name">Disponibilidad 24/7</div>
+        <div class="pillar-subtitle">"Siempre ahí"</div>
+      </div>
+    </div>
+    <ul class="phrase-list">
+      <li>¿3 de la mañana? Dale, recargamos.</li>
+      <li>Feriado, domingo, madrugada. Siempre abierto.</li>
+      <li>Sin horarios. Sin esperar a nadie.</li>
+      <li>No importa la hora. La app no duerme.</li>
+      <li>Olvidate de los horarios de atención.</li>
+    </ul>
+  </div>
+
+  <div class="sep">CTAs y Hashtags</div>
+
+  <!-- CTAs -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-gold">👆</span> CTAs (Llamadas a la acción)</div>
+    <table>
+      <thead><tr><th>CTA</th><th>Uso</th></tr></thead>
+      <tbody>
+        <tr><td><strong>"Descargá la app"</strong></td><td>Principal — instalación</td></tr>
+        <tr><td><strong>"Recargá ahora"</strong></td><td>Usuarios existentes</td></tr>
+        <tr><td><strong>"Empezá en 3 pasos"</strong></td><td>Nuevos — suena fácil</td></tr>
+        <tr><td><strong>"Probala gratis"</strong></td><td>Descarga sin costo</td></tr>
+        <tr><td><strong>"Escribinos"</strong></td><td>Soporte / dudas</td></tr>
+        <tr><td><strong>"Mirá cómo funciona"</strong></td><td>Contenido educativo</td></tr>
+        <tr><td><strong>"Retirá tu saldo"</strong></td><td>Feature de cobro</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Hashtags -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-green">#</span> Hashtags</div>
+    <p style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Principales (usar siempre)</p>
+    <div class="hashtag-group">
+      <span class="hashtag hashtag-primary">#[NOMBRE]</span>
+      <span class="hashtag hashtag-primary">#RecargáSaldo</span>
+      <span class="hashtag hashtag-primary">#SinVueltas</span>
+    </div>
+    <p style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; margin-top:14px;">Secundarios (rotar)</p>
+    <div class="hashtag-group">
+      <span class="hashtag hashtag-secondary">#SaldoAlToque</span>
+      <span class="hashtag hashtag-secondary">#TresPasos</span>
+      <span class="hashtag hashtag-secondary">#24HorasDisponible</span>
+      <span class="hashtag hashtag-secondary">#SimpleYSeguro</span>
+    </div>
+    <p style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; margin-top:14px;">De engagement</p>
+    <div class="hashtag-group">
+      <span class="hashtag hashtag-engage">#QuiénMás</span>
+      <span class="hashtag hashtag-engage">#YaRecargaste</span>
+    </div>
+  </div>
+</div>
+
+<!-- ======================== SECTION 3: PIEZAS IG ======================== -->
+<div class="section page-break">
+  <div class="section-number">Sección 03</div>
+  <h2 class="section-title">Piezas — Instagram / TikTok</h2>
+  <p class="section-subtitle">Posts, carruseles, stories y reels con copy, visual y notas.</p>
+
+  <!-- PIEZA 1 -->
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">1</div>
+      <div class="piece-info">
+        <div class="piece-name">Post de Presentación — "¿Qué es <span class="ph">[NOMBRE]</span>?"</div>
+        <div class="piece-objective">Primer contacto. Explicar qué es el servicio.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1080</span><span class="tag tag-gold">Feed</span></div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Copy principal</div>
+      <div class="copy-block">"Recargá saldo desde tu celu. Sin vueltas, sin esperas, sin drama."</div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Copy secundario</div>
+      <p>"Con <span class="ph">[NOMBRE]</span> elegís tu monto, transferís, y el saldo se acredita solo en tu cuenta."</p>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Caption</div>
+      <div class="caption-block">Saldo en tu cuenta sin mover un dedo (bueno, un par). Descargá <span class="ph">[NOMBRE]</span> y empezá a recargar. Link en bio. #RecargáSaldo #SinVueltas #<span class="ph">[NOMBRE]</span></div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Elementos visuales</div>
+      <ul>
+        <li>Fondo oscuro (#0B0F15)</li>
+        <li>Mockup genérico de celular mostrando pantalla Home</li>
+        <li>Título en dorado, subtítulo en blanco</li>
+        <li>Logo <span class="ph">[TU LOGO]</span> en esquina superior</li>
+      </ul>
+    </div>
+    <div class="note-block"><strong>Nota para diseñadora</strong>El mockup del celu es el protagonista visual. No saturar. Dejar aire.</div>
+  </div>
+
+  <!-- PIEZA 2 -->
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">2</div>
+      <div class="piece-info">
+        <div class="piece-name">Post "3 Pasos" — Cómo Funciona</div>
+        <div class="piece-objective">Explicar el proceso en 3 pasos visuales.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1080</span><span class="tag tag-gold">Feed</span></div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Copy principal</div>
+      <div class="copy-block">"Tres pasos. Cero drama."</div>
+    </div>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-content"><div class="step-title">"Elegí tu monto"</div><div class="step-desc">Abrí la app y decí cuánto querés recargar.</div></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-content"><div class="step-title">"Transferí y subí el comprobante"</div><div class="step-desc">Pagá por transferencia y mandá la foto.</div></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-content"><div class="step-title">"Recibí tu saldo"</div><div class="step-desc">Se acredita automáticamente en tu cuenta.</div></div></div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Caption</div>
+      <div class="caption-block">1-2-3 y listo. ¿Ya la descargaste? #TresPasos #SinVueltas #<span class="ph">[NOMBRE]</span></div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Elementos visuales</div>
+      <ul>
+        <li>3 bloques verticales con número grande (1, 2, 3) en dorado</li>
+        <li>Iconos por paso: selector/moneda, cámara/foto, check</li>
+        <li>Fondo oscuro con línea conectora entre pasos (verde sutil)</li>
+      </ul>
+    </div>
+    <div class="note-block"><strong>Nota</strong>Los números grandes son lo primero que se ve. Cada paso se lee en menos de 2 segundos.</div>
+  </div>
+
+  <!-- PIEZA 3 -->
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">3</div>
+      <div class="piece-info">
+        <div class="piece-name">Post "Seguridad" — Tu Plata Está Segura</div>
+        <div class="piece-objective">Generar confianza.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1080</span><span class="tag tag-gold">Feed</span></div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Copy principal</div>
+      <div class="copy-block">"Tu plata, segura. Siempre."</div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Copy secundario</div>
+      <p>"Cada pago se verifica automáticamente. Si algo no cierra, nuestro equipo lo revisa al toque."</p>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Caption</div>
+      <div class="caption-block">¿Te da cosa transferir? Tranqui. Validamos cada comprobante de forma automática y tenés soporte real. #SimpleYSeguro #<span class="ph">[NOMBRE]</span></div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Elementos visuales</div>
+      <ul>
+        <li>Escudo grande con check verde centrado</li>
+        <li>Fondo oscuro con glow verde detrás del escudo</li>
+        <li>"segura" en dorado</li>
+        <li>3 mini-badges: "Validación automática" | "Soporte 24/7" | "Todo registrado"</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- PIEZA 4 -->
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">4</div>
+      <div class="piece-info">
+        <div class="piece-name">Post "24/7" — Cuando Vos Quieras</div>
+        <div class="piece-objective">Comunicar disponibilidad permanente.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1080</span><span class="tag tag-gold">Feed</span></div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Copy principal</div>
+      <div class="copy-block">"Cuando vos quieras. 24/7."</div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Copy secundario</div>
+      <p>"Madrugada, siesta, feriado. La app no duerme."</p>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Elementos visuales</div>
+      <ul>
+        <li>"24/7" grande y dorado centrado como ancla visual</li>
+        <li>Fondo oscuro con degradado sutil nocturno</li>
+        <li>Elementos nocturnos sutiles (no infantil)</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- PIEZA 5 -->
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">5</div>
+      <div class="piece-info">
+        <div class="piece-name">Post "Simple" — Sin Vueltas</div>
+        <div class="piece-objective">Resaltar la facilidad del proceso.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1080</span><span class="tag tag-gold">Feed</span></div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Copy principal</div>
+      <div class="copy-block">"Más fácil que mandar un audio"</div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Elementos visuales</div>
+      <ul>
+        <li>Comparación visual: ícono complejo tachado vs ícono simple con check</li>
+        <li>Mucho espacio, poco texto. La simpleza del diseño refleja la del servicio.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- PIEZA 6 -->
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">6</div>
+      <div class="piece-info">
+        <div class="piece-name">Post "Cobrar/Retirar"</div>
+        <div class="piece-objective">Comunicar feature de retiro de saldo.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1080</span><span class="tag tag-gold">Feed</span></div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Copy principal</div>
+      <div class="copy-block">"¿Saldo a favor? Retiralo."</div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Elementos visuales</div>
+      <ul>
+        <li>Ícono de billetera/plata con flecha hacia abajo</li>
+        <li>Dorado más prominente que en otras piezas</li>
+        <li>Mockup genérico mostrando pantalla de retiro</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- PIEZA 7 -->
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">7</div>
+      <div class="piece-info">
+        <div class="piece-name">Carrusel Educativo — Tutorial (6 slides)</div>
+        <div class="piece-objective">Tutorial completo para usuarios nuevos.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1080</span><span class="tag tag-gold">Carrusel x6</span></div>
+    </div>
+    <div class="steps">
+      <div class="step"><div class="step-num">P</div><div class="step-content"><div class="step-title">Slide 1 — Portada</div><div class="step-desc">"¿Cómo recargo saldo?" / "Te lo explicamos en 5 pasos. Deslizá →"</div></div></div>
+      <div class="step"><div class="step-num">1</div><div class="step-content"><div class="step-title">Slide 2 — Descargá la app</div><div class="step-desc">"Entrá al link en nuestra bio." + Mockup genérico de descarga.</div></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-content"><div class="step-title">Slide 3 — Registrate</div><div class="step-desc">"Poné tu usuario y listo." + Mockup genérico de login.</div></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-content"><div class="step-title">Slide 4 — Elegí tu monto</div><div class="step-desc">"Tocá cuánto querés recargar." + Mockup genérico de selector de montos.</div></div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-content"><div class="step-title">Slide 5 — Transferí y subí comprobante</div><div class="step-desc">"Sacás foto y lo subís." + Mockup genérico de pantalla de pago.</div></div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-content"><div class="step-title">Slide 6 — ¡Listo!</div><div class="step-desc">"Se valida automáticamente." + Mockup de éxito con check verde. CTA: "Descargá ahora →"</div></div></div>
+    </div>
+    <div class="note-block"><strong>Nota</strong>Consistencia visual entre slides. Flechitas "deslizá →" en slide 1. CTA visible en el último slide.</div>
+  </div>
+
+  <!-- PIEZA 8 -->
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">8</div>
+      <div class="piece-info">
+        <div class="piece-name">Carrusel de Beneficios (5 slides)</div>
+        <div class="piece-objective">Mostrar propuesta de valor.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1080</span><span class="tag tag-gold">Carrusel x5</span></div>
+    </div>
+    <div class="steps">
+      <div class="step"><div class="step-num">P</div><div class="step-content"><div class="step-title">"¿Por qué <span class="ph">[NOMBRE]</span>?"</div><div class="step-desc">"4 razones. Deslizá →"</div></div></div>
+      <div class="step"><div class="step-num">1</div><div class="step-content"><div class="step-title">"Re simple"</div><div class="step-desc">"Tres pasos desde tu celu." · Icono: celular + check</div></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-content"><div class="step-title">"Seguro de verdad"</div><div class="step-desc">"Cada pago se valida automáticamente." · Icono: escudo</div></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-content"><div class="step-title">"24/7, siempre"</div><div class="step-desc">"La app funciona cuando vos querés." · Icono: reloj</div></div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-content"><div class="step-title">"Retirá tu saldo"</div><div class="step-desc">"Retirá a tu cuenta bancaria." · Icono: billetera + CTA final</div></div></div>
+    </div>
+  </div>
+
+  <!-- PIEZA 9 -->
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">9</div>
+      <div class="piece-info">
+        <div class="piece-name">Post Testimonial (template x3-4 variantes)</div>
+        <div class="piece-objective">Social proof.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1080</span><span class="tag tag-gold">Feed</span></div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Testimonios ejemplo</div>
+      <div class="copy-block">"Mandé el comprobante y el saldo cayó al toque. Ahora no recargo de otra forma." — @usuario1</div>
+      <div class="copy-block">"Lo mejor es que funciona de madrugada." — @usuario2</div>
+      <div class="copy-block">"Es muy fácil. Mi viejo que no sabe ni prender Netflix lo usa." — @usuario3</div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Elementos visuales</div>
+      <ul>
+        <li>Comillas doradas grandes como ancla visual</li>
+        <li>Fondo oscuro, texto centrado</li>
+        <li>3-4 variantes, mismo diseño, diferente texto</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- PIEZA 10 -->
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">10</div>
+      <div class="piece-info">
+        <div class="piece-name">Post FAQ — Preguntas Frecuentes</div>
+        <div class="piece-objective">Resolver dudas comunes.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1080</span><span class="tag tag-gold">Feed</span></div>
+    </div>
+    <div class="piece-detail">
+      <div class="piece-detail-label">Preguntas</div>
+      <table>
+        <tbody>
+          <tr><td style="color:var(--gold); font-weight:600;">¿Es seguro?</td><td>Sí. Cada pago se valida automáticamente.</td></tr>
+          <tr><td style="color:var(--gold); font-weight:600;">¿Cuánto tarda?</td><td>Muy poco. El proceso es automático.</td></tr>
+          <tr><td style="color:var(--gold); font-weight:600;">¿Funciona de noche?</td><td>Sí, 24/7. Sin horarios.</td></tr>
+          <tr><td style="color:var(--gold); font-weight:600;">¿Cómo retiro saldo?</td><td>Desde la app. CBU o alias.</td></tr>
+          <tr><td style="color:var(--gold); font-weight:600;">¿Qué necesito?</td><td>Un celu y una cuenta bancaria.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="sep">Stories</div>
+
+  <!-- STORIES 11-16 -->
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">11</div>
+      <div class="piece-info">
+        <div class="piece-name">Story "Descargá la App"</div>
+        <div class="piece-objective">Generar descarga directa.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Story</span></div>
+    </div>
+    <div class="copy-block">"Recargá saldo sin vueltas." / "Descargá <span class="ph">[NOMBRE]</span>" / ↓ <span class="ph">[LINK]</span> ↓</div>
+    <p style="font-size:12px; color:var(--muted); margin-top:8px;">Visual: Mockup genérico grande + flecha al link + glow dorado. Dejar espacio para sticker de Link de IG.</p>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">12</div>
+      <div class="piece-info">
+        <div class="piece-name">Story "¿Cómo Recargo?" — 3 frames</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Story x3</span></div>
+    </div>
+    <p style="font-size:12px;"><strong>Frame 1:</strong> "¿Cómo recargo saldo?" / "Es re fácil. Mirá →"<br>
+    <strong>Frame 2:</strong> "1. Elegí monto  2. Transferí  3. Subí comprobante"<br>
+    <strong>Frame 3:</strong> "¡Listo! Saldo en tu cuenta" / CTA descarga</p>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">13</div>
+      <div class="piece-info">
+        <div class="piece-name">Story "¿Cómo Retiro Saldo?" — 3 frames</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Story x3</span></div>
+    </div>
+    <p style="font-size:12px;"><strong>Frame 1:</strong> "¿Tenés saldo y querés retirarlo?" / "Mirá qué fácil →"<br>
+    <strong>Frame 2:</strong> "1. Abrí la app  2. Pedí retiro  3. Poné tu CBU o alias"<br>
+    <strong>Frame 3:</strong> "La plata llega a tu cuenta bancaria" / CTA</p>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">14</div>
+      <div class="piece-info">
+        <div class="piece-name">Story Encuesta/Quiz — 3 variantes</div>
+        <div class="piece-objective">Engagement e interacción.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Story x3</span></div>
+    </div>
+    <p style="font-size:12px;"><strong>A) Encuesta:</strong> "¿Cómo recargás saldo hoy?" → "Por la app" / "Le pido a alguien" / "Todavía no recargo"<br>
+    <strong>B) Quiz:</strong> "¿Cuántos pasos para recargar?" → "3" (correcta) / "5" / "10"<br>
+    <strong>C) Slider:</strong> "¿Qué tan fácil te parece?" → 😐 ← → 🤩</p>
+    <div class="note-block"><strong>Nota</strong>Dejar espacio central para stickers interactivos de IG.</div>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">15</div>
+      <div class="piece-info">
+        <div class="piece-name">Story Countdown — Pre-Lanzamiento (3 variantes)</div>
+        <div class="piece-objective">Generar expectativa.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Story x3</span></div>
+    </div>
+    <p style="font-size:12px;"><strong>V1:</strong> "Se viene algo que te va a simplificar la vida." Partículas doradas.<br>
+    <strong>V2:</strong> "Recargá saldo como nunca antes." Silueta de celu borrosa.<br>
+    <strong>V3:</strong> "Mañana lanzamos." Logo sutil + glow.</p>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">16</div>
+      <div class="piece-info">
+        <div class="piece-name">Story Behind the Scenes</div>
+        <div class="piece-objective">Humanizar la marca.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Story</span></div>
+    </div>
+    <div class="copy-block">"Detrás de cada recarga hay un equipo que la hace posible. Soporte real. Gente real. 24/7."</div>
+    <p style="font-size:12px; color:var(--muted); margin-top:8px;">Estilo casual, como backstage. Foto o placeholder del equipo.</p>
+  </div>
+
+  <div class="sep">Reels / TikTok</div>
+
+  <!-- REELS 17-20 -->
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">17</div>
+      <div class="piece-info">
+        <div class="piece-name">Reel "Antes vs Después"</div>
+        <div class="piece-objective">Contenido viral. Comparar el antes y después.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Reel 15-30s</span></div>
+    </div>
+    <div class="storyboard">
+      <div class="storyboard-row header"><div class="storyboard-cell">Seg</div><div class="storyboard-cell">Visual</div><div class="storyboard-cell">Texto</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">0-3</div><div class="storyboard-cell">Persona frustrada</div><div class="storyboard-cell">"Recargar saldo antes:"</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">3-7</div><div class="storyboard-cell">Texto apareciendo</div><div class="storyboard-cell">"Llamar... Esperar... Rogar..."</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">7-11</div><div class="storyboard-cell">TRANSICIÓN flash dorado</div><div class="storyboard-cell">—</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">11-15</div><div class="storyboard-cell">Persona feliz con celu</div><div class="storyboard-cell">"Recargar con [NOMBRE]:"</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">15-18</div><div class="storyboard-cell">Mockup + check</div><div class="storyboard-cell">"3 pasos → Saldo en tu cuenta"</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">18-20</div><div class="storyboard-cell">Logo + CTA</div><div class="storyboard-cell">"Descargá [NOMBRE]"</div></div>
+    </div>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">18</div>
+      <div class="piece-info">
+        <div class="piece-name">Reel "POV"</div>
+        <div class="piece-objective">Contenido relatable.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Reel 10-20s</span></div>
+    </div>
+    <div class="storyboard">
+      <div class="storyboard-row header"><div class="storyboard-cell">Seg</div><div class="storyboard-cell">Visual</div><div class="storyboard-cell">Texto</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">0-3</div><div class="storyboard-cell">POV: mirando celu</div><div class="storyboard-cell">"POV: te enteraste que podés recargar en 3 pasos"</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">3-9</div><div class="storyboard-cell">App funcionando</div><div class="storyboard-cell">"Solo sacás foto al comprobante..."</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">9-12</div><div class="storyboard-cell">Check verde</div><div class="storyboard-cell">"...y el saldo llega solo"</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">12-17</div><div class="storyboard-cell">Logo + CTA</div><div class="storyboard-cell">"¿POR QUÉ NO ME ENTERÉ ANTES?"</div></div>
+    </div>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">19</div>
+      <div class="piece-info">
+        <div class="piece-name">Reel "Tutorial Rápido"</div>
+        <div class="piece-objective">Mostrar el proceso completo en video.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Reel 30-45s</span></div>
+    </div>
+    <div class="storyboard">
+      <div class="storyboard-row header"><div class="storyboard-cell">Seg</div><div class="storyboard-cell">Visual</div><div class="storyboard-cell">Texto/Voz</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">0-3</div><div class="storyboard-cell">Intro logo</div><div class="storyboard-cell">"Te muestro cómo recargar"</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">3-13</div><div class="storyboard-cell">Animación: abrir app + elegir monto</div><div class="storyboard-cell">"Abrís... Elegís cuánto..."</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">13-23</div><div class="storyboard-cell">Animación: datos pago + foto</div><div class="storyboard-cell">"Transferís... Subís comprobante..."</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">23-33</div><div class="storyboard-cell">Animación: validación + éxito</div><div class="storyboard-cell">"Se valida... ¡Listo!"</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">33-37</div><div class="storyboard-cell">Logo + CTA</div><div class="storyboard-cell">"Descargá [NOMBRE]"</div></div>
+    </div>
+    <div class="note-block"><strong>Nota</strong>Usar mockups animados diseñados, NO grabación de app real. Voiceover casual.</div>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">20</div>
+      <div class="piece-info">
+        <div class="piece-name">Reel "Reacción"</div>
+        <div class="piece-objective">Cierre divertido de campaña.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Reel 7-15s</span></div>
+    </div>
+    <div class="storyboard">
+      <div class="storyboard-row header"><div class="storyboard-cell">Seg</div><div class="storyboard-cell">Visual</div><div class="storyboard-cell">Texto</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">0-3</div><div class="storyboard-cell">Persona normal</div><div class="storyboard-cell">"Cuando te dicen que funciona 24/7..."</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">3-8</div><div class="storyboard-cell">Reacción exagerada</div><div class="storyboard-cell">"...sin esperar a nadie... desde tu celu..."</div></div>
+      <div class="storyboard-row"><div class="storyboard-cell">8-12</div><div class="storyboard-cell">Logo</div><div class="storyboard-cell">"[NOMBRE] — Descargá ya"</div></div>
+    </div>
+  </div>
+
+  <div class="sep">Portadas de Highlights</div>
+
+  <!-- HIGHLIGHTS 21-25 -->
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-gold">⭕</span> Highlights del perfil (5 portadas)</div>
+    <p style="font-size:12px; color:var(--muted); margin-bottom:12px;">Formato: 1080x1080px · IG recorta circular · Fondo oscuro · Icono centrado · Sin texto</p>
+    <table>
+      <thead><tr><th>#</th><th>Highlight</th><th>Icono</th><th>Color acento</th></tr></thead>
+      <tbody>
+        <tr><td>21</td><td>Cómo funciona</td><td>▶ Play</td><td><span class="tag tag-green">Verde</span></td></tr>
+        <tr><td>22</td><td>FAQ</td><td>?</td><td><span class="tag tag-gold">Dorado</span></td></tr>
+        <tr><td>23</td><td>Descargar</td><td>↓ Flecha</td><td><span class="tag tag-green">Verde</span></td></tr>
+        <tr><td>24</td><td>Retiros</td><td>$ Billetera</td><td><span class="tag tag-gold">Dorado</span></td></tr>
+        <tr><td>25</td><td>Soporte</td><td>💬 Chat</td><td><span class="tag tag-green">Verde</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ======================== SECTION 4: WHATSAPP ======================== -->
+<div class="section page-break">
+  <div class="section-number">Sección 04</div>
+  <h2 class="section-title">Piezas — WhatsApp / Telegram</h2>
+  <p class="section-subtitle">Flyers, banners, stickers y GIF para distribución en chats y grupos.</p>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">26</div>
+      <div class="piece-info">
+        <div class="piece-name">Flyer Principal — Presentación del Servicio</div>
+        <div class="piece-objective">Pieza todo-en-uno para compartir en grupos.</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Flyer</span></div>
+    </div>
+    <div class="wireframe" style="text-align:center; font-size:13px; color:var(--white);">
+<span class="ph">[TU LOGO]</span>
+
+RECARGÁ SALDO SIN VUELTAS
+
+Tres pasos. Cero drama:
+1. Elegí tu monto
+2. Transferí y subí comprobante
+3. Tu saldo se acredita automáticamente
+
+✓ Simple — Desde tu celu
+✓ Seguro — Validación automática
+✓ 24/7 — Recargá cuando quieras
+
+DESCARGÁ LA APP:
+<span class="ph">[LINK DE DESCARGA]</span>
+
+Soporte: <span class="ph">[WHATSAPP]</span></div>
+    <div class="note-block"><strong>Nota</strong>LA pieza más compartida. Tiene que ser perfecta. Legible sin zoom. QR funcional.</div>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">27</div>
+      <div class="piece-info">
+        <div class="piece-name">Flyer "3 Pasos" — Tutorial Compacto</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Flyer</span></div>
+    </div>
+    <div class="wireframe" style="text-align:center; font-size:13px; color:var(--white);">
+¿CÓMO RECARGO SALDO?
+
+① Elegí cuánto querés
+② Transferí y mandá la foto
+③ Saldo en tu cuenta
+
+Descargá <span class="ph">[NOMBRE]</span>: <span class="ph">[LINK]</span></div>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">28</div>
+      <div class="piece-info">
+        <div class="piece-name">Flyer "Retiro de Saldo"</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1920</span><span class="tag tag-gold">Flyer</span></div>
+    </div>
+    <div class="wireframe" style="text-align:center; font-size:13px; color:var(--white);">
+RETIRÁ TU SALDO
+
+1. Abrí la app
+2. Elegí cuánto retirar
+3. Poné tu CBU o alias
+4. Recibí la plata en tu cuenta
+
+Descargá <span class="ph">[NOMBRE]</span>: <span class="ph">[LINK]</span></div>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">29</div>
+      <div class="piece-info">
+        <div class="piece-name">Flyer "Descargá" — QR + Link</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1080x1350</span><span class="tag tag-gold">Flyer</span></div>
+    </div>
+    <div class="wireframe" style="text-align:center; font-size:13px; color:var(--white);">
+<span class="ph">[TU LOGO]</span>
+
+DESCARGÁ <span class="ph">[NOMBRE]</span>
+
+[ QR CODE GRANDE ]
+
+o entrá a: <span class="ph">[LINK DE DESCARGA]</span>
+
+Recargá saldo sin vueltas.</div>
+    <div class="note-block"><strong>Nota</strong>QR funcional. Super minimalista. Ideal para imprimir también.</div>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">30</div>
+      <div class="piece-info">
+        <div class="piece-name">Banner Horizontal — Para Grupos</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">1200x628</span><span class="tag tag-gold">Banner</span></div>
+    </div>
+    <div class="wireframe" style="text-align:center; font-size:12px; color:var(--white);">
+<span class="ph">[LOGO]</span>  RECARGÁ SALDO SIN VUELTAS  |  3 pasos · Seguro · 24/7  |  Descargá: <span class="ph">[LINK]</span></div>
+    <p style="font-size:12px; color:var(--muted); margin-top:8px;">Horizontal = se ve más grande en WhatsApp. Compacto, tipo banner publicitario. Max 15 palabras.</p>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">31</div>
+      <div class="piece-info">
+        <div class="piece-name">Sticker Pack (6 stickers)</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">512x512</span><span class="tag tag-gold">PNG transp.</span></div>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>Texto</th><th>Visual</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>"SALDO CARGADO"</td><td>Check verde con brillos</td></tr>
+        <tr><td>2</td><td>"AL TOQUE"</td><td>Texto bold con rayito</td></tr>
+        <tr><td>3</td><td>"CARGÁ CON <span class="ph">[NOMBRE]</span>"</td><td>Logo + texto</td></tr>
+        <tr><td>4</td><td>"24/7 PA"</td><td>Reloj con gesto OK</td></tr>
+        <tr><td>5</td><td>"RE FÁCIL"</td><td>Mano OK + texto</td></tr>
+        <tr><td>6</td><td>"PLATA COBRADA"</td><td>Billetera con check</td></tr>
+      </tbody>
+    </table>
+    <div class="note-block"><strong>Nota</strong>Fondo transparente obligatorio. Estilo sticker callejero/urbano. Bordes gruesos. Deben funcionar a tamaño chico.</div>
+  </div>
+
+  <div class="piece-card">
+    <div class="piece-header">
+      <div class="piece-number">32</div>
+      <div class="piece-info">
+        <div class="piece-name">GIF Animado — Logo Loop</div>
+      </div>
+      <div class="piece-format"><span class="tag tag-green">480x480</span><span class="tag tag-gold">GIF &lt;5MB</span></div>
+    </div>
+    <p style="font-size:13px;">Logo aparece (fade/scale) → texto "<span class="ph">[NOMBRE]</span>" → brillo dorado recorre → subtexto "Recargá saldo sin vueltas" aparece/desaparece → loop. <strong>Duración: 2-3 segundos.</strong></p>
+  </div>
+</div>
+
+<!-- ======================== SECTION 5: CALENDARIO ======================== -->
+<div class="section page-break">
+  <div class="section-number">Sección 05</div>
+  <h2 class="section-title">Calendario de Publicación</h2>
+  <p class="section-subtitle">Plan de 4 semanas + contenido recurrente post-campaña.</p>
+
+  <!-- Semana 1 -->
+  <div class="calendar-week no-break">
+    <div class="calendar-week-header">
+      <span class="week-badge" style="background:rgba(245,158,11,0.15); color:var(--gold);">Semana 1</span>
+      <span class="week-name">Expectativa</span>
+    </div>
+    <div class="calendar-row"><span class="cal-day">Lun</span><span class="cal-platform"><span class="tag tag-green">IG Story</span></span><span class="cal-piece">#15 Countdown variante 1 — Misterio</span></div>
+    <div class="calendar-row"><span class="cal-day">Mar</span><span class="cal-platform"><span class="tag tag-green">IG Story</span></span><span class="cal-piece">#15 Countdown variante 2 — Expectativa</span></div>
+    <div class="calendar-row"><span class="cal-day">Mié</span><span class="cal-platform"><span class="tag tag-green">IG Story</span></span><span class="cal-piece">#15 Countdown variante 3 — "Mañana se viene"</span></div>
+    <div class="calendar-row"><span class="cal-day">Jue</span><span class="cal-platform"><span class="tag tag-green">Story+WA</span></span><span class="cal-piece">Countdown final + Flyer teaser — "Mañana lanzamos"</span></div>
+  </div>
+
+  <!-- Semana 2 -->
+  <div class="calendar-week no-break">
+    <div class="calendar-week-header">
+      <span class="week-badge" style="background:rgba(16,185,129,0.15); color:var(--green);">Semana 2</span>
+      <span class="week-name">Lanzamiento</span>
+    </div>
+    <div class="calendar-row"><span class="cal-day">Lun</span><span class="cal-platform"><span class="tag tag-green">IG+WA</span></span><span class="cal-piece">#1 Presentación + #11 Descargá + #26 Flyer + #29 QR</span></div>
+    <div class="calendar-row"><span class="cal-day">Mar</span><span class="cal-platform"><span class="tag tag-green">IG Feed</span></span><span class="cal-piece">#2 Post "3 pasos"</span></div>
+    <div class="calendar-row"><span class="cal-day">Mié</span><span class="cal-platform"><span class="tag tag-green">IG Story</span></span><span class="cal-piece">#12 Tutorial fichas (3 frames)</span></div>
+    <div class="calendar-row"><span class="cal-day">Jue</span><span class="cal-platform"><span class="tag tag-green">Reel/TT</span></span><span class="cal-piece">#19 Tutorial rápido</span></div>
+    <div class="calendar-row"><span class="cal-day">Vie</span><span class="cal-platform"><span class="tag tag-green">WhatsApp</span></span><span class="cal-piece">#27 Flyer "3 pasos"</span></div>
+    <div class="calendar-row"><span class="cal-day">Sáb</span><span class="cal-platform"><span class="tag tag-green">IG Story</span></span><span class="cal-piece">#14 Encuesta</span></div>
+  </div>
+
+  <!-- Semana 3 -->
+  <div class="calendar-week no-break">
+    <div class="calendar-week-header">
+      <span class="week-badge" style="background:rgba(66,165,245,0.15); color:#42A5F5;">Semana 3</span>
+      <span class="week-name">Educación</span>
+    </div>
+    <div class="calendar-row"><span class="cal-day">Lun</span><span class="cal-platform"><span class="tag tag-green">IG Carr.</span></span><span class="cal-piece">#7 Tutorial paso a paso</span></div>
+    <div class="calendar-row"><span class="cal-day">Mar</span><span class="cal-platform"><span class="tag tag-green">IG Story</span></span><span class="cal-piece">#13 Cómo retiro saldo</span></div>
+    <div class="calendar-row"><span class="cal-day">Mié</span><span class="cal-platform"><span class="tag tag-green">IG+WA</span></span><span class="cal-piece">#6 Retiro + #28 Flyer retiro</span></div>
+    <div class="calendar-row"><span class="cal-day">Jue</span><span class="cal-platform"><span class="tag tag-green">IG Feed</span></span><span class="cal-piece">#10 FAQ</span></div>
+    <div class="calendar-row"><span class="cal-day">Vie</span><span class="cal-platform"><span class="tag tag-green">Reel/TT</span></span><span class="cal-piece">#17 Antes vs Después</span></div>
+    <div class="calendar-row"><span class="cal-day">Sáb</span><span class="cal-platform"><span class="tag tag-green">IG Carr.</span></span><span class="cal-piece">#8 Beneficios</span></div>
+  </div>
+
+  <!-- Semana 4 -->
+  <div class="calendar-week no-break">
+    <div class="calendar-week-header">
+      <span class="week-badge" style="background:rgba(168,184,160,0.15); color:var(--muted);">Semana 4</span>
+      <span class="week-name">Social Proof</span>
+    </div>
+    <div class="calendar-row"><span class="cal-day">Lun</span><span class="cal-platform"><span class="tag tag-green">IG Feed</span></span><span class="cal-piece">#9 Testimonial 1</span></div>
+    <div class="calendar-row"><span class="cal-day">Mar</span><span class="cal-platform"><span class="tag tag-green">Reel/TT</span></span><span class="cal-piece">#18 POV</span></div>
+    <div class="calendar-row"><span class="cal-day">Mié</span><span class="cal-platform"><span class="tag tag-green">IG Feed</span></span><span class="cal-piece">#3 Seguridad</span></div>
+    <div class="calendar-row"><span class="cal-day">Jue</span><span class="cal-platform"><span class="tag tag-green">IG Story</span></span><span class="cal-piece">#16 Behind the scenes</span></div>
+    <div class="calendar-row"><span class="cal-day">Vie</span><span class="cal-platform"><span class="tag tag-green">IG Feed</span></span><span class="cal-piece">#4 24/7</span></div>
+    <div class="calendar-row"><span class="cal-day">Sáb</span><span class="cal-platform"><span class="tag tag-green">Reel/TT</span></span><span class="cal-piece">#20 Reacción</span></div>
+    <div class="calendar-row"><span class="cal-day">Dom</span><span class="cal-platform"><span class="tag tag-green">IG Feed</span></span><span class="cal-piece">#5 Simple</span></div>
+  </div>
+
+  <!-- Post-campaña -->
+  <div class="card no-break" style="margin-top:24px;">
+    <div class="card-title"><span class="icon icon-gold">🔄</span> Post-campaña (recurrente)</div>
+    <table>
+      <thead><tr><th>Frecuencia</th><th>Pieza</th><th>Canal</th></tr></thead>
+      <tbody>
+        <tr><td>Semanal</td><td>Testimonial nuevo (#9 variante)</td><td>IG Feed</td></tr>
+        <tr><td>Semanal</td><td>Encuesta/Quiz (#14 variante)</td><td>IG Story</td></tr>
+        <tr><td>Quincenal</td><td>Reel educativo</td><td>IG/TikTok</td></tr>
+        <tr><td>Mensual</td><td>Flyer actualizado</td><td>WhatsApp</td></tr>
+        <tr><td>Siempre</td><td>Stickers (#31) + GIF (#32)</td><td>WA/TG</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ======================== SECTION 6: SPECS ======================== -->
+<div class="section page-break">
+  <div class="section-number">Sección 06</div>
+  <h2 class="section-title">Especificaciones Técnicas</h2>
+  <p class="section-subtitle">Dimensiones, formatos y guía de exportación.</p>
+
+  <div class="spec-grid">
+    <div class="spec-card">
+      <h4>Dimensiones por tipo</h4>
+      <table>
+        <tbody>
+          <tr><td>Post Feed IG</td><td><strong>1080 x 1080</strong></td></tr>
+          <tr><td>Story / Reel</td><td><strong>1080 x 1920</strong></td></tr>
+          <tr><td>Banner WA</td><td><strong>1200 x 628</strong></td></tr>
+          <tr><td>Flyer WA</td><td><strong>1080 x 1920</strong></td></tr>
+          <tr><td>Flyer compacto</td><td><strong>1080 x 1350</strong></td></tr>
+          <tr><td>Highlight cover</td><td><strong>1080 x 1080</strong></td></tr>
+          <tr><td>Sticker</td><td><strong>512 x 512</strong></td></tr>
+          <tr><td>GIF</td><td><strong>480 x 480</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="spec-card">
+      <h4>Formatos de archivo</h4>
+      <table>
+        <tbody>
+          <tr><td>Posts estáticos</td><td><strong>PNG</strong> (o JPG)</td></tr>
+          <tr><td>Stories</td><td><strong>PNG</strong> o MP4</td></tr>
+          <tr><td>Reels/TikTok</td><td><strong>MP4</strong> H.264, 30fps</td></tr>
+          <tr><td>Flyers WA</td><td><strong>JPG</strong> (&lt;1MB)</td></tr>
+          <tr><td>Stickers</td><td><strong>PNG</strong> (transparencia)</td></tr>
+          <tr><td>GIF</td><td><strong>GIF</strong> (&lt;5MB)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-green">📐</span> Zona segura Stories / Reels</div>
+    <p style="font-size:12px; color:var(--muted); margin-bottom:12px;">Los primeros ~250px de arriba y los últimos ~350px de abajo están ocupados por la UI de Instagram. Todo el contenido importante debe estar en la zona central.</p>
+    <div class="zone-diagram">
+      <div class="zone-danger">↑ 250px — UI de Instagram (no poner texto)</div>
+      <div class="zone-safe">ZONA SEGURA<br>Todo el contenido clave acá</div>
+      <div class="zone-danger">↓ 350px — UI de Instagram (no poner texto)</div>
+    </div>
+  </div>
+
+  <div class="card no-break">
+    <div class="card-title"><span class="icon icon-gold">💾</span> Guía de exportación</div>
+    <ul style="list-style:none; padding:0; font-size:13px;">
+      <li style="padding:4px 0;">→ <strong>Resolución:</strong> 72dpi (digital)</li>
+      <li style="padding:4px 0;">→ <strong>Espacio de color:</strong> sRGB</li>
+      <li style="padding:4px 0;">→ <strong>Compresión JPG:</strong> 85-90% calidad</li>
+      <li style="padding:4px 0;">→ <strong>PNG:</strong> Pasar por TinyPNG después de exportar</li>
+      <li style="padding:4px 0;">→ <strong>Video:</strong> 1080x1920, 30fps, H.264, audio AAC si tiene voiceover</li>
+      <li style="padding:4px 0;">→ <strong>GIF:</strong> Máximo 256 colores, optimizar con ezgif</li>
+      <li style="padding:4px 0;">→ <strong>Nombres:</strong> <code style="background:var(--bg-surface); padding:2px 6px; border-radius:4px;">[numero]-[tipo]-[descripcion].ext</code></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ======================== SECTION 7: CHECKLIST ======================== -->
+<div class="section">
+  <div class="section-number">Sección 07</div>
+  <h2 class="section-title">Checklist Final</h2>
+  <p class="section-subtitle">Verificar antes de entregar las piezas.</p>
+
+  <div class="card">
+    <ul class="checklist">
+      <li><span class="check-box"></span>Ninguna pieza tiene contenido sensible o confidencial</li>
+      <li><span class="check-box"></span>Todos los <span class="ph">[PLACEHOLDERS]</span> están marcados y son editables</li>
+      <li><span class="check-box"></span>Paleta de colores consistente en todas las piezas</li>
+      <li><span class="check-box"></span>Tipografía Outfit (o alternativa aprobada) en todo</li>
+      <li><span class="check-box"></span>Mockups son genéricos (NO screenshots reales de la app)</li>
+      <li><span class="check-box"></span>Tono informal argentino consistente en todo el copy</li>
+      <li><span class="check-box"></span>Dimensiones correctas para cada plataforma</li>
+      <li><span class="check-box"></span>QR codes funcionales</li>
+      <li><span class="check-box"></span>Stickers con fondo transparente</li>
+      <li><span class="check-box"></span>GIF pesa menos de 5MB</li>
+      <li><span class="check-box"></span>Zona segura de stories/reels respetada</li>
+      <li><span class="check-box"></span>Archivos nombrados con la convención indicada</li>
+    </ul>
+  </div>
+</div>
+
+</div><!-- /container -->
+
+
+</body>
+</html>
