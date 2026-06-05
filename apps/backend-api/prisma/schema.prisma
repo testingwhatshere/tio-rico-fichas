@@ -97,6 +97,12 @@ model User {
   pushToken           String?  // Expo push notification token
   savedTargetUsername String?  // Remembered gaming panel username for bot auto-fill
   telegramId          String?  @unique // Telegram user ID for bot integration
+
+  // Preloaded users: operator-imported via CSV. Phone must match exactly at login.
+  isPreloaded  Boolean   @default(false)
+  preloadedAt  DateTime?
+  preloadedBy  String?   // operator userId who imported
+
   createdAt           DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -565,6 +571,12 @@ model Chat {
   requestId  String?    @unique // Associated request (optional, for request-contextual chats)
   request    Request?   @relation(fields: [requestId], references: [id], onDelete: Cascade)
   status     ChatStatus @default(OPEN)
+  // Set to true when the user explicitly taps "Necesito ayuda". Cleared the
+  // moment an operator sends any message into the chat. Lets the operator panel
+  // highlight chats that need attention vs. regular threads.
+  needsHelp        Boolean   @default(false)
+  helpRequestedAt  DateTime?
+  helpContext      String? // "chat" | "prize" — what the user was doing when asking
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 
@@ -575,6 +587,7 @@ model Chat {
   @@index([operatorId])
   @@index([requestId])
   @@index([status])
+  @@index([needsHelp])
 }
 
 model Message {

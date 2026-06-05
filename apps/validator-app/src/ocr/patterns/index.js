@@ -40,7 +40,9 @@ function detectPlatform(lowerText) {
  * @returns {{ platform: string, platformName: string, fields: object }}
  */
 function detectAndExtract(text, expectedAmount = null) {
-  const lower = text.toLowerCase();
+  // Collapse whitespace for platform detection so keywords like "onda siempre"
+  // match even when the OCR puts a newline between the two words.
+  const lower = text.toLowerCase().replace(/\s+/g, ' ');
   const platform = detectPlatform(lower);
 
   if (platform) {

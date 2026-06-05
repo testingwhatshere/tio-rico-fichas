@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { getSocket } from '@/services/socket';
 import { useAuthStore } from '@/stores/auth.store';
@@ -14,6 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 import colors from '@/constants/colors';
 import { hapticLight, hapticMedium, hapticSuccess } from '@/utils/haptics';
 import { formatAmount, MAX_INPUT_AMOUNT } from '@/utils/amount';
+import { settingsApi, chatsApi } from '@/services/api';
+import { crossAlert } from '@/utils/dialog';
 
 interface PrizeClaimCardProps {
   isDisabled?: boolean;
@@ -46,7 +49,52 @@ export default function PrizeClaimCard({
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [requestingHelp, setRequestingHelp] = useState(false);
   const processingRef = useRef(false);
+
+  // Help button: ping operators via backend endpoint (panel + Telegram alert)
+  // or open WhatsApp directly. The backend marks the chat needsHelp = true.
+  const handleNeedHelp = async () => {
+    if (requestingHelp) return;
+    setRequestingHelp(true);
+    hapticLight();
+    try {
+      const settings = await settingsApi.getPublic().catch(() => null);
+      const supportPhone = settings?.supportPhoneNumber || '';
+
+      const openWhatsApp = () => {
+        if (!supportPhone) {
+          crossAlert('Sin numero', 'No hay un numero de soporte configurado.');
+          return;
+        }
+        const tel = supportPhone.replace(/[^\d+]/g, '');
+        const text = encodeURIComponent('Hola, necesito ayuda con mi cobro de premio.');
+        Linking.openURL(`https://wa.me/${tel}?text=${text}`).catch(() => {});
+      };
+
+      const { crossConfirm } = await import('@/utils/dialog');
+      const wantsChat = await crossConfirm(
+        '¿Cómo querés que te ayudemos?',
+        'Podemos avisarle al operador en el chat o abrir WhatsApp directo.',
+        {
+          confirmText: 'Avisar en el chat',
+          cancelText: 'Abrir WhatsApp',
+        },
+      );
+      if (wantsChat) {
+        try {
+          await chatsApi.requestHelp('prize');
+          crossAlert('Listo', 'Le avisamos al operador. Vas a recibir respuesta en el chat.');
+        } catch {
+          crossAlert('No pudimos avisar', 'Intentá de nuevo o probá por WhatsApp.');
+        }
+      } else {
+        openWhatsApp();
+      }
+    } finally {
+      setRequestingHelp(false);
+    }
+  };
 
   const presetAmounts = [3000, 5000, 10000, 25000];
 
@@ -147,7 +195,8 @@ export default function PrizeClaimCard({
               if (response?.success) {
                 hapticSuccess();
                 setSubmitted(true);
-                if (onCancel) setTimeout(() => onCancel(), 1500);
+                // No auto-close: user taps "Cerrar" manually. The setTimeout
+                // produced a race condition with React re-renders that wiped the home UI.
               } else {
                 setError(response?.error || 'No se pudo crear la solicitud');
                 processingRef.current = false;
@@ -162,7 +211,6 @@ export default function PrizeClaimCard({
           if (result?.id) {
             hapticSuccess();
             setSubmitted(true);
-            if (onCancel) setTimeout(() => onCancel(), 1500);
           } else {
             throw new Error('No se pudo crear la solicitud');
           }
@@ -189,6 +237,27 @@ export default function PrizeClaimCard({
         <Text style={styles.disabledText}>
           Premio: ${formatAmount(amountNum)} — {method === 'CBU' ? `CBU: ...${cbu.slice(-4)}` : `Alias: ${alias}`} — {accountHolder}
         </Text>
+        <Text style={[styles.disabledText, { marginTop: 8, fontSize: 12 }]}>
+          Un operador la va a procesar en unos minutos. Te avisamos cuando este lista.
+        </Text>
+        {submitted && onCancel ? (
+          <TouchableOpacity
+            onPress={onCancel}
+            style={{
+              marginTop: 14,
+              alignSelf: 'stretch',
+              paddingVertical: 12,
+              borderRadius: 10,
+              backgroundColor: colors.accent,
+              alignItems: 'center',
+            }}
+            activeOpacity={0.8}
+          >
+            <Text style={{ color: colors.textOnPrimary, fontWeight: '700', fontSize: 14 }}>
+              Cerrar
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   }
@@ -206,8 +275,23 @@ export default function PrizeClaimCard({
         <Ionicons name="information-circle-outline" size={16} color={colors.warning || '#f59e0b'} />
         <Text style={styles.requirementsText}>
           Para cobrar, necesitas tener fichas en tu cuenta del casino. Minimo $3.000.
+          {'\n'}
+          <Text style={styles.requirementsHighlight}>Solo se puede cobrar 1 premio cada 24 hs.</Text>
         </Text>
       </View>
+
+      {/* Help button */}
+      <TouchableOpacity
+        style={styles.helpButton}
+        onPress={handleNeedHelp}
+        disabled={requestingHelp}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="help-circle-outline" size={16} color={colors.accent} />
+        <Text style={styles.helpButtonText}>
+          {requestingHelp ? 'Pidiendo ayuda...' : 'Necesito ayuda con mi premio'}
+        </Text>
+      </TouchableOpacity>
 
       {/* Amount section */}
       <View style={styles.section}>
@@ -570,6 +654,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
     lineHeight: 18,
+  },
+  requirementsHighlight: {
+    color: colors.warning || '#f59e0b',
+    fontWeight: '700',
+  },
+  helpButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+    marginBottom: 14,
+  },
+  helpButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.accent,
   },
   cancelButton: {
     alignItems: 'center',

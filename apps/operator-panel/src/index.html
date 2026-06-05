@@ -332,6 +332,16 @@
           <span>Usuarios</span>
         </button>
 
+        <button class="nav-item" data-view="preload-users" title="Importar usuarios desde CSV">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="12" y1="18" x2="12" y2="12"/>
+            <line x1="9" y1="15" x2="15" y2="15"/>
+          </svg>
+          <span>Pre-cargados</span>
+        </button>
+
         <button class="nav-item" data-view="panels">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
@@ -815,6 +825,44 @@
           <div id="users-list" class="users-list">
             <div class="empty-state">
               <p>Cargando usuarios...</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Preloaded Users (CSV import) View -->
+        <section id="view-preload-users" class="view">
+          <div class="view-header">
+            <h2>Usuarios Pre-cargados</h2>
+            <button id="preload-refresh-btn" class="btn btn-secondary btn-sm">Recargar</button>
+          </div>
+
+          <div class="card" style="padding:16px; margin-bottom:16px;">
+            <h3 style="margin-top:0;">Importar desde CSV</h3>
+            <p style="font-size:0.85rem; color:#94a3b8; margin:8px 0 14px;">
+              El archivo debe tener columnas en este orden: <b>username, phone, panelId</b> (panelId es opcional).<br>
+              Una fila por usuario. La primera fila puede ser el encabezado (se ignora si dice "username").
+            </p>
+            <div style="margin-bottom:10px;">
+              <input type="file" id="preload-csv-input" accept=".csv,text/csv,text/plain" style="display:none;">
+              <button id="preload-pick-btn" class="btn btn-primary btn-sm">Elegir archivo CSV</button>
+              <span id="preload-filename" style="margin-left:10px; font-size:0.85rem; color:#94a3b8;">Ningún archivo seleccionado</span>
+            </div>
+            <div id="preload-preview" class="hidden" style="margin-top:12px;">
+              <div style="font-size:0.8rem; color:#94a3b8; margin-bottom:6px;">
+                Vista previa: <span id="preload-preview-count">0</span> filas válidas
+              </div>
+              <div id="preload-preview-list" style="max-height:200px; overflow-y:auto; background:rgba(0,0,0,0.3); padding:8px; border-radius:6px; font-family:monospace; font-size:0.75rem;"></div>
+              <button id="preload-submit-btn" class="btn btn-primary" style="margin-top:10px;">
+                Importar al sistema
+              </button>
+            </div>
+            <div id="preload-result" class="hidden" style="margin-top:12px; padding:10px; border-radius:6px;"></div>
+          </div>
+
+          <div class="card" style="padding:16px;">
+            <h3 style="margin-top:0;">Pre-cargados actuales (<span id="preload-count">0</span>)</h3>
+            <div id="preload-list" style="margin-top:10px;">
+              <div class="empty-state"><p>Cargando...</p></div>
             </div>
           </div>
         </section>

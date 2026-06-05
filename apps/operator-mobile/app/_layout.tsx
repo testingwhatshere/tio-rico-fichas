@@ -62,6 +62,29 @@ function registerSocketListeners(socket: ReturnType<typeof getSocket>) {
       if (data.type === 'USER' || data.senderType === 'USER') notifyMessage();
     }
   });
+  // User tapped "Necesito ayuda" — high-priority alert. addChat upserts so it
+  // works even if the chat isn't loaded yet.
+  socket.on('chat:help_requested', (data: any) => {
+    if (!data.chatId) return;
+    const contextLabel = data.context === 'prize' ? 'cobro de premio' : 'soporte';
+    store().addChat({
+      id: data.chatId,
+      userId: data.userId,
+      user: { id: data.userId, username: data.username },
+      needsHelp: true,
+      helpContext: data.context,
+      helpRequestedAt: data.requestedAt,
+      updatedAt: data.requestedAt,
+      lastMessage: { content: data.message, type: 'USER', createdAt: data.requestedAt },
+    });
+    notifyCritical();
+    Alert.alert('🙋 AYUDA solicitada', `${data.username} pidió ayuda con ${contextLabel}`);
+  });
+  socket.on('chat:help_cleared', (data: any) => {
+    if (data.chatId) {
+      store().updateChat(data.chatId, { needsHelp: false, helpContext: null, helpRequestedAt: null });
+    }
+  });
   socket.on('stats_update', (data: any) => store().updateStats(data));
   socket.on('kill_switch', (data: any) => store().setKillSwitch(data.active));
   socket.on('bot_status', (data: any) => {

@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { ChatsGateway } from '../events/chats.gateway';
 import { OperatorGateway } from '../events/operator.gateway';
+import { ChatsService } from '../chats/chats.service';
 import {
   SendMessageDto,
   GetMessagesQueryDto,
@@ -24,6 +25,8 @@ export class MessagesService {
     private readonly chatsGateway: ChatsGateway,
     @Inject(forwardRef(() => OperatorGateway))
     private readonly operatorGateway: OperatorGateway,
+    @Inject(forwardRef(() => ChatsService))
+    private readonly chatsService: ChatsService,
   ) {}
 
   /**
@@ -117,6 +120,12 @@ export class MessagesService {
         chatId: dto.chatId,
         content: dto.content,
         senderId,
+      });
+      // The user's pending help request is considered "attended to" the moment
+      // any operator chimes in. Clear the flag so the chat stops being
+      // highlighted in the operator panel sidebar.
+      this.chatsService.clearHelpFlag(dto.chatId).catch((err) => {
+        this.logger.warn(`clearHelpFlag failed for ${dto.chatId}: ${err.message}`);
       });
     }
 

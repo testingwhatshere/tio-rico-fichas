@@ -12,14 +12,13 @@ import {
   Keyboard,
   RefreshControl,
   ImageBackground,
-  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useAuthStore } from '@/stores/auth.store';
-import { settingsApi, chatsApi, messagesApi, requestsApi, authApi } from '@/services/api';
+import { settingsApi, chatsApi, messagesApi, requestsApi, authApi, prizeClaimsApi } from '@/services/api';
 import { sendMessage as sendSocketMessage, getSocket } from '@/services/socket';
 import { hapticLight } from '@/utils/haptics';
 import { formatAmount } from '@/utils/amount';
@@ -49,6 +48,17 @@ const STATUS_LABELS: Record<string, { emoji: string; text: string }> = {
   CANCELLED: { emoji: '🔙', text: 'Cancelada' },
 };
 
+const PRIZE_STATUS_LABELS: Record<string, { emoji: string; text: string }> = {
+  PENDING_PAYMENT_DETAILS: { emoji: '📝', text: 'Esperando datos de pago' },
+  PENDING_VERIFICATION: { emoji: '⏳', text: 'Verificando premio' },
+  AWAITING_PAYMENT: { emoji: '💰', text: 'Esperando que el operador pague' },
+  PROCESSING_PAYMENT: { emoji: '🔄', text: 'Pagando premio' },
+  COMPLETED: { emoji: '✅', text: 'Premio pagado' },
+  REJECTED: { emoji: '❌', text: 'Premio rechazado' },
+  VERIFICATION_FAILED: { emoji: '⚠️', text: 'En revision manual' },
+  FAILED: { emoji: '⚠️', text: 'En revision manual' },
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
@@ -60,6 +70,7 @@ export default function HomeScreen() {
   const [loadingChat, setLoadingChat] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeRequest, setActiveRequest] = useState<any>(null);
+  const [activePrizeClaim, setActivePrizeClaim] = useState<any>(null);
   const [usernameCopied, setUsernameCopied] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showPrizeModal, setShowPrizeModal] = useState(false);
@@ -95,6 +106,11 @@ export default function HomeScreen() {
       setActiveRequest(active || null);
     }).catch(() => {});
 
+    // Active prize claim
+    prizeClaimsApi.getMyActive().then((claim) => {
+      setActivePrizeClaim(claim || null);
+    }).catch(() => {});
+
     // Recent messages
     await loadRecentMessages();
   }, []);
@@ -102,6 +118,36 @@ export default function HomeScreen() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Real-time refresh of the active prize claim when socket events update it.
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const refresh = () => {
+      prizeClaimsApi.getMyActive().then((claim) => setActivePrizeClaim(claim || null)).catch(() => {});
+    };
+    socket.on('prize_claim:status_update', refresh);
+    socket.on('prize_claim:payment_sent', refresh);
+    socket.on('prize_claim:rejected', refresh);
+
+    // In-app banner for password change result. Fires regardless of which
+    // screen the user is on, so it complements the system message in the chat
+    // and the native push notification.
+    const onPasswordChanged = (data: any) => {
+      const msg = data?.success
+        ? '✅ Tu contraseña fue cambiada. Ya podés usar la nueva para ingresar al panel.'
+        : `❌ No pudimos cambiar tu contraseña. ${data?.error || 'Contactá a soporte.'}`;
+      showSuccessBanner(msg);
+    };
+    socket.on('password:changed', onPasswordChanged);
+
+    return () => {
+      socket.off('prize_claim:status_update', refresh);
+      socket.off('prize_claim:payment_sent', refresh);
+      socket.off('prize_claim:rejected', refresh);
+      socket.off('password:changed', onPasswordChanged);
+    };
+  }, [showSuccessBanner]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -319,6 +365,28 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
+        {/* Active Prize Claim Banner */}
+        {activePrizeClaim && (
+          <TouchableOpacity
+            style={styles.statusBanner}
+            onPress={() => router.push('/chat')}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.statusBannerEmoji}>
+              {PRIZE_STATUS_LABELS[activePrizeClaim.status]?.emoji || '🏆'}
+            </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.statusBannerText}>
+                Premio · {PRIZE_STATUS_LABELS[activePrizeClaim.status]?.text || 'En proceso'}
+              </Text>
+              <Text style={styles.statusBannerAmount}>
+                ${formatAmount(Number(activePrizeClaim.amount))}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+        )}
+
         {/* Action Cards */}
         <View style={styles.cardsContainer}>
           <TouchableOpacity style={[styles.card, styles.cardHighlight]} onPress={handlePlayGame} activeOpacity={0.7}>
@@ -355,140 +423,91 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Chat Preview Widget */}
-        <TouchableOpacity
-          style={styles.chatPreview}
-          onPress={() => router.push('/chat')}
-          activeOpacity={0.9}
-        >
-          <View style={styles.chatPreviewHeader}>
-            <Image source={require('@/assets/icon.png')} style={styles.chatPreviewIcon} />
-            <Text style={styles.chatPreviewTitle}>Chat</Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-          </View>
-
-          {/* Recent messages */}
-          <View style={styles.chatPreviewMessages}>
-            {loadingChat ? (
-              <ActivityIndicator size="small" color={colors.accent} style={{ paddingVertical: 12 }} />
-            ) : recentMessages.length === 0 ? (
-              <Text style={styles.chatPreviewEmpty}>Escribi algo para empezar</Text>
-            ) : (
-              recentMessages.map((msg) => (
-                <View key={msg.id} style={styles.chatPreviewMsg}>
-                  {msg.type === 'USER' ? (
-                    <Ionicons name="person-circle" size={18} color={colors.textMuted} />
-                  ) : (
-                    <Image source={require('@/assets/icon.png')} style={styles.chatPreviewMsgIcon} />
-                  )}
-                  <Text style={styles.chatPreviewMsgText} numberOfLines={1}>
-                    {msg.imageUrl ? '📷 Imagen' : msg.content}
-                  </Text>
-                  <Text style={styles.chatPreviewMsgTime}>{formatTime(msg.createdAt)}</Text>
-                </View>
-              ))
-            )}
-          </View>
-
-          {/* Quick action: tap to open chat (text input removed — proof upload only) */}
-          <View style={styles.chatPreviewInputRow}>
-            <View style={[styles.chatPreviewInput, { justifyContent: 'center' }]}>
-              <Text style={{ color: colors.textMuted, fontSize: 13 }}>
-                Toca para abrir el chat
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => router.push('/chat')}
-              style={styles.chatPreviewSend}
-              accessibilityLabel="Abrir chat"
-            >
-              <Ionicons name="chevron-forward" size={18} color={colors.textOnPrimary} />
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
       </ScrollView>
 
-    </SafeAreaView>
-    </ImageBackground>
-
-    {/* Password Change Modal */}
-    <Modal
-      visible={showPasswordModal}
-      transparent
-      animationType="fade"
-      onRequestClose={handleClosePasswordModal}
-    >
-      <View style={pwStyles.overlay}>
-        <View style={pwStyles.card}>
-          <View style={pwStyles.header}>
-            <Ionicons name="key" size={24} color={colors.accent} />
-            <Text style={pwStyles.title}>Cambiar Contraseña</Text>
-            <TouchableOpacity onPress={handleClosePasswordModal} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="close" size={24} color={colors.textMuted} />
+      {/* Password Change Overlay (manual, not RN Modal — avoids platform quirks) */}
+      {showPasswordModal && (
+        <View style={pwStyles.overlay} pointerEvents="box-none">
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={handleClosePasswordModal}
+          />
+          <View style={pwStyles.card}>
+            <View style={pwStyles.header}>
+              <Ionicons name="key" size={24} color={colors.accent} />
+              <Text style={pwStyles.title}>Cambiar Contraseña</Text>
+              <TouchableOpacity onPress={handleClosePasswordModal} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="close" size={24} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <Text style={pwStyles.description}>
+              Ingresa tu nueva contraseña para el panel de juego.
+            </Text>
+            <TextInput
+              style={pwStyles.input}
+              placeholder="Nueva contraseña"
+              placeholderTextColor={colors.textMuted}
+              secureTextEntry
+              value={newPassword}
+              onChangeText={setNewPassword}
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={pwStyles.input}
+              placeholder="Confirmar contraseña"
+              placeholderTextColor={colors.textMuted}
+              secureTextEntry
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              autoCapitalize="none"
+              onSubmitEditing={handleChangePassword}
+            />
+            <TouchableOpacity
+              style={[pwStyles.button, changingPassword && { opacity: 0.6 }]}
+              onPress={handleChangePassword}
+              disabled={changingPassword}
+              activeOpacity={0.8}
+            >
+              {changingPassword ? (
+                <ActivityIndicator size="small" color="#000" />
+              ) : (
+                <Text style={pwStyles.buttonText}>Cambiar</Text>
+              )}
             </TouchableOpacity>
           </View>
-          <Text style={pwStyles.description}>
-            Ingresa tu nueva contraseña para el panel de juego.
-          </Text>
-          <TextInput
-            style={pwStyles.input}
-            placeholder="Nueva contraseña"
-            placeholderTextColor={colors.textMuted}
-            secureTextEntry
-            value={newPassword}
-            onChangeText={setNewPassword}
-            autoCapitalize="none"
-          />
-          <TextInput
-            style={pwStyles.input}
-            placeholder="Confirmar contraseña"
-            placeholderTextColor={colors.textMuted}
-            secureTextEntry
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            autoCapitalize="none"
-            onSubmitEditing={handleChangePassword}
-          />
-          <TouchableOpacity
-            style={[pwStyles.button, changingPassword && { opacity: 0.6 }]}
-            onPress={handleChangePassword}
-            disabled={changingPassword}
-            activeOpacity={0.8}
-          >
-            {changingPassword ? (
-              <ActivityIndicator size="small" color="#000" />
-            ) : (
-              <Text style={pwStyles.buttonText}>Cambiar</Text>
-            )}
-          </TouchableOpacity>
         </View>
-      </View>
-    </Modal>
+      )}
 
-    {/* Prize Claim Modal */}
-    <Modal
-      visible={showPrizeModal}
-      transparent
-      animationType="slide"
-      onRequestClose={handleClosePrizeModal}
-    >
-      <View style={prizeModalStyles.overlay}>
-        <View style={prizeModalStyles.card}>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <PrizeClaimCard onCancel={handleClosePrizeModal} />
-          </ScrollView>
+      {/* Prize Claim Overlay (manual, not RN Modal) */}
+      {showPrizeModal && (
+        <View style={prizeModalStyles.overlay} pointerEvents="box-none">
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={handleClosePrizeModal}
+          />
+          <View style={prizeModalStyles.card}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <PrizeClaimCard onCancel={handleClosePrizeModal} />
+            </ScrollView>
+          </View>
         </View>
-      </View>
-    </Modal>
+      )}
+    </SafeAreaView>
+    </ImageBackground>
     </>
   );
 }
 
 const prizeModalStyles = StyleSheet.create({
   overlay: {
-    flex: 1,
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.7)',
     justifyContent: 'flex-end',
+    zIndex: 1000,
+    elevation: 1000,
   },
   card: {
     maxHeight: '85%',
@@ -506,11 +525,14 @@ const prizeModalStyles = StyleSheet.create({
 
 const pwStyles = StyleSheet.create({
   overlay: {
-    flex: 1,
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.7)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
+    zIndex: 1000,
+    elevation: 1000,
   },
   card: {
     width: '100%',

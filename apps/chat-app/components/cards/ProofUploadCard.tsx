@@ -103,13 +103,17 @@ export default function ProofUploadCard({
       await onUpload(selectedFile, (progress: number) => setUploadProgress(progress));
       uploadingRef.current = false;
       setIsUploading(false);
-    } catch (error) {
+    } catch (error: any) {
       uploadingRef.current = false;
       setIsUploading(false);
       setUploadProgress(0);
+      const backendMessage =
+        error?.response?.data?.message ||
+        error?.message ||
+        'No pudimos subir el comprobante. Intentá de nuevo.';
       Alert.alert(
         'Error al subir',
-        'No pudimos subir el comprobante. Intentá de nuevo.',
+        backendMessage,
         [
           { text: 'Reintentar', onPress: handleUpload },
           { text: 'Cambiar archivo', onPress: () => setSelectedFile(null) },

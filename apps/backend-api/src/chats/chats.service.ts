@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, Inject, for
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { OperatorGateway } from '../events/operator.gateway';
+import { TelegramService } from '../notifications/telegram.service';
 import { ChatStatus, ChatQueryDto, ChatResponseDto } from './dto';
 
 @Injectable()
@@ -14,7 +15,114 @@ export class ChatsService {
     private readonly eventsGateway: EventsGateway,
     @Inject(forwardRef(() => OperatorGateway))
     private readonly operatorGateway: OperatorGateway,
+    @Inject(forwardRef(() => TelegramService))
+    private readonly telegramService: TelegramService,
   ) {}
+
+  // ==========================================
+  // HELP REQUESTS
+  // ==========================================
+
+  /**
+   * The user hit "Necesito ayuda" in chat-app. Mark the chat, persist a system
+   * message describing the context, and fan out alerts to every operator
+   * channel (operator-panel, mobile, Telegram).
+   *
+   * `context` is "chat" or "prize" — lets the operator see at a glance what the
+   * user was doing when they asked for help.
+   */
+  async requestHelp(userId: string, context: 'chat' | 'prize' = 'chat'): Promise<{ chatId: string }> {
+    const chat = await this.getOrCreateChat(userId);
+
+    const now = new Date();
+    await this.prisma.chat.update({
+      where: { id: chat.id },
+      data: {
+        needsHelp: true,
+        helpRequestedAt: now,
+        helpContext: context,
+        updatedAt: now,
+      },
+    });
+
+    const contextLabel = context === 'prize' ? 'cobro de premio' : 'chat';
+    const messageContent =
+      context === 'prize'
+        ? '🙋 Necesito ayuda con mi cobro de premio.'
+        : '🙋 Necesito ayuda. ¿Un operador me puede atender?';
+
+    // Persist a USER message so it's visible in the conversation as a normal
+    // bubble. Operator clients also pick this up via 'new_message' and surface
+    // a notification of their own.
+    const message = await this.prisma.message.create({
+      data: {
+        chatId: chat.id,
+        senderId: userId,
+        content: messageContent,
+        type: 'USER',
+      },
+      include: {
+        sender: {
+          select: { id: true, email: true, username: true, role: true },
+        },
+      },
+    });
+
+    const formatted = {
+      id: message.id,
+      chatId: chat.id,
+      senderId: userId,
+      content: messageContent,
+      type: 'USER' as const,
+      createdAt: message.createdAt,
+      sender: message.sender,
+    };
+
+    // 1) Emit the chat message as if the user had typed it.
+    this.eventsGateway.emitToChatRoom(chat.id, 'message:new', formatted);
+    this.operatorGateway.emitNewMessage(formatted);
+
+    // 2) Dedicated help_requested event so the operator panel can play a
+    //    distinct sound + highlight the chat in the sidebar.
+    const helpPayload = {
+      chatId: chat.id,
+      userId,
+      context,
+      message: messageContent,
+      requestedAt: now.toISOString(),
+      username: (chat.user as any)?.username || chat.user?.email || 'usuario',
+    };
+    this.operatorGateway.emitHelpRequested(helpPayload);
+    this.eventsGateway.emitToOperators('chat:help_requested', helpPayload);
+
+    // 3) Telegram ping for operators who aren't watching the panel.
+    this.telegramService
+      .alertHelpRequested(helpPayload.username, context)
+      .catch((err) => this.logger.warn(`Telegram help alert failed: ${err.message}`));
+
+    this.logger.log(`Help requested by ${userId} in chat ${chat.id} (context: ${context})`);
+
+    return { chatId: chat.id };
+  }
+
+  /**
+   * Clear the needsHelp flag — called automatically when an operator sends any
+   * message into the chat (in messages.service). Idempotent.
+   */
+  async clearHelpFlag(chatId: string): Promise<void> {
+    const chat = await this.prisma.chat.findUnique({
+      where: { id: chatId },
+      select: { needsHelp: true },
+    });
+    if (!chat || !chat.needsHelp) return;
+    await this.prisma.chat.update({
+      where: { id: chatId },
+      data: { needsHelp: false },
+    });
+    const payload = { chatId };
+    this.operatorGateway.emitToAll('chat:help_cleared', payload);
+    this.eventsGateway.emitToOperators('chat:help_cleared', payload);
+  }
 
   /**
    * Get or create a chat for a user

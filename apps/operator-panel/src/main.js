@@ -21,8 +21,8 @@ const configPath = path.join(app.getPath('userData'), 'config.json');
 let state = {
   connected: false,
   config: {
-    backendUrl: '',
-    apiKey: '',
+    backendUrl: 'https://tiorico-api.onrender.com',
+    apiKey: 'Narciso',
     operatorName: ''
   },
   pendingFailures: 0,
@@ -804,6 +804,55 @@ function connectToBackend() {
 
     // Bot AI removed: users no longer send free-text messages.
     // Proof images are processed by the validator (OCR + Ollama fallback).
+  });
+
+  // User explicitly tapped "Necesito ayuda" — mark chat in store, alert
+  // operator with distinct sound + persistent toast.
+  socket.on('chat:help_requested', (data) => {
+    console.log('[Main] HELP requested:', data.chatId, 'context:', data.context);
+    const chat = store.chats.find(c => c.id === data.chatId);
+    if (chat) {
+      chat.needsHelp = true;
+      chat.helpContext = data.context;
+      chat.helpRequestedAt = data.requestedAt;
+    } else {
+      // Chat not yet in store — push minimal entry so the sidebar shows the
+      // help request immediately.
+      store.chats.unshift({
+        id: data.chatId,
+        status: 'OPEN',
+        user: { id: data.userId, username: data.username },
+        needsHelp: true,
+        helpContext: data.context,
+        helpRequestedAt: data.requestedAt,
+        unread: 1,
+        unreadCount: 1,
+        lastMessage: { content: data.message, createdAt: data.requestedAt, type: 'USER' },
+        createdAt: data.requestedAt,
+        updatedAt: data.requestedAt,
+      });
+    }
+    state.lastUpdate = new Date().toISOString();
+    sendToRenderer('data-update', { store, state, notificationSettings, quickReplies });
+    sendToRenderer('chat-help-requested', data);
+    const contextLabel = data.context === 'prize' ? 'cobro de premio' : 'chat';
+    showNotification(
+      '🙋 AYUDA solicitada',
+      `${data.username} pidió ayuda con ${contextLabel}`,
+      'critical',
+      'validation_failure', // reuse the urgent "alert" sound mapping
+    );
+  });
+
+  socket.on('chat:help_cleared', (data) => {
+    const chat = store.chats.find(c => c.id === data.chatId);
+    if (chat) {
+      chat.needsHelp = false;
+      chat.helpContext = null;
+      chat.helpRequestedAt = null;
+      sendToRenderer('data-update', { store, state, notificationSettings, quickReplies });
+      sendToRenderer('chat-help-cleared', data);
+    }
   });
 
   socket.on('messages:read', (data) => {
@@ -1795,6 +1844,75 @@ ipcMain.handle('create-panel-user', async (event, targetUsername) => {
     logActivity('CREATE_PANEL_USER', { targetUsername });
   }
   return response;
+});
+
+// --- Preloaded users (CSV bulk import) — HTTP, not socket ---
+
+ipcMain.handle('bulk-import-preloaded', async (event, entries) => {
+  try {
+    if (!state.config?.backendUrl || !state.config?.apiKey) {
+      return { error: 'Backend no configurado' };
+    }
+    const url = `${state.config.backendUrl}/api/users/preloaded/bulk`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-Operator-API-Key': state.config.apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ entries }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      return { error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
+    }
+    const data = await response.json();
+    logActivity('PRELOAD_USERS_IMPORTED', {
+      created: data.created,
+      updated: data.updated,
+      errors: data.errors?.length || 0,
+    });
+    return { success: true, data };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('list-preloaded-users', async () => {
+  try {
+    if (!state.config?.backendUrl || !state.config?.apiKey) {
+      return { error: 'Backend no configurado' };
+    }
+    const url = `${state.config.backendUrl}/api/users/preloaded`;
+    const response = await fetch(url, {
+      headers: { 'X-Operator-API-Key': state.config.apiKey },
+    });
+    if (!response.ok) return { error: `HTTP ${response.status}` };
+    const data = await response.json();
+    return { success: true, data };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('unflag-preloaded-user', async (event, userId) => {
+  try {
+    if (!state.config?.backendUrl || !state.config?.apiKey) {
+      return { error: 'Backend no configurado' };
+    }
+    const url = `${state.config.backendUrl}/api/users/preloaded/${encodeURIComponent(userId)}`;
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'X-Operator-API-Key': state.config.apiKey },
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      return { error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
+    }
+    return { success: true };
+  } catch (err) {
+    return { error: err.message };
+  }
 });
 
 // ============================================

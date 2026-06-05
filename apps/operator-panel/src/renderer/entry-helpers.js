@@ -12,6 +12,7 @@ import { initWalletsView } from './views/wallets.js';
 import { initPrizesView } from './views/prizes.js';
 import { initPaymentsView } from './views/payments.js';
 import { initUsersView } from './views/users.js';
+import { initPreloadUsersView } from './views/preload-users.js';
 import { initRequestsView } from './views/requests.js';
 import { loadSettings } from './views/settings.js';
 import { loadPanels, setupPanelsView, editPanel, deactivatePanel, activatePanel } from './views/panels.js';
@@ -44,6 +45,7 @@ export function navigateTo(view) {
     case 'prizes': initPrizesView(); break;
     case 'payments': initPaymentsView(); break;
     case 'users': initUsersView(); break;
+    case 'preload-users': initPreloadUsersView(); break;
     case 'requests': initRequestsView(); break;
     case 'panels': setupPanelsView(); loadPanels(); break;
     case 'extensions': renderExtensionsList(); break;

@@ -10,6 +10,7 @@ import { ProofValidationService } from './proof-validation.service';
 import { ValidationResultDto } from './dto';
 import { VALIDATION_TIMEOUT_BUFFER_MS } from '../common/constants/timeouts';
 import { AppEvent, ValidationCompletedEvent, PaymentProofUploadedEvent, MpVerificationNeededEvent } from '../common/events/app-events';
+import { PushService } from '../notifications/push.service';
 
 @Injectable()
 export class PaymentsService {
@@ -26,6 +27,7 @@ export class PaymentsService {
     @Inject(forwardRef(() => SettingsService))
     private readonly settingsService: SettingsService,
     private readonly proofValidationService: ProofValidationService,
+    private readonly pushService: PushService,
   ) {}
 
   /**
@@ -125,6 +127,18 @@ export class PaymentsService {
         proofUrl: request.proofUrl,
       });
 
+      // Push notification — even if validator was unavailable, the user should know.
+      this.pushService
+        .sendToUser(
+          request.userId,
+          'Comprobante en revisión',
+          isValidatorUnavailable
+            ? 'El servicio automático no está disponible. Un operador lo revisará en breve.'
+            : 'No pudimos validar tu comprobante automáticamente. Un operador lo revisará.',
+          { requestId, type: 'validation_error' },
+        )
+        .catch((err: any) => this.logger.warn(`Push (validation_error) failed: ${err.message}`));
+
       await this.requestsService.setValidationResult(requestId, {
         valid: false,
         score: 0,
@@ -214,6 +228,16 @@ export class PaymentsService {
         proofUrl: request.proofUrl,
         validationScore: validationResult.score,
       });
+      // Push notification — covers the case where the automated validator rejects
+      // the proof and the user is on home/closed-app and wouldn't see chat msgs.
+      this.pushService
+        .sendToUser(
+          request.userId,
+          'Comprobante en revisión',
+          'No pudimos validar tu comprobante automáticamente. Un operador lo está revisando.',
+          { requestId, type: 'validation_failed' },
+        )
+        .catch((err: any) => this.logger.warn(`Push (validation_failed) failed: ${err.message}`));
     }
 
     return validationResult;

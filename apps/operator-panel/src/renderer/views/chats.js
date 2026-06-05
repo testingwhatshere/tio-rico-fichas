@@ -59,8 +59,10 @@ export function renderChatsList() {
 
   const selectedChat = getSelectedChat();
 
-  // Sort chats by most recent activity
+  // Sort chats: needsHelp first (newest first), then by most recent activity.
   const sortedChats = [...chatsToRender].sort((a, b) => {
+    if (a.needsHelp && !b.needsHelp) return -1;
+    if (!a.needsHelp && b.needsHelp) return 1;
     const timeA = a.lastMessage?.createdAt || a.updatedAt || a.createdAt || '';
     const timeB = b.lastMessage?.createdAt || b.updatedAt || b.createdAt || '';
     return timeB.localeCompare(timeA);
@@ -72,10 +74,13 @@ export function renderChatsList() {
     const unread = chat.unread || chat.unreadCount || 0;
     const status = chat.status || 'OPEN';
     const isActive = selectedChat?.id === chat.id;
+    const needsHelp = !!chat.needsHelp;
+    const helpContextLabel = chat.helpContext === 'prize' ? 'premio' : 'chat';
 
     return `
-      <div class="chat-item ${unread > 0 ? 'unread' : ''} ${isActive ? 'active' : ''}"
+      <div class="chat-item ${unread > 0 ? 'unread' : ''} ${isActive ? 'active' : ''} ${needsHelp ? 'needs-help' : ''}"
            onclick="selectChat('${chat.id}')">
+        ${needsHelp ? `<div class="chat-help-banner">🙋 AYUDA · ${helpContextLabel}</div>` : ''}
         <div class="chat-item-header">
           <span class="chat-name">${escapeHtml(userName)}</span>
           ${unread > 0 ? `<span class="chat-unread-badge">${unread}</span>` : ''}

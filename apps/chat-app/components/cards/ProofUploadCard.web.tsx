@@ -59,13 +59,17 @@ export default function ProofUploadCard({
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || isUploading) return;
 
     setIsUploading(true);
     try {
       await onUpload(selectedFile);
     } catch {
       Alert.alert('Error', 'No pudimos subir el comprobante. Intenta de nuevo.');
+    } finally {
+      // Always release the spinner. The hook may have caught the error and
+      // returned normally (e.g. duplicate-proof) — without finally, the button
+      // stays spinning and the user can't change the file or retry.
       setIsUploading(false);
     }
   };

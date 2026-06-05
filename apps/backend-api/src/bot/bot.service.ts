@@ -8,6 +8,7 @@ import { BalanceService } from '../balance/balance.service';
 import { BotGateway } from './bot.gateway';
 import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../notifications/telegram.service';
+import { PushService } from '../notifications/push.service';
 import { JobStatus, RequestStatus, JobType } from '@prisma/client';
 import { JobResultDto, JobProgressDto, BotStatusDto, HeartbeatDto } from './dto';
 import { STALE_PROGRESS_MS, BOT_HEARTBEAT_TIMEOUT_MS } from '../common/constants/timeouts';
@@ -210,7 +211,7 @@ export class BotService implements OnModuleInit {
         data: { newPassword: null },
       });
 
-      // Send system message to user's chat
+      // Send system message to user's chat + native push notification.
       if (job.requestingUserId) {
         try {
           const chatsService = this.moduleRef.get(ChatsService, { strict: false });
@@ -222,6 +223,32 @@ export class BotService implements OnModuleInit {
           await messagesService.sendSystemMessage(chat.id, msg);
         } catch (err) {
           this.logger.warn(`Failed to send password change notification: ${err.message}`);
+        }
+        try {
+          // Push notification so the user sees it even if the chat-app is closed
+          // or they're on the home screen (which doesn't open the chat to see msgs).
+          const pushService = this.moduleRef.get(PushService, { strict: false });
+          if (pushService?.sendToUser) {
+            const title = dto.success ? '✅ Contraseña cambiada' : '❌ Cambio de contraseña falló';
+            const body = dto.success
+              ? 'Ya podés usar la nueva contraseña para ingresar al panel.'
+              : `${dto.error || 'Contactá a soporte.'}`;
+            await pushService.sendToUser(job.requestingUserId, title, body, { type: 'password_change' });
+          }
+        } catch (err: any) {
+          this.logger.warn(`Push for password change failed: ${err.message}`);
+        }
+        // Real-time socket event so the chat-app shows an in-app toast on
+        // whichever screen the user happens to be on (home, chat, etc.).
+        try {
+          this.eventsGateway.emitToUser(job.requestingUserId, 'password:changed', {
+            success: !!dto.success,
+            error: dto.error || null,
+            jobId,
+            timestamp: new Date().toISOString(),
+          });
+        } catch (err: any) {
+          this.logger.warn(`Socket emit password:changed failed: ${err.message}`);
         }
       }
 

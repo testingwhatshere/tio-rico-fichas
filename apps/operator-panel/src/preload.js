@@ -60,6 +60,11 @@ contextBridge.exposeInMainWorld('api', {
   toggleUserActive: (userId, isActive) => invokeWithTimeout('toggle-user-active', userId, isActive),
   createPanelUser: (targetUsername) => invokeWithTimeout('create-panel-user', targetUsername),
 
+  // Preloaded users (CSV bulk import)
+  bulkImportPreloaded: (entries) => invokeWithTimeout('bulk-import-preloaded', entries),
+  listPreloadedUsers: () => invokeWithTimeout('list-preloaded-users'),
+  unflagPreloadedUser: (userId) => invokeWithTimeout('unflag-preloaded-user', userId),
+
   // Promotions
   broadcastPromo: (title, message) => invokeWithTimeout('broadcast-promo', { title, message }),
 
@@ -118,6 +123,16 @@ contextBridge.exposeInMainWorld('api', {
   onNewMessage: (callback) => {
     ipcRenderer.on('new-message', (event, data) => callback(data));
     return () => ipcRenderer.removeAllListeners('new-message');
+  },
+
+  onChatHelpRequested: (callback) => {
+    ipcRenderer.on('chat-help-requested', (event, data) => callback(data));
+    return () => ipcRenderer.removeAllListeners('chat-help-requested');
+  },
+
+  onChatHelpCleared: (callback) => {
+    ipcRenderer.on('chat-help-cleared', (event, data) => callback(data));
+    return () => ipcRenderer.removeAllListeners('chat-help-cleared');
   },
 
   onStatsUpdate: (callback) => {

@@ -18,6 +18,7 @@ import { MessagesService } from '../messages/messages.service';
 import { RequestStatus } from '@prisma/client';
 import { CreateRequestDto, ApproveRequestDto, RejectRequestDto } from './dto';
 import { PaymentsService } from '../payments/payments.service';
+import { PushService } from '../notifications/push.service';
 import { ChatsService } from '../chats/chats.service';
 import { VALID_TRANSITIONS } from '../common/constants/statuses';
 import {
@@ -46,6 +47,7 @@ export class RequestsService {
     private readonly messagesService: MessagesService,
     @Inject(forwardRef(() => ChatsService))
     private readonly chatsService: ChatsService,
+    private readonly pushService: PushService,
   ) {}
 
   /**
@@ -341,7 +343,7 @@ export class RequestsService {
             throw new ForbiddenException('No tienes acceso a esta solicitud');
           }
 
-          if (request.status !== 'PENDING_PROOF') {
+          if (request.status !== 'PENDING_PROOF' && request.status !== 'VALIDATION_FAILED') {
             throw new BadRequestException('Esta solicitud ya tiene un comprobante');
           }
 
@@ -699,6 +701,16 @@ export class RequestsService {
       status: 'REJECTED',
       reason: dto.reason,
     });
+
+    // Native push notification — works even when the app is closed.
+    this.pushService
+      .sendToUser(
+        updated.userId,
+        'Solicitud rechazada',
+        dto.reason ? `Motivo: ${dto.reason}` : 'Tu solicitud fue rechazada. Abrí la app para más detalle.',
+        { requestId: updated.id, type: 'request_rejected' },
+      )
+      .catch((err: any) => this.logger.warn(`Push (reject) failed for user ${updated.userId}: ${err.message}`));
 
     this.events.emitDashboardUpdate();
 

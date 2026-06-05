@@ -32,6 +32,13 @@ interface SocketHandlerDeps {
 
   // For reconnect flow-state guard
   flowStateRef: React.MutableRefObject<FlowState>;
+
+  // Proof upload handler (for VALIDATION_FAILED retry card)
+  handleProofUpload?: (file: any) => Promise<void>;
+
+  // Restart-load handler (for post-completion "Cargar de nuevo" card)
+  handleStartNewLoad?: (prefillAmount?: number) => void;
+  handleAmountSelected?: (amount: number) => Promise<void> | void;
 }
 
 const SOCKET_POLL_INTERVAL_MS = 200;
@@ -50,6 +57,9 @@ export function useSocketHandlers(deps: SocketHandlerDeps) {
     setConnectionError,
     loadMessages,
     flowStateRef,
+    handleProofUpload,
+    handleStartNewLoad,
+    handleAmountSelected,
   } = deps;
 
   const typingIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -119,8 +129,16 @@ export function useSocketHandlers(deps: SocketHandlerDeps) {
           updateActiveRequest(null);
           useAuthStore.getState().refreshBalance();
           setTimeout(() => {
-            addBotMessage('Queres cargar mas fichas? Toca el boton de abajo.');
             setFlowState('IDLE');
+            // Offer next-step actions: pick another amount OR open game (already in GAME_LINK above).
+            if (handleAmountSelected) {
+              addBotMessage('Querés cargar mas fichas? Elegi un monto:', {
+                type: 'AMOUNT_SELECTOR',
+                props: { onAmountSelected: handleAmountSelected },
+              });
+            } else {
+              addBotMessage('Querés cargar mas fichas? Volve al inicio para empezar de nuevo.');
+            }
           }, 5000);
         }
       };
@@ -136,7 +154,13 @@ export function useSocketHandlers(deps: SocketHandlerDeps) {
 
       const handleValidationFailed = (data: any) => {
         if (data.requestId === activeRequestRef.current?.id && trackStatusEvent('validation_failed', data.requestId)) {
-          addBotMessage('No pudimos verificar tu comprobante automaticamente. Un operador lo va a revisar en unos minutos. No hace falta que hagas nada, te avisamos.');
+          addBotMessage(
+            'No pudimos validar tu comprobante automaticamente. Un operador lo va a revisar manualmente en unos minutos. Te avisamos cuando este resuelto, no hace falta hacer nada.',
+            {
+              type: 'STATUS_TRACKER',
+              props: { requestId: data.requestId },
+            },
+          );
           setFlowState('FAILED');
         }
       };

@@ -31,6 +31,7 @@ export const VIEW_TITLES = {
   prizes: 'Premios',
   payments: 'Pagos Salientes',
   users: 'Usuarios',
+  'preload-users': 'Usuarios Pre-cargados',
   panels: 'Paneles',
   extensions: 'Extensiones',
   settings: 'Configuraci\u00f3n'

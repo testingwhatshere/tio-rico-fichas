@@ -640,9 +640,12 @@ export const useOperatorStore = create<OperatorState>((set, get) => ({
   },
 }));
 
-// Helper: sort chats by most recent activity
+// Helper: sort chats. needsHelp chats always come first (priority queue), then
+// by most recent activity.
 function sortChatsByRecency(chats: any[]): any[] {
   return [...chats].sort((a, b) => {
+    if (a.needsHelp && !b.needsHelp) return -1;
+    if (!a.needsHelp && b.needsHelp) return 1;
     const dateA = a.updatedAt || a.createdAt || '';
     const dateB = b.updatedAt || b.createdAt || '';
     return dateB.localeCompare(dateA);

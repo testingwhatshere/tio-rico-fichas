@@ -376,9 +376,13 @@ function setupEventListeners() {
     el.addEventListener('click', closeAllModals);
   });
 
-  // Modal actions (onclick assignment to prevent duplicate listeners - O3 FIX)
-  document.getElementById('modal-approve-btn').onclick = approveSelectedFailure;
-  document.getElementById('modal-reject-btn').onclick = rejectSelectedFailure;
+  // Modal actions (onclick assignment to prevent duplicate listeners - O3 FIX).
+  // Null-checked: if either element isn't in the DOM yet, the missing assignment
+  // would throw and skip the rest of setupEventListeners, leaving handlers detached.
+  const approveBtn = document.getElementById('modal-approve-btn');
+  if (approveBtn) approveBtn.onclick = approveSelectedFailure;
+  const rejectBtn = document.getElementById('modal-reject-btn');
+  if (rejectBtn) rejectBtn.onclick = rejectSelectedFailure;
 
   // Export buttons
   document.getElementById('export-failures-btn')?.addEventListener('click', () => exportData('failures'));
@@ -583,6 +587,30 @@ function setupIpcListeners() {
 
   fns.push(window.api.onDispatchBlocked((data) => {
     showToast(`Despacho bloqueado: ${data.reason}`, 'warning');
+  }));
+
+  fns.push(window.api.onChatHelpRequested((data) => {
+    const chat = store.chats.find(c => c.id === data.chatId);
+    if (chat) {
+      chat.needsHelp = true;
+      chat.helpContext = data.context;
+      chat.helpRequestedAt = data.requestedAt;
+    }
+    const contextLabel = data.context === 'prize' ? 'cobro de premio' : 'soporte';
+    showToast(`🙋 AYUDA: ${data.username} pidió ayuda con ${contextLabel}`, 'warning');
+    if (getCurrentView() === 'chats') renderChatsList();
+    else setChatListDirty(true);
+  }));
+
+  fns.push(window.api.onChatHelpCleared((data) => {
+    const chat = store.chats.find(c => c.id === data.chatId);
+    if (chat) {
+      chat.needsHelp = false;
+      chat.helpContext = null;
+      chat.helpRequestedAt = null;
+    }
+    if (getCurrentView() === 'chats') renderChatsList();
+    else setChatListDirty(true);
   }));
 
   fns.push(window.api.onNewMessage((message) => {

@@ -1305,6 +1305,13 @@ export class OperatorGateway
     });
   }
 
+  emitHelpRequested(data: { chatId: string; userId: string; context: string; message: string; requestedAt: string; username: string }) {
+    this.emitToAll('chat:help_requested', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   emitNewChat(data: any) {
     this.emitToAll('chat:new', {
       ...data,

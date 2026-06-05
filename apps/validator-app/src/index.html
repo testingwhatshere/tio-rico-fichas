@@ -466,12 +466,16 @@
           <span id="model-status">-</span>
         </span>
       </div>
-      <!-- Model Selector (shown when multiple vision models available) -->
-      <div class="model-selector hidden" id="model-selector">
+      <!-- Model Selector (always visible). Populated dynamically from detected models;
+           falls back to generic options if Ollama isn't reachable yet. -->
+      <div class="model-selector" id="model-selector">
         <label for="model-select">Modelo activo:</label>
         <select id="model-select" class="model-dropdown">
-          <option value="">Seleccionar modelo...</option>
+          <option value="">Esperando deteccion...</option>
         </select>
+        <button id="btn-test-ollama" class="btn-secondary" style="margin-top:8px; width:100%; padding:6px 10px; font-size:0.8rem; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); border-radius:6px; color:#e2e8f0; cursor:pointer;">
+          Probar conexion con Ollama
+        </button>
       </div>
       <!-- Daily stats (% by source) -->
       <div id="validator-stats" style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08); font-size:0.75rem; color:#94a3b8;">
@@ -855,7 +859,7 @@
         modelStatus.textContent = 'Esperando...';
         btnDownloadModel.classList.add('hidden');
         modelReady = false;
-        modelSelector.classList.add('hidden');
+        updateModelSelector();
       } else {
         stepModel.className = 'setup-step pending';
         document.getElementById('step2-icon').textContent = '2️⃣';
@@ -865,7 +869,7 @@
         btnDownloadModel.classList.remove('hidden');
         btnDownloadModel.disabled = !ollamaReady;
         modelReady = false;
-        modelSelector.classList.add('hidden');
+        updateModelSelector();
       }
     }
 
@@ -881,8 +885,27 @@
           if (model === selectedModel) option.selected = true;
           modelSelect.appendChild(option);
         });
+        modelSelector.classList.remove('hidden');
       } else {
-        modelSelector.classList.add('hidden');
+        // No models detected yet — show generic options as fallback so the
+        // operator can still configure their preferred one.
+        modelSelect.innerHTML = '';
+        const fallbacks = [
+          { value: '', label: 'Auto (detectar)' },
+          { value: 'qwen2.5-vl', label: 'qwen2.5-vl (recomendado)' },
+          { value: 'llava', label: 'llava' },
+          { value: 'llama3.2-vision', label: 'llama3.2-vision' },
+          { value: 'minicpm-v', label: 'minicpm-v' },
+          { value: 'qwen2-vl', label: 'qwen2-vl' },
+        ];
+        fallbacks.forEach(({ value, label }) => {
+          const option = document.createElement('option');
+          option.value = value;
+          option.textContent = label;
+          if (value && value === selectedModel) option.selected = true;
+          modelSelect.appendChild(option);
+        });
+        modelSelector.classList.remove('hidden');
       }
     }
 
@@ -1006,8 +1029,25 @@
         selectedModel = newModel;
         modelStatus.textContent = newModel;
         electronAPI.selectModel(newModel);
+        addLog(`Modelo seleccionado: ${newModel}`, 'info');
       }
     });
+
+    // Test Ollama connection button — fires checkOllama; the ollama-status listener handles the result.
+    const btnTestOllama = document.getElementById('btn-test-ollama');
+    if (btnTestOllama) {
+      btnTestOllama.addEventListener('click', () => {
+        btnTestOllama.disabled = true;
+        btnTestOllama.textContent = 'Probando...';
+        addLog('Probando conexion con Ollama en http://localhost:11434 ...', 'info');
+        electronAPI.checkOllama();
+        // Re-enable after 5s in case no event comes back.
+        setTimeout(() => {
+          btnTestOllama.disabled = false;
+          btnTestOllama.textContent = 'Probar conexion con Ollama';
+        }, 5000);
+      });
+    }
 
     // Clear queue handler with native dialog confirmation
     btnClearQueue.addEventListener('click', async () => {

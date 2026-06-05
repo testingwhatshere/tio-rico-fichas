@@ -21,6 +21,8 @@
         "test:e2e:headed": "npx playwright test --config tests/e2e/playwright.config.ts --headed"
     },
     "devDependencies": {
+        "@img/sharp-libvips-win32-x64": "1.2.4",
+        "@img/sharp-win32-x64": "0.34.5",
         "@playwright/test": "^1.58.2",
         "ajv": "^8.18.0",
         "expo-modules-core": "^2.2.3",

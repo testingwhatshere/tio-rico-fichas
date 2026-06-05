@@ -24,16 +24,23 @@ const mercadopagoOverrides = {
   },
 
   transactionId(text) {
-    // MP: "Número de operación de Mercado Pago\n86537718327"
+    // MP classic: "Número de operación de Mercado Pago\n86537718327" (all digits)
+    // MP modern:  "N.* de movimiento\nB32QK1HXEN39MWCM1" (alphanumeric)
     const m = text.match(/operaci[oó]n\s+de\s+Mercado\s+Pago\s*\n\s*(\d{8,20})/i)
+      || text.match(/n[^\w\n]{0,5}de\s+movimiento\s*\n?\s*([A-Z0-9]{10,30})/i)
       || text.match(/operaci[oó]n[^\d]*?(\d{8,20})/i);
     return m ? m[1] : h.extractOperationNumber(text);
   },
 
   recipientName(text) {
-    // MP: "Para\n  Nombre Apellido" with line break
-    const m = text.match(/(?:\*\s*)?Para\s*\n\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){0,4})/);
-    return m ? m[1].trim() : h.extractRecipient(text);
+    // MP classic: "Para\n  Nombre Apellido" with line break
+    const labeled = text.match(/(?:\*\s*)?Para\s*\n\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){0,4})/);
+    if (labeled) return labeled[1].trim();
+    // MP modern: amount on first line, then recipient name, then "Transferencia enviada/recibida".
+    // Capture the Capitalized name line right before that label.
+    const modern = text.match(/([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,4})\s*\n\s*Transferencia\s+(?:enviada|recibida|confirmada)/i);
+    if (modern) return modern[1].trim();
+    return h.extractRecipient(text);
   },
 
   recipientAccount(text) {
@@ -74,6 +81,7 @@ const PLATFORMS = [
   { id: 'lemoncash', name: 'Lemon Cash', keywords: ['lemon cash', 'lemon'] },
   { id: 'belo', name: 'Belo', keywords: ['belo'] },
   { id: 'buenbit', name: 'Buenbit', keywords: ['buenbit'] },
+  { id: 'credicuotas', name: 'Credicuotas', keywords: ['credicuotas'] },
 
   // Traditional banks
   { id: 'galicia', name: 'Banco Galicia', keywords: ['banco galicia', 'galicia'] },

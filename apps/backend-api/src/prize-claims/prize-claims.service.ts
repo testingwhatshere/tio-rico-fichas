@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { BotGateway } from '../bot/bot.gateway';
 import { TelegramService } from '../notifications/telegram.service';
+import { PushService } from '../notifications/push.service';
 import { SetPrizePaymentDto, RejectPrizeClaimDto } from './dto';
 import { PrizeClaimStatus } from '@prisma/client';
 
@@ -41,6 +42,7 @@ export class PrizeClaimsService {
     private readonly botGateway: BotGateway,
     private readonly telegramService: TelegramService,
     private readonly moduleRef: ModuleRef,
+    private readonly pushService: PushService,
   ) {}
 
   // ==========================================
@@ -80,6 +82,9 @@ export class PrizeClaimsService {
         `Ya tenés un cobro de premio en proceso (${activeClaim.status}). Esperá a que se resuelva.`,
       );
     }
+
+    // 24h cooldown: reject if the user already collected a prize in the last 24 hours.
+    await this.assertNoRecentPaidClaim(userId);
 
     const claim = await this.prisma.prizeClaim.create({
       data: {
@@ -142,6 +147,9 @@ export class PrizeClaimsService {
         `Ya tenés un cobro de premio en proceso (${activeClaim.status}). Esperá a que se resuelva.`,
       );
     }
+
+    // 24h cooldown: reject if the user already collected a prize in the last 24 hours.
+    await this.assertNoRecentPaidClaim(userId);
 
     // Validate payment details
     if (data.paymentMethod === 'CBU') {
@@ -528,6 +536,16 @@ export class PrizeClaimsService {
           status: 'VERIFICATION_FAILED',
           message: `No tenés suficientes fichas. Tenés ${result.balance.toLocaleString('es-AR')} pero pediste $${Number(claim.amount).toLocaleString('es-AR')}. Podés intentar con un monto menor.`,
         });
+
+        // Push so the user knows even with the app closed.
+        this.pushService
+          .sendToUser(
+            claim.userId,
+            '⚠️ Fichas insuficientes',
+            `Tenés ${result.balance.toLocaleString('es-AR')} fichas pero pediste cobrar $${Number(claim.amount).toLocaleString('es-AR')}. Podés intentar con un monto menor.`,
+            { claimId, type: 'prize_verification_insufficient' },
+          )
+          .catch((err: any) => this.logger.warn(`Push (prize_verification_insufficient) failed: ${err.message}`));
       }
     } else {
       // Verification failed (error)
@@ -543,6 +561,17 @@ export class PrizeClaimsService {
         status: 'VERIFICATION_FAILED',
         message: 'Hubo un problema al verificar tus fichas. Un operador va a revisar tu solicitud.',
       });
+
+      // Push so the user knows even with the app closed.
+      this.pushService
+        .sendToUser(
+          claim.userId,
+          '⚠️ Premio en revisión',
+          'No pudimos verificar tus fichas automáticamente. Un operador revisará tu solicitud.',
+          { claimId, type: 'prize_verification_error' },
+        )
+        .catch((err: any) => this.logger.warn(`Push (prize_verification_error) failed: ${err.message}`));
+
       this.events.emitToOperators('new_prize_claim', this.formatClaimForOperator(claim));
     }
   }
@@ -705,6 +734,16 @@ export class PrizeClaimsService {
         message: 'Hubo un problema al retirar tus fichas. Un operador va a revisarlo.',
       });
 
+      // Push so the user knows even with the app closed.
+      this.pushService
+        .sendToUser(
+          claim.userId,
+          '⚠️ Premio en revisión',
+          'No pudimos retirar las fichas del panel. Un operador lo revisará.',
+          { claimId, type: 'prize_failed' },
+        )
+        .catch((err: any) => this.logger.warn(`Push (prize_failed) failed: ${err.message}`));
+
       this.events.emitToOperators('prize_claim_updated', {
         id: claimId,
         status: 'FAILED',
@@ -803,22 +842,48 @@ export class PrizeClaimsService {
       throw new BadRequestException(`El premio ya está ${claim.status}`);
     }
 
+    // Reason is mandatory and must be clear — the user needs to understand why.
+    const trimmedReason = (dto.reason || '').trim();
+    if (!trimmedReason || trimmedReason.length < 5) {
+      throw new BadRequestException(
+        'El motivo de rechazo es obligatorio y debe ser claro (mínimo 5 caracteres).',
+      );
+    }
+
     await this.prisma.prizeClaim.update({
       where: { id: claimId },
       data: {
         status: 'REJECTED',
         rejectedBy: operatorId,
-        rejectionReason: dto.reason,
+        rejectionReason: trimmedReason,
       },
     });
 
-    this.logger.log(`Prize claim ${claimId} REJECTED by ${operatorId}: ${dto.reason}`);
+    this.logger.log(`Prize claim ${claimId} REJECTED by ${operatorId}: ${trimmedReason}`);
+
+    const amountLabel = `$${Number(claim.amount).toLocaleString('es-AR')}`;
+    const detailedMessage =
+      `❌ Tu pedido de cobro de ${amountLabel} fue RECHAZADO.\n\n` +
+      `📋 Motivo: ${trimmedReason}\n\n` +
+      `Si tenés dudas o creés que es un error, tocá "Necesito ayuda" para hablar con un operador.`;
 
     this.events.emitToUser(claim.userId, 'prize_claim:status_update', {
       claimId,
       status: 'REJECTED',
-      message: `Tu solicitud de premio fue rechazada. Motivo: ${dto.reason}`,
+      reason: trimmedReason,
+      amount: Number(claim.amount),
+      message: detailedMessage,
     });
+
+    // Native push so the user is notified even if app is closed.
+    this.pushService
+      .sendToUser(
+        claim.userId,
+        `❌ Premio de ${amountLabel} rechazado`,
+        `Motivo: ${trimmedReason}`,
+        { claimId, type: 'prize_rejected', reason: trimmedReason },
+      )
+      .catch((err: any) => this.logger.warn(`Push (prize_rejected) failed: ${err.message}`));
 
     this.events.emitToOperators('prize_claim_updated', {
       id: claimId,
@@ -907,6 +972,73 @@ export class PrizeClaimsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /**
+   * Returns the user's active prize claim, or — if there's no active one — the
+   * latest terminal claim within the last 6 hours. This lets the chat-app's home
+   * banner keep showing "Premio pagado / rechazado" for a while after the final
+   * status change, so the user actually sees the outcome before it disappears.
+   */
+  async findCurrentForUser(userId: string) {
+    const active = await this.findActiveForUser(userId);
+    if (active) return active;
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+    return this.prisma.prizeClaim.findFirst({
+      where: {
+        userId,
+        status: { in: ['COMPLETED', 'REJECTED', 'VERIFICATION_FAILED', 'FAILED'] },
+        updatedAt: { gte: sixHoursAgo },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  /**
+   * Reject the new claim if the user already had a paid prize in the last 24 hours.
+   * Hard rate-limit to prevent quick successive cash-outs.
+   *
+   * Robustness: filters by `completedBy IS NOT NULL` so we only count claims that
+   * were actually marked COMPLETED by an operator (defends against stray status
+   * transitions). `updatedAt` is the timestamp of that final status change.
+   */
+  private async assertNoRecentPaidClaim(userId: string) {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const recentPaid = await this.prisma.prizeClaim.findFirst({
+      where: {
+        userId,
+        status: 'COMPLETED',
+        completedBy: { not: null },
+        updatedAt: { gte: twentyFourHoursAgo },
+      },
+      orderBy: { updatedAt: 'desc' },
+      select: { updatedAt: true },
+    });
+    if (recentPaid) {
+      const nextAvailableAt = new Date(recentPaid.updatedAt.getTime() + 24 * 60 * 60 * 1000);
+      const elapsedHours = (Date.now() - recentPaid.updatedAt.getTime()) / (1000 * 60 * 60);
+      const remainingHours = Math.max(0, 24 - elapsedHours);
+      const remainingLabel = remainingHours >= 1
+        ? `${Math.ceil(remainingHours)} hs`
+        : `${Math.ceil(remainingHours * 60)} min`;
+      // Render Argentine time (UTC-3) so users always see local time even if the
+      // server is in a different TZ.
+      const fmt = new Intl.DateTimeFormat('es-AR', {
+        timeZone: 'America/Argentina/Buenos_Aires',
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+      const nextAvailableLabel = fmt.format(nextAvailableAt);
+      throw new BadRequestException(
+        `Solo se puede cobrar un premio cada 24 hs. Ya cobraste uno hace poco. ` +
+          `Vas a poder cobrar el próximo a partir del ${nextAvailableLabel} hs ` +
+          `(en aproximadamente ${remainingLabel}).`,
+      );
+    }
   }
 
   // ==========================================

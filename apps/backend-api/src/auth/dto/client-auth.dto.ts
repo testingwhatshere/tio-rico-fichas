@@ -1,9 +1,13 @@
 import { IsString, IsOptional, MinLength, MaxLength, Matches } from 'class-validator';
 
 /**
- * DTO for client-only authentication (username only, no password)
- * Used by the chat app for simple user identification
- * Phone is required on first registration, optional on subsequent logins
+ * DTO for client-only authentication (username + phone).
+ * Phone is ALWAYS required — both on first registration and on every login —
+ * as an anti-fraud check. We re-verify the stored phone matches what the user
+ * types in, so a stolen username alone isn't enough to log in.
+ *
+ * `phone` stays optional at the DTO level so we can return PHONE_REQUIRED with
+ * a clean message from the service when the field is missing.
  */
 export class ClientAuthDto {
   @IsString()
@@ -16,6 +20,8 @@ export class ClientAuthDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^\d{7,15}$/, { message: 'Número de teléfono inválido' })
+  // Accept any common Argentine input: with/without +, spaces, dashes, parens.
+  // The service (canonicalArPhone) normalizes to digits-only before lookup/storage.
+  @Matches(/^[+\d\s\-()]{7,25}$/, { message: 'Número de teléfono inválido' })
   phone?: string;
 }

@@ -86,6 +86,7 @@ export function useChatFlow() {
       addBotMessage: (content: string, card?: InteractiveCard) => void,
       handlePaymentConfirmed: () => void,
       supportPhoneRef: React.MutableRefObject<string>,
+      handleProofUpload?: (file: any) => Promise<void>,
     ) => {
       if (!req.proofUrl && req.status === 'PENDING_PROOF') {
         // On resume/reconnect, skip straight to proof upload.
@@ -96,6 +97,7 @@ export function useChatFlow() {
           type: 'PROOF_UPLOAD',
           props: {
             requestId: req.id,
+            onUpload: handleProofUpload,
           },
         });
       } else if (req.status === 'VALIDATING') {
@@ -118,10 +120,13 @@ export function useChatFlow() {
         });
       } else if (req.status === 'VALIDATION_FAILED') {
         setFlowState('FAILED');
-        addBotMessage('No pudimos validar tu comprobante. Un operador lo va a revisar.', {
-          type: 'STATUS_TRACKER',
-          props: { requestId: req.id, supportPhone: supportPhoneRef.current },
-        });
+        addBotMessage(
+          'Tu comprobante esta siendo revisado por un operador. Te avisamos cuando este resuelto.',
+          {
+            type: 'STATUS_TRACKER',
+            props: { requestId: req.id, supportPhone: supportPhoneRef.current },
+          },
+        );
       } else if (req.status === 'REJECTED') {
         setFlowState('FAILED');
         addBotMessage('Tu solicitud fue rechazada.', {

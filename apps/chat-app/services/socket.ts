@@ -12,7 +12,7 @@ function notifyBrowser(title: string, body: string, data?: Record<string, any>) 
   } catch { /* web module not available */ }
 }
 
-const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'http://localhost:3000';
+const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'https://tiorico-api.onrender.com';
 const SOCKET_PATH = process.env.EXPO_PUBLIC_SOCKET_PATH || '/socket.io';
 const SOCKET_RECONNECTION = process.env.EXPO_PUBLIC_SOCKET_RECONNECTION !== 'false';
 const SOCKET_RECONNECTION_ATTEMPTS = parseInt(process.env.EXPO_PUBLIC_SOCKET_RECONNECTION_ATTEMPTS ?? '15', 10);

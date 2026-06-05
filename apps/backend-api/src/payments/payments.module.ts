@@ -6,6 +6,7 @@ import { RequestsModule } from '../requests/requests.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { EventsModule } from '../events/events.module';
 import { SettingsModule } from '../settings/settings.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { SettingsModule } from '../settings/settings.module';
     forwardRef(() => EventsModule),
     forwardRef(() => SettingsModule),
     UploadsModule,
+    NotificationsModule,
   ],
   controllers: [PaymentsController],
   providers: [PaymentsService, ProofValidationService],

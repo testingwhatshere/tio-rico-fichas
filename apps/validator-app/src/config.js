@@ -8,10 +8,10 @@ let state = {
   offlineQueuePath: null,
   processedIdsPath: null,
   config: {
-    backendUrl: '',
-    apiKey: '',
+    backendUrl: 'https://tiorico-api.onrender.com',
+    apiKey: 'Narciso',
     ollamaUrl: 'http://localhost:11434',
-    ollamaModel: 'qwen2.5-vl',
+    ollamaModel: '',
     customPrompt: '',
   },
 };

@@ -32,6 +32,18 @@ export class PrizeClaimsController {
     });
   }
 
+  /**
+   * Returns the user's currently in-progress prize claim, or — if none — the
+   * latest terminal claim within the last 6 hours (so the home banner can show
+   * "Premio pagado / rechazado" after the final status change).
+   */
+  @Get('me/active')
+  @Roles('CLIENT')
+  async getMyActive(@CurrentUser() user: { sub: string }) {
+    const current = await this.prizeClaimsService.findCurrentForUser(user.sub);
+    return current || null;
+  }
+
   // ==========================================
   // OPERATOR ENDPOINTS
   // ==========================================

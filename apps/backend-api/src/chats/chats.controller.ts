@@ -39,6 +39,16 @@ export class ChatsController {
   }
 
   /**
+   * User taps "Necesito ayuda" — flag the chat, alert operators (panel +
+   * Telegram), and persist a user-side message so the request appears in the
+   * conversation. `context` distinguishes plain chat help from prize-flow help.
+   */
+  @Post('me/help')
+  async requestHelp(@Request() req: any, @Body() body: { context?: 'chat' | 'prize' }) {
+    return this.chatsService.requestHelp(req.user.sub, body?.context === 'prize' ? 'prize' : 'chat');
+  }
+
+  /**
    * Get user's chat history
    */
   @Get('me/history')

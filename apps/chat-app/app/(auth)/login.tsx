@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,6 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  Animated,
   Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,27 +24,13 @@ export default function LoginScreen() {
 
   const [username, setUsername] = useState('');
   const [phone, setPhone] = useState('');
-  const [needsPhone, setNeedsPhone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState<'username' | 'phone' | null>(null);
 
-  const phoneAnim = useRef(new Animated.Value(0)).current;
   const phoneInputRef = useRef<TextInput>(null);
   // Icon glow animation removed — clean design
 
-  // Show phone field with animation
-  const showPhoneField = () => {
-    setNeedsPhone(true);
-    Animated.timing(phoneAnim, {
-      toValue: 1,
-      duration: 300,
-      useNativeDriver: false,
-    }).start(() => {
-      phoneInputRef.current?.focus();
-    });
-  };
-
-  // Validate form
+  // Validate form — username + phone are BOTH required, every login.
   const validateForm = (): boolean => {
     if (!username.trim()) {
       setError('El nombre de usuario es requerido');
@@ -62,29 +47,27 @@ export default function LoginScreen() {
       return false;
     }
 
-    if (needsPhone && !phone.trim()) {
-      setError('El numero de telefono es requerido para registrarte');
+    if (!phone.trim()) {
+      setError('El numero de telefono es requerido');
       return false;
     }
 
-    if (needsPhone && !/^\d{7,15}$/.test(phone.trim())) {
+    if (!/^\d{7,15}$/.test(phone.trim())) {
       setError('Numero de telefono invalido (solo numeros, 7-15 digitos)');
       return false;
     }
 
     // Block Mar del Plata + zona costera area codes
-    if (needsPhone) {
-      const blockedCodes = ['223'];
-      const cleanPhone = phone.replace(/\s/g, '').replace(/^\+/, '');
-      const isBlocked = blockedCodes.some(code =>
-        cleanPhone.startsWith(code) ||
-        cleanPhone.startsWith('54' + code) ||
-        cleanPhone.startsWith('549' + code),
-      );
-      if (isBlocked) {
-        setError('El sistema no está disponible en tu región');
-        return false;
-      }
+    const blockedCodes = ['223'];
+    const cleanPhone = phone.replace(/\s/g, '').replace(/^\+/, '');
+    const isBlocked = blockedCodes.some(code =>
+      cleanPhone.startsWith(code) ||
+      cleanPhone.startsWith('54' + code) ||
+      cleanPhone.startsWith('549' + code),
+    );
+    if (isBlocked) {
+      setError('El sistema no está disponible en tu región');
+      return false;
     }
 
     setError(null);
@@ -101,30 +84,13 @@ export default function LoginScreen() {
     }
 
     try {
-      await login(username.trim(), needsPhone ? phone.trim() : undefined);
+      await login(username.trim(), phone.trim());
       // Navigation is handled by root _layout.tsx
     } catch (err: any) {
-      // Check if backend is asking for phone number (new user)
-      const responseData = err.response?.data;
-      if (responseData?.message === 'PHONE_REQUIRED' || responseData?.needsPhone) {
-        showPhoneField();
-        return;
-      }
-
       const errorMessage = getErrorMessage(err);
       Alert.alert('Error', errorMessage);
     }
   };
-
-  const phoneHeight = phoneAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 110],
-  });
-
-  const phoneOpacity = phoneAnim.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [0, 0, 1],
-  });
 
   const isWeb = Platform.OS === 'web';
 
@@ -141,9 +107,7 @@ export default function LoginScreen() {
         <Text style={styles.titleSecondary}>FICHAS</Text>
         <View style={styles.titleDivider} />
         <Text style={styles.subtitle}>
-          {needsPhone
-            ? 'Ingresa tu numero de telefono para crear tu cuenta'
-            : 'Ingresa tu nombre de usuario para continuar'}
+          Ingresa tu usuario y telefono para continuar
         </Text>
       </View>
 
@@ -156,7 +120,7 @@ export default function LoginScreen() {
             style={[
               styles.inputWrapper,
               isFocused === 'username' && styles.inputWrapperFocused,
-              error && !needsPhone ? styles.inputWrapperError : null,
+              error && isFocused !== 'phone' ? styles.inputWrapperError : null,
             ]}
           >
             <Ionicons
@@ -177,23 +141,23 @@ export default function LoginScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               autoComplete="username"
-              editable={!isLoading && !needsPhone}
-              returnKeyType={needsPhone ? 'next' : 'go'}
-              onSubmitEditing={needsPhone ? () => phoneInputRef.current?.focus() : handleLogin}
+              editable={!isLoading}
+              returnKeyType="next"
+              onSubmitEditing={() => phoneInputRef.current?.focus()}
               onFocus={() => setIsFocused('username')}
               onBlur={() => setIsFocused(null)}
             />
           </View>
         </View>
 
-        {/* Phone Input - animated, shown only for new users */}
-        <Animated.View style={[styles.inputContainer, { height: phoneHeight, opacity: phoneOpacity, overflow: 'hidden' }]}>
+        {/* Phone Input — always required (login + register) */}
+        <View style={styles.inputContainer}>
           <Text style={styles.label}>Numero de telefono</Text>
           <View
             style={[
               styles.inputWrapper,
               isFocused === 'phone' && styles.inputWrapperFocused,
-              error && needsPhone ? styles.inputWrapperError : null,
+              error && isFocused === 'phone' ? styles.inputWrapperError : null,
             ]}
           >
             <Ionicons
@@ -221,7 +185,7 @@ export default function LoginScreen() {
               onBlur={() => setIsFocused(null)}
             />
           </View>
-        </Animated.View>
+        </View>
 
         {error && <Text style={styles.errorText}>{error}</Text>}
 
@@ -236,9 +200,7 @@ export default function LoginScreen() {
             {isLoading ? (
               <ActivityIndicator color={colors.textOnPrimary} />
             ) : (
-              <Text style={styles.buttonText}>
-                {needsPhone ? 'REGISTRARSE' : 'CONTINUAR'}
-              </Text>
+              <Text style={styles.buttonText}>CONTINUAR</Text>
             )}
           </View>
         </TouchableOpacity>
@@ -246,9 +208,7 @@ export default function LoginScreen() {
         {/* Info */}
         <View style={styles.infoContainer}>
           <Text style={styles.infoText}>
-            {needsPhone
-              ? 'Tu numero se usa para verificar tu identidad. No se comparte con nadie.'
-              : 'Si es tu primera vez, te pediremos un numero de telefono para crear tu cuenta.'}
+            Tu numero verifica tu identidad. Debe coincidir con el registrado.
           </Text>
         </View>
       </View>

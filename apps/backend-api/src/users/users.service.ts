@@ -9,12 +9,37 @@ import * as bcrypt from 'bcrypt';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto, UpdateUserDto } from './dto';
+import { PushService } from '../notifications/push.service';
+
+/**
+ * Conservative Argentine phone normalizer.
+ * Returns canonical "549<area><number>" when the input is clearly AR;
+ * leaves foreign-looking numbers (Chile +56, Spain +34, etc.) as digit-only.
+ */
+function canonicalArPhone(raw: string): string {
+  let digits = (raw || '').replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.startsWith('549')) return digits;
+  if (digits.startsWith('54') && digits.length >= 11 && digits.length <= 13) {
+    return '549' + digits.slice(2);
+  }
+  if (digits.startsWith('9') && digits.length >= 10 && digits.length <= 12) {
+    return '54' + digits;
+  }
+  if (digits.length >= 10 && digits.length <= 11 && !digits.startsWith('0')) {
+    return '549' + digits;
+  }
+  return digits;
+}
 
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pushService: PushService,
+  ) {}
 
   async findAll(page = 1, limit = 10) {
     const skip = (page - 1) * limit;
@@ -410,6 +435,17 @@ export class UsersService {
 
     this.logger.log(`Password change job created: ${job.id} for user ${userId} (panel user: ${user.savedTargetUsername})`);
 
+    // Push notification — immediate "received" feedback so the user knows the request
+    // landed (the final success/fail push fires later from bot.service.ts when the bot completes).
+    this.pushService
+      .sendToUser(
+        userId,
+        '🔄 Cambio de contraseña recibido',
+        'Tu pedido entró en cola. Te avisamos cuando esté procesado.',
+        { jobId: job.id, type: 'password_change_queued' },
+      )
+      .catch((err: any) => this.logger.warn(`Push (password_change_queued) failed: ${err.message}`));
+
     return {
       success: true,
       message: 'Tu cambio de contraseña está en proceso. Te avisaremos cuando esté listo.',
@@ -458,5 +494,140 @@ export class UsersService {
       message: `Creación de usuario "${normalized}" en proceso.`,
       jobId: job.id,
     };
+  }
+
+  // ============================================
+  // PRELOADED USERS
+  // ============================================
+
+  /**
+   * Bulk import preloaded users from operator CSV.
+   * - Validates each entry (username 3-30 chars, phone 7-15 digits).
+   * - Upserts: if username exists, updates phone+panelId+isPreloaded; if not, creates.
+   * - Conflicts (phone already used by a different username) are skipped + reported.
+   */
+  async bulkImportPreloaded(
+    entries: Array<{ username: string; phone: string; panelId?: string }>,
+    operatorUserId: string,
+  ) {
+    if (!Array.isArray(entries) || entries.length === 0) {
+      throw new BadRequestException('No se enviaron filas para importar');
+    }
+    if (entries.length > 5000) {
+      throw new BadRequestException('Máximo 5000 filas por importación');
+    }
+
+    const created: string[] = [];
+    const updated: string[] = [];
+    const errors: Array<{ row: number; username?: string; error: string }> = [];
+
+    for (let i = 0; i < entries.length; i++) {
+      const raw = entries[i];
+      const row = i + 1;
+      const username = (raw.username || '').toString().trim().toLowerCase();
+      const phone = (raw.phone || '').toString().trim();
+      const panelId = (raw.panelId || '').toString().trim() || null;
+
+      if (!username || username.length < 3 || username.length > 30) {
+        errors.push({ row, username, error: 'Username inválido (3-30 caracteres)' });
+        continue;
+      }
+      if (!/^[a-z0-9_][a-z0-9_]*$/.test(username)) {
+        errors.push({ row, username, error: 'Username solo letras, números y guión bajo' });
+        continue;
+      }
+      if (!phone || !/^\d{7,15}$/.test(phone.replace(/\D/g, ''))) {
+        errors.push({ row, username, error: 'Teléfono inválido (7-15 dígitos)' });
+        continue;
+      }
+
+      try {
+        // Canonical Argentine format: 549<area><number>. Accepts any input
+        // (with/without "+", "54", "9", area code only, etc.).
+        const cleanPhone = canonicalArPhone(phone);
+
+        // Conflict: phone already used by a different username
+        const phoneOwner = await this.prisma.user.findUnique({ where: { phone: cleanPhone } });
+        if (phoneOwner && phoneOwner.username !== username) {
+          errors.push({ row, username, error: `Teléfono ya usado por "${phoneOwner.username}"` });
+          continue;
+        }
+
+        // Case-insensitive lookup: "Adrian" and "adrian" treated as the same user.
+        const existing = await this.prisma.user.findFirst({
+          where: { username: { equals: username, mode: 'insensitive' } },
+        });
+        if (existing) {
+          await this.prisma.user.update({
+            where: { id: existing.id },
+            data: {
+              phone: cleanPhone,
+              panelId: panelId || existing.panelId,
+              isPreloaded: true,
+              preloadedAt: new Date(),
+              preloadedBy: operatorUserId,
+            },
+          });
+          updated.push(username);
+        } else {
+          await this.prisma.user.create({
+            data: {
+              username,
+              phone: cleanPhone,
+              panelId,
+              role: UserRole.CLIENT,
+              savedTargetUsername: username,
+              isPreloaded: true,
+              preloadedAt: new Date(),
+              preloadedBy: operatorUserId,
+            },
+          });
+          created.push(username);
+        }
+      } catch (err: any) {
+        errors.push({ row, username, error: err.message || 'Error desconocido' });
+      }
+    }
+
+    this.logger.log(
+      `Bulk preload by ${operatorUserId}: created=${created.length}, updated=${updated.length}, errors=${errors.length}`,
+    );
+
+    return {
+      created: created.length,
+      updated: updated.length,
+      errors,
+      createdUsernames: created,
+      updatedUsernames: updated,
+    };
+  }
+
+  /** Returns all users currently marked as preloaded, latest first. */
+  async findPreloaded() {
+    return this.prisma.user.findMany({
+      where: { isPreloaded: true },
+      select: {
+        id: true,
+        username: true,
+        phone: true,
+        panelId: true,
+        preloadedAt: true,
+        preloadedBy: true,
+        isActive: true,
+        createdAt: true,
+      },
+      orderBy: { preloadedAt: 'desc' },
+    });
+  }
+
+  /** Removes the preloaded flag (does not delete the User row). */
+  async unflagPreloaded(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { isPreloaded: false },
+    });
+    return { success: true };
   }
 }

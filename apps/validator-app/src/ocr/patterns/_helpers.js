@@ -3,10 +3,55 @@
  * Every platform-specific pattern can use these to avoid duplicating regex logic.
  */
 
-// Parse Argentine number format: "1.234.567,89" → 1234567.89, "500" → 500
+// Parse number string. Handles AR ("1.234.567,89"), US ("1,234,567.89"),
+// and plain ("500" or "500,00"). OCR-tolerant: O→0, I/l→1, S→5, B→8.
 function parseAmount(str) {
   if (!str) return null;
-  const cleaned = str.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+  // Normalize OCR letter→digit artifacts (only when adjacent to digits, to avoid
+  // mangling actual words). Common with bold/large fonts.
+  let cleaned = String(str)
+    .replace(/[Oo](?=[\d.,])|(?<=[\d.,])[Oo]/g, '0')
+    .replace(/[IiLl](?=[\d.,])|(?<=[\d.,])[IiLl]/g, '1')
+    .replace(/[Ss](?=[\d.,])|(?<=[\d.,])[Ss]/g, '5')
+    .replace(/[Bb](?=[\d.,])|(?<=[\d.,])[Bb]/g, '8')
+    .replace(/\s/g, '')
+    .replace(/[^\d.,]/g, ''); // strip any other char ($, currency symbols, stray letters)
+
+  const hasComma = cleaned.includes(',');
+  const hasDot = cleaned.includes('.');
+  const lastComma = cleaned.lastIndexOf(',');
+  const lastDot = cleaned.lastIndexOf('.');
+
+  if (hasComma && hasDot) {
+    // Whichever comes LAST is the decimal separator.
+    if (lastComma > lastDot) {
+      // AR style: "1.234.567,89" → dots are thousands, comma is decimal.
+      cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+    } else {
+      // US style: "1,234,567.89" → commas are thousands, dot is decimal.
+      cleaned = cleaned.replace(/,/g, '');
+    }
+  } else if (hasComma) {
+    // Only commas. If exactly one comma with 1-2 digits after → AR decimal.
+    // Otherwise treat all commas as thousands separators.
+    const parts = cleaned.split(',');
+    if (parts.length === 2 && parts[1].length <= 2) {
+      cleaned = parts[0] + '.' + parts[1];
+    } else {
+      cleaned = cleaned.replace(/,/g, '');
+    }
+  } else if (hasDot) {
+    // Only dots. Heuristic: if there are 2+ dots, OR a single dot followed by exactly
+    // 3 digits (and not a 1-2 digit fractional like "5.5"), treat as thousand sep.
+    const parts = cleaned.split('.');
+    const multipleDots = parts.length > 2;
+    const looksLikeThousands = parts.length === 2 && parts[1].length === 3;
+    if (multipleDots || looksLikeThousands) {
+      cleaned = cleaned.replace(/\./g, '');
+    }
+    // else: single dot with non-3-digit suffix → decimal, leave for parseFloat.
+  }
+
   const num = parseFloat(cleaned);
   return isNaN(num) ? null : num;
 }
@@ -27,15 +72,20 @@ function parseAmount(str) {
 function extractAllAmounts(text) {
   const out = [];
 
-  // Argentine number: 1+ digits, optional thousands dots, optional ,XX decimals.
-  // Anchored: must NOT be glued to another digit (so we don't grab partial CBUs).
-  const NUM = /(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:,\d{2})?)/.source;
+  // OCR-tolerant digit: real digit OR letter that looks like one (O→0, I/l→1, S→5, B→8).
+  // Both upper and lower case — Tesseract switches based on font weight.
+  const D = '[0-9OoIiLlSsBb]';
+  // Argentine/US number tolerant. Two alternatives:
+  //  1. With thousand separators: 1-3 digits, then ONE OR MORE (.\d{3}/,\d{3}/<space>\d{3}) groups, optional decimals.
+  //  2. Plain integer up to 8 digits, optional decimals.
+  // Order matters: thousand-separated form FIRST so we don't capture only the leading group.
+  const NUM = `(${D}{1,3}(?:[\\s.,]${D}{3})+(?:[.,]${D}{1,2})?|${D}{2,8}(?:[.,]${D}{1,2})?)`;
 
   // 1. High-confidence: amount that follows a label.
-  // Captures everything from the label up to a number, supports labels split across spaces / newlines.
+  // Currency prefix tolerates [$sS] — Tesseract often reads $ as s/S in custom fonts.
   const labeledRe = new RegExp(
-    `(monto(?:\\s+transferido|\\s+enviado|\\s+recibido)?|importe|total|transferiste|enviaste|recibiste|cobraste)` +
-    `\\s*[:$\\s]*\\$?\\s*` +
+    `(monto(?:\\s+transferido|\\s+enviado|\\s+recibido|\\s+total)?|importe|total|transferiste|enviaste|recibiste|cobraste|pagaste|abonaste)` +
+    `\\s*[:\\s]*[\\$sS]?\\s*` +
     NUM,
     'gi'
   );
@@ -45,8 +95,8 @@ function extractAllAmounts(text) {
     if (amt != null && amt > 0) out.push({ amount: amt, source: 'labeled', label: m[1].toLowerCase() });
   }
 
-  // 2. ARS / pesos suffix (often used by crypto exchanges that show USD too — we want the ARS one).
-  const arsRe = new RegExp(`\\$?\\s*${NUM}\\s*(?:ARS|pesos)\\b`, 'gi');
+  // 2. ARS / pesos suffix.
+  const arsRe = new RegExp(`\\$?\\s*${NUM}\\s*(?:ARS|pesos|\\$\\s*ARS)\\b`, 'gi');
   while ((m = arsRe.exec(text)) !== null) {
     const amt = parseAmount(m[1]);
     if (amt != null && amt > 0) out.push({ amount: amt, source: 'ars_suffix' });
@@ -57,19 +107,28 @@ function extractAllAmounts(text) {
     if (amt != null && amt > 0) out.push({ amount: amt, source: 'ars_prefix' });
   }
 
-  // 3. $ prefix with decimals (most banks display this for the headline figure).
-  const dollarDecRe = new RegExp(`\\$\\s*${NUM}`, 'g');
-  while ((m = dollarDecRe.exec(text)) !== null) {
+  // 3. $ prefix (headline figure — usually rendered in bold/large font).
+  const dollarRe = new RegExp(`\\$\\s*${NUM}`, 'g');
+  while ((m = dollarRe.exec(text)) !== null) {
     const amt = parseAmount(m[1]);
     if (amt != null && amt > 0) out.push({ amount: amt, source: 'dollar' });
   }
 
-  // 4. Standalone number line that "looks like" an amount (100..10M).
+  // 4. Standalone number line.
   for (const line of text.split('\n').map(l => l.trim())) {
-    if (/^\d{1,3}(?:\.\d{3})+(?:,\d{2})?$/.test(line) || /^\d{3,8}(?:,\d{2})?$/.test(line)) {
+    // Standard AR/US patterns
+    if (/^\d{1,3}(?:[\s.,]\d{3})+(?:[.,]\d{2})?$/.test(line) || /^\d{3,8}(?:[.,]\d{2})?$/.test(line)) {
       const amt = parseAmount(line);
       if (amt != null && amt >= 100 && amt <= 10_000_000) {
         out.push({ amount: amt, source: 'standalone' });
+      }
+      continue;
+    }
+    // OCR-tolerant: line that's *mostly* digits but with O/I/l/S confused
+    if (new RegExp(`^${D}{3,12}(?:[.,]${D}{1,2})?$`).test(line)) {
+      const amt = parseAmount(line);
+      if (amt != null && amt >= 100 && amt <= 10_000_000) {
+        out.push({ amount: amt, source: 'standalone_tolerant' });
       }
     }
   }
@@ -105,11 +164,23 @@ function extractDate(text) {
     enero: '01', febrero: '02', marzo: '03', abril: '04', mayo: '05', junio: '06',
     julio: '07', agosto: '08', septiembre: '09', octubre: '10', noviembre: '11', diciembre: '12',
   };
+  const monthAbbr = {
+    ene: '01', feb: '02', mar: '03', abr: '04', may: '05', jun: '06',
+    jul: '07', ago: '08', sep: '09', sept: '09', oct: '10', nov: '11', dic: '12',
+  };
 
   // DD de mes de YYYY
   const longMatch = text.match(/(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})/i);
   if (longMatch) {
     return `${longMatch[3]}-${monthNames[longMatch[2].toLowerCase()]}-${longMatch[1].padStart(2, '0')}`;
+  }
+
+  // DD/abbr (e.g. "13/may") — MP modern format, no year shown.
+  // Assume current year. Caller will validate against date window.
+  const abbrMatch = text.match(/(\d{1,2})[\/\s\-](ene|feb|mar|abr|may|jun|jul|ago|sept?|oct|nov|dic)\b/i);
+  if (abbrMatch) {
+    const year = new Date().getFullYear();
+    return `${year}-${monthAbbr[abbrMatch[2].toLowerCase()]}-${abbrMatch[1].padStart(2, '0')}`;
   }
 
   // DD/MM/YYYY or DD-MM-YYYY

@@ -149,4 +149,38 @@ export class UsersController {
     return { transactions };
   }
 
+  // ============================================
+  // PRELOADED USERS (operator-imported via CSV)
+  // ============================================
+
+  /**
+   * Bulk import preloaded users from CSV-derived array.
+   * Each entry: { username, phone, panelId? }.
+   * - Creates new User if username doesn't exist.
+   * - Updates phone/panelId/isPreloaded if username exists.
+   * - Conflict (phone already used by another username) → reported in errors.
+   */
+  @Post('preloaded/bulk')
+  @Roles(UserRole.OPERATOR, UserRole.SENIOR_OPERATOR, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  async bulkImportPreloaded(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { entries: Array<{ username: string; phone: string; panelId?: string }> },
+  ) {
+    return this.usersService.bulkImportPreloaded(body.entries || [], user.sub);
+  }
+
+  /** List all currently-preloaded users (latest first). */
+  @Get('preloaded')
+  @Roles(UserRole.OPERATOR, UserRole.SENIOR_OPERATOR, UserRole.ADMIN)
+  async listPreloaded() {
+    return this.usersService.findPreloaded();
+  }
+
+  /** Remove a user from the preloaded list (does NOT delete the User row). */
+  @Delete('preloaded/:id')
+  @Roles(UserRole.SENIOR_OPERATOR, UserRole.ADMIN)
+  async unflagPreloaded(@Param('id', ParseUUIDPipe) id: string) {
+    return this.usersService.unflagPreloaded(id);
+  }
 }

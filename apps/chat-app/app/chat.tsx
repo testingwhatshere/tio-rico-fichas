@@ -112,6 +112,10 @@ export default function UnifiedChatScreen() {
     setFlowState,
   });
 
+  // Refs for handlers declared further down (avoid temporal dead zone).
+  const handleStartNewLoadRef = useRef<((prefillAmount?: number) => void) | null>(null);
+  const handleAmountSelectedRef = useRef<((amount: number) => Promise<void> | void) | null>(null);
+
   // Socket handlers
   useSocketHandlers({
     chatIdRef,
@@ -126,6 +130,9 @@ export default function UnifiedChatScreen() {
     loadMessages,
     flowStateRef,
     markMessagesAsRead,
+    handleProofUpload,
+    handleStartNewLoad: (p) => handleStartNewLoadRef.current?.(p),
+    handleAmountSelected: (a) => handleAmountSelectedRef.current?.(a),
   });
 
   // Glow animation for empty state
@@ -173,7 +180,7 @@ export default function UnifiedChatScreen() {
 
         if (active) {
           updateActiveRequest(active);
-          initFlowStateFromRequest(active, chat.id, addBotMessage, handlePaymentConfirmed, supportPhoneRef);
+          initFlowStateFromRequest(active, chat.id, addBotMessage, handlePaymentConfirmed, supportPhoneRef, handleProofUpload);
         } else {
           setFlowState('IDLE');
         }
@@ -285,6 +292,7 @@ export default function UnifiedChatScreen() {
     });
     scrollToBottom();
   };
+  handleStartNewLoadRef.current = handleStartNewLoad;
 
   const handleAmountSelected = async (amount: number) => {
     const userMessage: Message = {
@@ -349,6 +357,7 @@ export default function UnifiedChatScreen() {
       setFlowState('IDLE');
     }
   };
+  handleAmountSelectedRef.current = handleAmountSelected;
 
   const handleCancelRequest = async () => {
     const currentRequest = activeRequestRef.current;
@@ -558,6 +567,38 @@ export default function UnifiedChatScreen() {
     }
   };
 
+  // Help: two-option dialog → backend endpoint (notifies operators + Telegram)
+  // or WhatsApp shortcut.
+  const handleNeedHelp = async () => {
+    hapticMedium();
+    const wantsChat = await crossConfirm(
+      '¿Cómo querés que te ayudemos?',
+      'Podemos avisar al operador en este chat o abrir WhatsApp.',
+      {
+        confirmText: 'Avisar en el chat',
+        cancelText: 'Abrir WhatsApp',
+      },
+    );
+    if (wantsChat) {
+      try {
+        await chatsApi.requestHelp('chat');
+        addBotMessage('Le avisamos al operador. Te respondemos por acá en unos minutos.');
+        scrollToBottom();
+      } catch (e: any) {
+        const errMsg = getErrorMessage(e);
+        crossAlert('No pudimos avisar', errMsg || 'Intentá de nuevo o probá por WhatsApp.');
+      }
+    } else {
+      if (!supportPhone) {
+        crossAlert('Sin numero', 'No hay un numero de soporte configurado.');
+        return;
+      }
+      const tel = supportPhone.replace(/[^\d+]/g, '');
+      const text = encodeURIComponent('Hola, necesito ayuda con mi carga/premio.');
+      import('react-native').then(({ Linking }) => Linking.openURL(`https://wa.me/${tel}?text=${text}`));
+    }
+  };
+
   const handleSettings = async () => {
     hapticMedium();
     const { user, logout } = useAuthStore.getState();
@@ -636,7 +677,14 @@ export default function UnifiedChatScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 6 }} activeOpacity={0.7}>
+            <TouchableOpacity
+              onPress={() => {
+                if (router.canGoBack()) router.back();
+                else router.replace('/home');
+              }}
+              style={{ marginRight: 6 }}
+              activeOpacity={0.7}
+            >
               <Ionicons name="arrow-back" size={22} color={colors.textSecondary} />
             </TouchableOpacity>
             <Image source={require('@/assets/icon.png')} style={{ width: 32, height: 32, borderRadius: 8, marginRight: 8 }} />
@@ -749,59 +797,18 @@ export default function UnifiedChatScreen() {
           </View>
         )}
 
-        {/* Pending Image Preview */}
-        {pendingImage && (
-          <View style={styles.pendingImageContainer}>
-            <Image source={{ uri: pendingImage }} style={styles.pendingImageThumb} />
-            <TouchableOpacity
-              style={styles.pendingImageRemove}
-              onPress={() => setPendingImage(null)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="close-circle" size={22} color={colors.error} />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Action Footer: only proof upload + WhatsApp support. Text chat disabled. */}
+        {/* Action Footer: ask-for-help (in-chat) + WhatsApp shortcut. */}
         <View style={styles.actionFooter}>
-          {pendingImage ? (
-            <TouchableOpacity
-              testID="send-proof-button"
-              accessibilityLabel="Enviar comprobante"
-              style={[
-                styles.primaryActionButton,
-                (isSending || isOffline || isInputDisabled || isUploadingImage) && styles.primaryActionButtonDisabled,
-              ]}
-              onPress={sendMessage}
-              disabled={isSending || isOffline || !chatId || isInputDisabled || isUploadingImage}
-              activeOpacity={0.8}
-            >
-              {isUploadingImage || isSending ? (
-                <ActivityIndicator size="small" color={colors.textOnPrimary} />
-              ) : (
-                <>
-                  <Ionicons name="send" size={18} color={colors.textOnPrimary} />
-                  <Text style={styles.primaryActionText}>Enviar comprobante</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              testID="pick-proof-button"
-              accessibilityLabel="Subir comprobante"
-              style={[
-                styles.primaryActionButton,
-                (isOffline || isInputDisabled || isUploadingImage) && styles.primaryActionButtonDisabled,
-              ]}
-              onPress={pickImage}
-              disabled={isOffline || isInputDisabled || isUploadingImage}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="image-outline" size={20} color={colors.textOnPrimary} />
-              <Text style={styles.primaryActionText}>Subir comprobante</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            testID="footer-help-button"
+            accessibilityLabel="Necesito ayuda"
+            style={styles.helpFooterButton}
+            onPress={handleNeedHelp}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="help-circle" size={22} color={colors.textOnPrimary} />
+            <Text style={styles.helpFooterText}>Necesito ayuda</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             testID="footer-whatsapp-button"
             accessibilityLabel="Hablar por WhatsApp"
@@ -1106,5 +1113,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#25D366',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  whatsappFooterText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  helpFooterButton: {
+    flex: 1,
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  helpFooterText: {
+    color: colors.textOnPrimary,
+    fontWeight: '700',
+    fontSize: 15,
+    letterSpacing: 0.5,
   },
 });

@@ -58,15 +58,15 @@ export default function PrizeDetailScreen() {
     );
   }
 
-  const amount = parseAmount(claim.amount);
-  const verifiedBalance = claim.verifiedBalance != null ? parseAmount(claim.verifiedBalance) : null;
-  const targetUsername = claim.targetUsername || claim.user?.savedTargetUsername || '-';
-  const userEmail = claim.user?.email || '-';
-  const paymentMethod = claim.paymentMethod || '-';
-  const paymentDetails = claim.paymentDetails || '-';
-  const status = claim.status || 'PENDING';
+  const amount = parseAmount(claim?.amount);
+  const verifiedBalance = claim?.verifiedBalance != null ? parseAmount(claim.verifiedBalance) : null;
+  const targetUsername = claim?.targetUsername || claim?.user?.savedTargetUsername || '-';
+  const userEmail = claim?.user?.email || '-';
+  const paymentMethod = claim?.paymentMethod || '-';
+  const paymentDetails = claim?.paymentDetails || '-';
+  const status = claim?.status || 'PENDING';
   const statusConfig = STATUS_CONFIG[status] || STATUS_CONFIG.PENDING;
-  const createdAt = claim.createdAt || '';
+  const createdAt = claim?.createdAt || '';
   const updatedAt = claim.updatedAt || '';
   const isTerminal = ['COMPLETED', 'REJECTED'].includes(status);
 

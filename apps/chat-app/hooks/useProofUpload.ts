@@ -18,6 +18,15 @@ interface UseProofUploadOptions {
   setFlowState: (state: FlowState) => void;
 }
 
+// Matches the backend's duplicate-proof error in any phrasing currently in use.
+const DUPLICATE_PROOF_HINTS = [
+  'comprobante ya fue utilizado',
+  'usaste este comprobante',
+  'ya usaste este comprobante',
+  'usado en otra solicitud',
+  'en otra solicitud',
+];
+
 export function useProofUpload({
   activeRequestRef,
   disableLastCard,
@@ -50,20 +59,22 @@ export function useProofUpload({
         console.error('Upload error:', error?.response?.status, error?.response?.data, error?.message);
 
         try {
-          const message =
+          const rawMessage =
             error?.response?.data?.message ||
             error?.response?.data?.error?.message ||
             error?.message ||
             'Error desconocido';
+          const message = String(rawMessage).toLowerCase();
 
-          if (message.includes('comprobante ya fue utilizado')) {
-            addBotMessage('Este comprobante ya fue usado en otra solicitud. Por favor subi uno diferente.');
-          } else if (message.includes('10MB') || message.includes('excede')) {
+          const isDuplicate = DUPLICATE_PROOF_HINTS.some((hint) => message.includes(hint));
+          if (isDuplicate) {
+            addBotMessage('Este comprobante ya fue usado en otra solicitud. Toca "Cambiar archivo" y subi uno diferente.');
+          } else if (message.includes('10mb') || message.includes('excede')) {
             addBotMessage('El archivo es demasiado grande (max 10MB). Intenta con una imagen mas chica.');
-          } else if (message.includes('not configured') || message.includes('Cloudinary')) {
+          } else if (message.includes('not configured') || message.includes('cloudinary')) {
             addBotMessage('El servicio de subida de archivos no esta disponible. Contacta soporte.');
           } else {
-            addBotMessage(`No pudimos subir el comprobante. ${message.length < 100 ? message : 'Verifica tu conexion e intenta de nuevo.'}`);
+            addBotMessage(`No pudimos subir el comprobante. ${rawMessage.length < 100 ? rawMessage : 'Verifica tu conexion e intenta de nuevo.'}`);
           }
         } catch (botMsgError) {
           console.error('Failed to show upload error in chat:', botMsgError);

@@ -394,16 +394,22 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 // Load configuration from storage
 async function loadConfig() {
+  const DEFAULT_CONFIG = {
+    backendUrl: 'https://tiorico-api.onrender.com',
+    apiKey: 'Narciso',
+  };
   const stored = await chrome.storage.local.get(['config']);
-  if (stored.config) {
-    state.config = stored.config;
-    console.log('[ServiceWorker] Config loaded:', {
-      backendUrl: state.config.backendUrl,
-      hasApiKey: !!state.config.apiKey
-    });
+  if (stored.config && stored.config.backendUrl && stored.config.apiKey) {
+    state.config = { ...DEFAULT_CONFIG, ...stored.config };
   } else {
-    console.warn('[ServiceWorker] No config found - please configure in options page');
+    state.config = { ...DEFAULT_CONFIG, ...(stored.config || {}) };
+    await chrome.storage.local.set({ config: state.config });
+    console.log('[ServiceWorker] Defaults applied + persisted');
   }
+  console.log('[ServiceWorker] Config loaded:', {
+    backendUrl: state.config.backendUrl,
+    hasApiKey: !!state.config.apiKey
+  });
 }
 
 // Load local statistics from storage

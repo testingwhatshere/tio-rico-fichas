@@ -163,7 +163,7 @@ function createPipeline(deps) {
   // we only short-circuit to Ollama if BOTH paths produce no exact amount+date match.
   function getOcrThreshold() {
     const t = deps.config?.ocrConfidenceThreshold;
-    return Number.isFinite(t) ? t : 0.7;
+    return Number.isFinite(t) ? t : 0.55;
   }
   // Date window (days). Default ±1 day in ART — same-day or yesterday, nothing older.
   function getDateWindowDays() {
@@ -190,15 +190,55 @@ function createPipeline(deps) {
       const ocr = await recognizeWithMultiPass(imageBuffer, deps.sendToRenderer);
       if (!ocr) return { result: null, source: null, ocrText: '', fields: null };
       const text = ocr.text;
-      if (!text || text.length < 20) {
-        logger.info('OCR', 'Too little text extracted, falling back to Ollama');
+      // Lowered from 20 to 5 — number-focused variant produces very short strings
+      // (just the amount line) but they're still useful for matching.
+      if (!text || text.length < 5) {
+        logger.info('OCR', `Too little text extracted (${text?.length || 0} chars), falling back to Ollama`);
         return { result: null, source: null, ocrText: text, fields: null };
       }
 
       const expected = request.expectedAmount > 0 ? request.expectedAmount : null;
       const fields = parseOCRText(text, expected || 0);
       const duration = Date.now() - startTime;
-      logger.info('OCR', `Extracted in ${duration}ms: amount=${fields.extractedAmount}, date=${fields.extractedDate}, confidence=${fields.confidence.toFixed(2)}, bank=${fields.detectedPlatform}`);
+      const extractMsg = `Extraido en ${duration}ms: amount=${fields.extractedAmount}, date=${fields.extractedDate}, confidence=${fields.confidence.toFixed(2)}, bank=${fields.detectedPlatform}`;
+      logger.info('OCR', extractMsg);
+      deps.sendToRenderer('log', { message: extractMsg, type: fields.extractedAmount != null ? 'success' : 'warning' });
+
+      // High-confidence OCR but no amount extracted → dump raw text for debugging.
+      // This is the exact case the user is hitting: 91% confidence but parseAmount fails.
+      if (fields.confidence > 0.5 && fields.extractedAmount == null) {
+        const snippet = text.slice(0, 500).replace(/\n/g, ' ⏎ ');
+        logger.warn('OCR', `HIGH-CONFIDENCE-NO-AMOUNT (conf=${fields.confidence.toFixed(2)}, expected=${expected}): "${snippet}"`);
+        deps.sendToRenderer('log', { message: `Atencion: OCR leyo ${Math.round(fields.confidence * 100)}% pero no extrajo monto. Revisar logs.`, type: 'warning' });
+
+        // Last-ditch fallback: scan the raw text for *any* number sequence that
+        // matches expected within ±1 peso. We do NOT apply ÷100/×100 alternatives:
+        // that would approve a $50 receipt as $5000. Order-of-magnitude must match.
+        if (expected != null) {
+          // Match D in _helpers.js — both upper and lower case OCR-confused letters.
+          const D = '[0-9OoIiLlSsBb]';
+          const NUM_RE = new RegExp(
+            `(?<![${D}])(${D}{1,3}(?:[.,\\s]${D}{3})+(?:[.,]${D}{1,2})?|${D}{3,12}(?:[.,]${D}{1,2})?)(?![${D}])`,
+            'g',
+          );
+          const rawDigitGroups = [...text.matchAll(NUM_RE)].map((m) => m[1]);
+          const { parseAmount } = require('../ocr/patterns/_helpers');
+          const matches = rawDigitGroups
+            .map((g) => parseAmount(g))
+            .filter((n) => n != null && n >= 100);
+          const exactMatch = matches.find((n) => Math.abs(n - expected) <= 1.0);
+          if (exactMatch != null) {
+            const msg = `LAST-DITCH MATCH: monto rescatado ${exactMatch} (candidatos: ${matches.join(', ')})`;
+            logger.info('OCR', msg);
+            deps.sendToRenderer('log', { message: msg, type: 'success' });
+            fields.extractedAmount = exactMatch;
+          } else {
+            const msg = `LAST-DITCH FALLO. Numeros vistos: [${rawDigitGroups.join(' | ')}]. Parseados: [${matches.join(', ')}]. Esperado: ${expected}`;
+            logger.warn('OCR', msg);
+            deps.sendToRenderer('log', { message: msg, type: 'warning' });
+          }
+        }
+      }
 
       // Determine date validity in ART.
       const dateWindow = getDateWindowDays();
@@ -212,22 +252,45 @@ function createPipeline(deps) {
         }
       }
 
-      // Status normalization.
-      const approvedVariants = ['aprobada', 'aprobado', 'exitosa', 'exitoso', 'completada', 'completado', 'acreditada', 'approved', 'realizada', 'enviada'];
+      // Status normalization. Includes modern MP/wallet wording.
+      const approvedVariants = [
+        'aprobada', 'aprobado', 'exitosa', 'exitoso', 'completada', 'completado',
+        'acreditada', 'acreditado', 'approved', 'realizada', 'realizado',
+        'enviada', 'enviado', 'transferida', 'transferido', 'confirmada', 'confirmado',
+        'finalizada', 'finalizado', 'procesada', 'procesado', 'pagada', 'pagado',
+        'cobrada', 'cobrado',
+      ];
       let statusApproved = null; // null = unknown, true/false = decided.
       if (fields.transactionStatus) {
         statusApproved = approvedVariants.some(v => fields.transactionStatus.toLowerCase().includes(v));
         if (!statusApproved) statusFlags.push('STATUS_NOT_APPROVED');
+      } else {
+        // Status field not extracted — scan whole OCR text for action verbs that imply success.
+        // MP modern receipts often just say "Le transferiste a Juan" without a status label.
+        const lower = text.toLowerCase();
+        const actionVerbs = [
+          'transferiste', 'enviaste', 'pagaste', 'abonaste',
+          'le transferiste', 'transferencia exitosa', 'transferencia realizada',
+          'transferencia enviada', 'transferencia recibida', 'transferencia confirmada',
+          'transferencia completada', 'transferencia procesada',
+          'comprobante de transferencia', 'comprobante de pago',
+        ];
+        if (actionVerbs.some(v => lower.includes(v))) {
+          statusApproved = true;
+        }
       }
 
-      // Amount match against expected. We *strongly* prefer exact match (within 1 cent) over
-      // confidence — Tesseract's confidence is dragged down by UI chrome around the receipt.
+      // Amount match against expected. Tolerance: 1 peso absolute OR 0.5% (handles OCR
+      // decimals/cents glitches on bold/large fonts). Also try swapped notation in case
+      // Tesseract confused US (1,234.56) ↔ AR (1.234,56) formats.
       const amount = fields.extractedAmount;
       let amountMatchExact = false;
       let amountMatchTolerant = false;
+      // Match: ±1 peso absolute OR 0.5% (handles cent rounding on bold fonts).
+      // Removed prior ÷100/×100 alternatives — that would approve $50 as $5000.
       if (amount != null && expected != null) {
-        amountMatchExact = Math.abs(amount - expected) < 0.01;
-        amountMatchTolerant = Math.abs(amount - expected) <= expected * 0.1;
+        amountMatchExact = Math.abs(amount - expected) <= 1.0;
+        amountMatchTolerant = Math.abs(amount - expected) <= Math.max(expected * 0.005, 1.0);
       }
       if (!amountMatchTolerant && expected != null && amount != null) {
         statusFlags.push('AMOUNT_MISMATCH');

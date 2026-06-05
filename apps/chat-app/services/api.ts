@@ -26,7 +26,7 @@ import { withCache } from '@/services/cache';
 // =============================================================================
 
 /** Base URL del backend API desde variables de entorno */
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://tiorico-api.onrender.com/api';
 
 /** Timeout para requests en milisegundos */
 const API_TIMEOUT = parseInt(process.env.EXPO_PUBLIC_API_TIMEOUT || '30000', 10);
@@ -707,6 +707,17 @@ export const prizeClaimsApi = {
     const response = await api.post('/prize-claims', data);
     return response.data;
   },
+  /** Returns the user's currently in-progress prize claim, or null. */
+  getMyActive: async () => {
+    const response = await api.get('/prize-claims/me/active');
+    return response.data as null | {
+      id: string;
+      amount: string | number;
+      status: string;
+      createdAt: string;
+      targetUsername?: string;
+    };
+  },
 };
 
 // =============================================================================
@@ -735,6 +746,15 @@ export const chatsApi = {
    */
   getOne: async (chatId: string): Promise<Chat> => {
     const response = await api.get<Chat>(`/chats/${chatId}`);
+    return response.data;
+  },
+
+  /**
+   * Marca el chat como "necesita ayuda" — el backend alerta a operadores y
+   * Telegram. context = "chat" o "prize" para distinguir el origen.
+   */
+  requestHelp: async (context: 'chat' | 'prize' = 'chat'): Promise<{ chatId: string }> => {
+    const response = await api.post<{ chatId: string }>('/chats/me/help', { context });
     return response.data;
   },
 };

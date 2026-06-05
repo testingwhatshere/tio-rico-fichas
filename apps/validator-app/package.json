@@ -1,6 +1,6 @@
 {
   "name": "validator-app",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "description": "Validador de Comprobantes - Aplicacion de escritorio",
   "main": "src/main.js",
   "author": "Game Automation Platform",
@@ -45,9 +45,18 @@
     ],
     "win": {
       "target": [
-        { "target": "portable", "arch": ["x64"] }
+        { "target": "nsis", "arch": ["x64"] }
       ],
       "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Validador de Comprobantes",
+      "deleteAppDataOnUninstall": false
     }
   }
 }

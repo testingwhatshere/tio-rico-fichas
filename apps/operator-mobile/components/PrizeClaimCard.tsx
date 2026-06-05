@@ -43,7 +43,7 @@ function getRelativeTime(dateStr: string): string {
 
 export default function PrizeClaimCard({ claim, onPress }: PrizeClaimCardProps) {
   const amount = parseAmount(claim.amount);
-  const targetUsername = claim.targetUsername || claim.user?.savedTargetUsername || '-';
+  const targetUsername = claim?.targetUsername || claim?.user?.savedTargetUsername || '-';
   const timestamp = claim.createdAt || '';
   const status = claim.status || 'PENDING';
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.PENDING;

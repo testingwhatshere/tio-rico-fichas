@@ -72,12 +72,16 @@ async function generateOCRVariants(imageBuffer) {
   }
 
   // Skip preprocessing for very small images (likely already processed)
-  if (imageBuffer.length < 1000) {
+  if (imageBuffer.length < 500) {
     logger.info('OCR', 'Image too small for preprocessing, using original');
     return [{ name: 'original', buffer: imageBuffer, psm: 6 }];
   }
 
   const variants = [];
+
+  // Always try the original image first — preprocessing sometimes destroys
+  // detail (small text, thin strokes) that Tesseract could otherwise read.
+  variants.push({ name: 'original', buffer: imageBuffer, psm: 3 }); // PSM 3 = auto layout
 
   try {
     // Variant 1: Standard (good for document-style receipts)
@@ -123,6 +127,81 @@ async function generateOCRVariants(imageBuffer) {
     variants.push({ name: 'inverted', buffer: inverted, psm: 6 });
   } catch (err) {
     logger.warn('OCR', `Inverted variant failed: ${err.message}`);
+  }
+
+  try {
+    // Variant 4: Downscale (paradoxically, *very large* fonts read better when shrunk —
+    // Tesseract's LSTM was trained on small text and gets confused by huge bold characters).
+    const downscale = await sharp(imageBuffer)
+      .resize(800, null, { fit: 'inside', withoutEnlargement: false })
+      .grayscale()
+      .normalize()
+      .sharpen({ sigma: 1.2 })
+      .threshold(140)
+      .png()
+      .toBuffer();
+    variants.push({ name: 'downscale', buffer: downscale, psm: 6 });
+  } catch (err) {
+    logger.warn('OCR', `Downscale variant failed: ${err.message}`);
+  }
+
+  try {
+    // Variant 5: Number-focused (PSM 7 single line + heavy contrast — optimized for the
+    // bold amount line). Whitelist is applied in worker.js when name='number-focused'.
+    const numberFocused = await sharp(imageBuffer)
+      .resize(1600, null, { fit: 'inside', withoutEnlargement: false })
+      .grayscale()
+      .normalize()
+      .linear(2.0, -80) // Very high contrast
+      .sharpen({ sigma: 2.5 })
+      .threshold(100)
+      .png()
+      .toBuffer();
+    variants.push({ name: 'number-focused', buffer: numberFocused, psm: 11 });
+  } catch (err) {
+    logger.warn('OCR', `Number-focused variant failed: ${err.message}`);
+  }
+
+  // Variant 6: Top-half crop @ high zoom — MP/MercadoPago renders the headline
+  // amount in huge bold font in the upper portion of the receipt. By cropping
+  // and zooming, we give Tesseract a clearer shot at it without the rest of the
+  // page noise.
+  try {
+    const meta = await sharp(imageBuffer).metadata();
+    if (meta.width && meta.height) {
+      const topHalf = await sharp(imageBuffer)
+        .extract({ left: 0, top: 0, width: meta.width, height: Math.floor(meta.height * 0.55) })
+        .resize(2400, null, { fit: 'inside', withoutEnlargement: false })
+        .grayscale()
+        .normalize()
+        .linear(1.6, -40)
+        .sharpen({ sigma: 2.0 })
+        .threshold(130)
+        .png()
+        .toBuffer();
+      variants.push({ name: 'top-half-zoom', buffer: topHalf, psm: 6 });
+    }
+  } catch (err) {
+    logger.warn('OCR', `Top-half-zoom variant failed: ${err.message}`);
+  }
+
+  // Variant 7: digits-only PSM 7 (single line treated as one text line).
+  // Aggressive zoom + strict whitelist (applied in worker.js when name starts with
+  // 'digits-only'). Designed for the case where the amount is rendered alone on
+  // its own visual line in a custom font.
+  try {
+    const digitsOnly = await sharp(imageBuffer)
+      .resize(2000, null, { fit: 'inside', withoutEnlargement: false })
+      .grayscale()
+      .normalize()
+      .linear(1.8, -60)
+      .sharpen({ sigma: 2.0 })
+      .threshold(140)
+      .png()
+      .toBuffer();
+    variants.push({ name: 'digits-only', buffer: digitsOnly, psm: 7 });
+  } catch (err) {
+    logger.warn('OCR', `Digits-only variant failed: ${err.message}`);
   }
 
   // Always include original as fallback

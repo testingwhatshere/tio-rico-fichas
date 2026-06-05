@@ -8,6 +8,7 @@ import { SettingsModule } from '../settings/settings.module';
 import { MessagesModule } from '../messages/messages.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { ChatsModule } from '../chats/chats.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ChatsModule } from '../chats/chats.module';
     forwardRef(() => MessagesModule),
     forwardRef(() => JobsModule),
     forwardRef(() => ChatsModule),
+    NotificationsModule,
   ],
   controllers: [RequestsController],
   providers: [RequestsService],

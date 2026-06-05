@@ -121,29 +121,103 @@ export class AuthService {
   // Mar del Plata — area code blocked from registration
   private static readonly BLOCKED_AREA_CODES = ['223'];
 
+  /**
+   * Normalize Argentine phone numbers to canonical form `549<area><number>`.
+   * Conservative: only transforms numbers that look Argentine. Foreign numbers
+   * (Chile +56, Spain +34, Uruguay +598, etc.) are left as digit-only without
+   * a wrong "549" prefix.
+   *
+   * Argentine canonical examples (all → "5491134567890"):
+   *   "1134567890" (10 digits, local), "91134567890" (11, with mobile 9),
+   *   "541134567890" (12 with country+area), "5491134567890" (13 canonical),
+   *   "+54 9 11 3456-7890"
+   */
+  static canonicalArPhone(raw: string): string {
+    let digits = (raw || '').replace(/\D/g, '');
+    if (digits.startsWith('00')) digits = digits.slice(2);
+    // Already canonical AR mobile
+    if (digits.startsWith('549')) return digits;
+    // AR with country code 54, missing "9" mobile marker.
+    // Only auto-add the "9" when the total length matches AR (11 digits after "54").
+    if (digits.startsWith('54') && digits.length >= 11 && digits.length <= 13) {
+      return '549' + digits.slice(2);
+    }
+    // AR mobile typed with "9" prefix but no country code (length 10-12)
+    if (digits.startsWith('9') && digits.length >= 10 && digits.length <= 12) {
+      return '54' + digits;
+    }
+    // Plain local AR number (10-11 digits) — likely an area+number with no prefix
+    if (digits.length >= 10 && digits.length <= 11 && !digits.startsWith('0')) {
+      return '549' + digits;
+    }
+    // Foreign number or unrecognized format → return digits unchanged
+    return digits;
+  }
+
   async clientAuth(dto: ClientAuthDto): Promise<AuthResponseDto> {
-    const normalizedUsername = dto.username.toLowerCase();
+    const normalizedUsername = dto.username.toLowerCase().trim();
 
     // Fix 20: Check reserved usernames
     if (AuthService.RESERVED_USERNAMES.includes(normalizedUsername)) {
       throw new BadRequestException('Este nombre de usuario está reservado');
     }
 
-    // Try to find existing user by username
-    let user = await this.prisma.user.findUnique({
-      where: { username: normalizedUsername },
+    // Phone is REQUIRED on every login/register, no exceptions (anti-fraud).
+    if (!dto.phone) {
+      throw new BadRequestException({
+        message: 'PHONE_REQUIRED',
+        statusCode: 400,
+        needsPhone: true,
+      });
+    }
+
+    // Case-insensitive lookup as safety net for legacy records that may have mixed case.
+    let user = await this.prisma.user.findFirst({
+      where: { username: { equals: normalizedUsername, mode: 'insensitive' } },
       select: {
         id: true,
         username: true,
         role: true,
         isActive: true,
+        isPreloaded: true,
+        phone: true,
       },
     });
 
-    // If user exists → login as normal (phone not needed)
     if (user) {
       if (!user.isActive) {
         throw new UnauthorizedException('Cuenta deshabilitada');
+      }
+
+      // Every existing user must prove the phone matches what's stored. Both
+      // sides canonicalized to "549<area><number>" so the user can type any
+      // common Argentine format ("1134...", "9 11 34...", "+5491134...").
+      if (user.phone) {
+        const providedPhone = AuthService.canonicalArPhone(dto.phone);
+        const expectedPhone = AuthService.canonicalArPhone(user.phone);
+        if (providedPhone !== expectedPhone) {
+          this.logger.warn(
+            `User "${normalizedUsername}" login rejected: phone mismatch`,
+          );
+          throw new UnauthorizedException(
+            'El número de teléfono no coincide con el registrado. Si es tu cuenta, contactá a soporte.',
+          );
+        }
+      } else {
+        // Legacy account without phone on record: backfill on this login.
+        const normalizedPhone = AuthService.canonicalArPhone(dto.phone);
+        const existingPhoneUser = await this.prisma.user.findUnique({
+          where: { phone: normalizedPhone },
+        });
+        if (existingPhoneUser && existingPhoneUser.id !== user.id) {
+          throw new BadRequestException(
+            'Este número de teléfono ya está registrado con otro usuario',
+          );
+        }
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { phone: normalizedPhone },
+        });
       }
 
       // Trigger discovery for existing users without panel (fire-and-forget)
@@ -167,24 +241,14 @@ export class AuthService {
       };
     }
 
-    // User doesn't exist → registration flow, phone is required
-    if (!dto.phone) {
-      throw new BadRequestException({
-        message: 'PHONE_REQUIRED',
-        statusCode: 400,
-        needsPhone: true,
-      });
-    }
+    // Normalize phone to canonical Argentine format "549<area><number>".
+    // This collapses any equivalent input the user might type into a single
+    // canonical key, so uniqueness checks catch duplicates.
+    const normalizedPhone = AuthService.canonicalArPhone(dto.phone);
 
-    // Normalize phone: strip spaces and leading +
-    const normalizedPhone = dto.phone.replace(/\s+/g, '');
-
-    // Block Mar del Plata + zona costera area codes
-    const cleanPhone = normalizedPhone.replace(/^\+/, '');
+    // Block Mar del Plata + zona costera area codes (canonical form starts with 549<area>)
     const isBlockedRegion = AuthService.BLOCKED_AREA_CODES.some(code =>
-      cleanPhone.startsWith(code) ||
-      cleanPhone.startsWith('54' + code) ||
-      cleanPhone.startsWith('549' + code),
+      normalizedPhone.startsWith('549' + code),
     );
     if (isBlockedRegion) {
       throw new BadRequestException('El sistema no está disponible en tu región');
@@ -203,36 +267,53 @@ export class AuthService {
 
     // Create new CLIENT user with username + phone
     // savedTargetUsername = username (they're the same — the gaming panel username)
+    type UserShape = {
+      id: string;
+      username: string | null;
+      phone: string | null;
+      role: 'CLIENT' | 'OPERATOR' | 'SENIOR_OPERATOR' | 'ADMIN';
+      isActive: boolean;
+      isPreloaded: boolean;
+    };
+    const userSelect = {
+      id: true,
+      username: true,
+      role: true,
+      isActive: true,
+      isPreloaded: true,
+      phone: true,
+    } as const;
+
+    let createdOrFound: UserShape | null = null;
     try {
-      user = await this.prisma.user.create({
+      createdOrFound = (await this.prisma.user.create({
         data: {
           username: normalizedUsername,
           phone: normalizedPhone,
           role: 'CLIENT',
           savedTargetUsername: normalizedUsername,
         },
-        select: {
-          id: true,
-          username: true,
-          role: true,
-          isActive: true,
-        },
-      });
+        select: userSelect,
+      })) as UserShape;
     } catch (error: any) {
       if (error.code === 'P2002') {
         // Concurrent creation — could be username or phone unique constraint
-        // Re-fetch to see if our username was created
-        user = await this.prisma.user.findUnique({
-          where: { username: normalizedUsername },
-          select: { id: true, username: true, role: true, isActive: true },
-        });
-        if (!user) {
+        // Re-fetch case-insensitively to find any variant of the username.
+        createdOrFound = (await this.prisma.user.findFirst({
+          where: { username: { equals: normalizedUsername, mode: 'insensitive' } },
+          select: userSelect,
+        })) as UserShape | null;
+        if (!createdOrFound) {
           throw new BadRequestException('Error al crear usuario, intentá de nuevo');
         }
       } else {
         throw error;
       }
     }
+    if (!createdOrFound) {
+      throw new BadRequestException('Error al crear usuario, intentá de nuevo');
+    }
+    user = createdOrFound;
 
     // Check if account is active
     if (!user.isActive) {

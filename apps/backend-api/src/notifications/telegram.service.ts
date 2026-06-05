@@ -725,6 +725,20 @@ export class TelegramService implements OnModuleInit {
     );
   }
 
+  /**
+   * User explicitly tapped "Necesito ayuda" in the chat-app. Operators get a
+   * direct ping in Telegram even if no panel is open.
+   */
+  async alertHelpRequested(username: string, context: 'chat' | 'prize') {
+    const contextLabel = context === 'prize' ? 'cobro de premio' : 'chat de soporte';
+    await this.send(
+      `🙋 <b>AYUDA SOLICITADA</b>\n\n` +
+      `Usuario: <b>${username}</b>\n` +
+      `Contexto: ${contextLabel}\n\n` +
+      `Abrí el panel y respondele.`,
+    );
+  }
+
   private async handlePremiosCommand(chatId: string) {
     try {
       const pending = await this.prisma.prizeClaim.findMany({

@@ -3,6 +3,7 @@ const fs = require('fs');
 const https = require('https');
 const { execFile, spawn } = require('child_process');
 const logger = require('../logger');
+const configMod = require('../config');
 
 function createOllamaManager(deps) {
   // deps = { config, sendToRenderer, getMainWindow }
@@ -125,6 +126,8 @@ function createOllamaManager(deps) {
         }
         const previous = deps.config.ollamaModel;
         deps.config.ollamaModel = selectedModel;
+        // Persist so next boot uses the same model without re-deciding.
+        try { configMod.saveConfig(); } catch (e) { logger.warn('OLLAMA', `Could not persist auto-selected model: ${e.message}`); }
         logger.info('OLLAMA', `Auto-selected vision model: ${selectedModel}`, { previous });
         // Surface the swap so the operator knows we changed their picked model.
         if (previous && previous !== selectedModel && lastAutoSelectedModel !== selectedModel) {
