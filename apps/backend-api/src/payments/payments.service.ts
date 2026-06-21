@@ -9,7 +9,12 @@ import { SettingsService } from '../settings/settings.service';
 import { ProofValidationService } from './proof-validation.service';
 import { ValidationResultDto } from './dto';
 import { VALIDATION_TIMEOUT_BUFFER_MS } from '../common/constants/timeouts';
-import { AppEvent, ValidationCompletedEvent, PaymentProofUploadedEvent, MpVerificationNeededEvent } from '../common/events/app-events';
+import {
+  AppEvent,
+  ValidationCompletedEvent,
+  PaymentProofUploadedEvent,
+  MpVerificationNeededEvent,
+} from '../common/events/app-events';
 import { PushService } from '../notifications/push.service';
 
 @Injectable()
@@ -42,7 +47,9 @@ export class PaymentsService {
    * Get validation date window in days from settings (dynamic)
    */
   private async getValidationDateWindowDays(): Promise<number> {
-    const value = await this.settingsService.getSetting('VALIDATION_DATE_WINDOW_DAYS');
+    const value = await this.settingsService.getSetting(
+      'VALIDATION_DATE_WINDOW_DAYS',
+    );
     return parseInt(value || '7', 10);
   }
 
@@ -53,10 +60,12 @@ export class PaymentsService {
   async validateProof(requestId: string): Promise<ValidationResultDto> {
     // Align with gateway timeout setting + 5s buffer so the gateway timeout fires first
     const gatewayTimeoutMs = parseInt(
-      await this.settingsService.getSetting('VALIDATION_TIMEOUT_MS') || '60000',
+      (await this.settingsService.getSetting('VALIDATION_TIMEOUT_MS')) ||
+        '60000',
       10,
     );
-    const VALIDATION_TIMEOUT_MS = gatewayTimeoutMs + VALIDATION_TIMEOUT_BUFFER_MS;
+    const VALIDATION_TIMEOUT_MS =
+      gatewayTimeoutMs + VALIDATION_TIMEOUT_BUFFER_MS;
 
     this.logger.log(`Validating proof for request ${requestId}`);
 
@@ -102,7 +111,9 @@ export class PaymentsService {
         timeoutPromise,
       ]);
     } catch (error: any) {
-      this.logger.error(`Validation error for request ${requestId}: ${error.message}`);
+      this.logger.error(
+        `Validation error for request ${requestId}: ${error.message}`,
+      );
 
       // Detect validator unavailability for clearer error messages
       const isValidatorUnavailable =
@@ -137,7 +148,9 @@ export class PaymentsService {
             : 'No pudimos validar tu comprobante automáticamente. Un operador lo revisará.',
           { requestId, type: 'validation_error' },
         )
-        .catch((err: any) => this.logger.warn(`Push (validation_error) failed: ${err.message}`));
+        .catch((err: any) =>
+          this.logger.warn(`Push (validation_error) failed: ${err.message}`),
+        );
 
       await this.requestsService.setValidationResult(requestId, {
         valid: false,
@@ -169,7 +182,9 @@ export class PaymentsService {
 
     // Fix 24: Check cancellation before updating status
     if (isCancelled()) {
-      this.logger.warn(`Validation for ${requestId} completed after timeout, discarding result`);
+      this.logger.warn(
+        `Validation for ${requestId} completed after timeout, discarding result`,
+      );
       return validationResult;
     }
 
@@ -186,6 +201,15 @@ export class PaymentsService {
           select: { requiresVerification: true },
         });
         mpVerificationEnabled = wallet?.requiresVerification ?? false;
+        // Negocio decidió NO usar la extension MP — la decisión se toma 100% con el
+        // comprobante. Si una wallet quedó con requiresVerification=true, el request
+        // colgaría en PENDING_MP_VERIFICATION para siempre. Avisar fuerte así sale.
+        if (mpVerificationEnabled) {
+          this.logger.warn(
+            `Wallet ${request.walletId} has requiresVerification=true but MP extension is not in use. ` +
+              `Request ${requestId} would hang in PENDING_MP_VERIFICATION. Set requiresVerification=false in wallet config.`,
+          );
+        }
       }
 
       this.eventsGateway.emitValidationCompleted(request.userId, {
@@ -195,13 +219,17 @@ export class PaymentsService {
       });
 
       if (isCancelled()) {
-        this.logger.warn(`Validation for ${requestId} completed after timeout, discarding`);
+        this.logger.warn(
+          `Validation for ${requestId} completed after timeout, discarding`,
+        );
         return validationResult;
       }
 
       if (mpVerificationEnabled) {
         // MP verification enabled: emit MP_VERIFICATION_NEEDED, job created after MP confirms
-        this.logger.log(`Proof validated for request ${requestId}, emitting MP_VERIFICATION_NEEDED event`);
+        this.logger.log(
+          `Proof validated for request ${requestId}, emitting MP_VERIFICATION_NEEDED event`,
+        );
         this.eventEmitter.emit(AppEvent.MP_VERIFICATION_NEEDED, {
           requestId,
           walletId: request.walletId,
@@ -210,7 +238,9 @@ export class PaymentsService {
         } as MpVerificationNeededEvent);
       } else {
         // MP verification disabled: go straight to job creation (original flow)
-        this.logger.log(`Proof validated for request ${requestId}, emitting VALIDATION_COMPLETED event (MP verification disabled)`);
+        this.logger.log(
+          `Proof validated for request ${requestId}, emitting VALIDATION_COMPLETED event (MP verification disabled)`,
+        );
         this.eventEmitter.emit(AppEvent.VALIDATION_COMPLETED, {
           requestId,
           score: validationResult.score,
@@ -237,7 +267,9 @@ export class PaymentsService {
           'No pudimos validar tu comprobante automáticamente. Un operador lo está revisando.',
           { requestId, type: 'validation_failed' },
         )
-        .catch((err: any) => this.logger.warn(`Push (validation_failed) failed: ${err.message}`));
+        .catch((err: any) =>
+          this.logger.warn(`Push (validation_failed) failed: ${err.message}`),
+        );
     }
 
     return validationResult;
@@ -260,33 +292,58 @@ export class PaymentsService {
     try {
       // Determine MIME type from URL extension or Cloudinary resource type
       let mimeType = 'image/jpeg'; // default
-      if (proofUrl.endsWith('.pdf') || proofUrl.includes('/raw/upload/')) mimeType = 'application/pdf';
+      if (proofUrl.endsWith('.pdf') || proofUrl.includes('/raw/upload/'))
+        mimeType = 'application/pdf';
       else if (proofUrl.endsWith('.png')) mimeType = 'image/png';
       else if (proofUrl.endsWith('.webp')) mimeType = 'image/webp';
       else if (proofUrl.endsWith('.heic')) mimeType = 'image/heic';
 
       // Fetch wallet info for cross-referencing in validation
       const wallet = request.walletId
-        ? await this.prisma.paymentConfig.findUnique({ where: { id: request.walletId } })
-        : await this.prisma.paymentConfig.findFirst({ where: { isActive: true, isSelected: true } });
+        ? await this.prisma.paymentConfig.findUnique({
+            where: { id: request.walletId },
+          })
+        : await this.prisma.paymentConfig.findFirst({
+            where: { isActive: true, isSelected: true },
+          });
 
-      const walletInfo = wallet ? {
-        holderName: wallet.holderName,
-        holderLegalName: wallet.holderLegalName,
-        holderDni: wallet.holderDni,
-        type: wallet.type,
-        alias: (wallet.details as any)?.alias,
-        cbu: (wallet.details as any)?.cbu,
-        cvu: (wallet.details as any)?.cvu,
-        bank: (wallet.details as any)?.bank,
-        requiresVerification: wallet.requiresVerification ?? false,
-      } : null;
+      const walletInfo = wallet
+        ? {
+            holderName: wallet.holderName,
+            holderLegalName: wallet.holderLegalName,
+            holderDni: wallet.holderDni,
+            type: wallet.type,
+            alias: (wallet.details as any)?.alias,
+            cbu: (wallet.details as any)?.cbu,
+            cvu: (wallet.details as any)?.cvu,
+            bank: (wallet.details as any)?.bank,
+            requiresVerification: wallet.requiresVerification ?? false,
+          }
+        : null;
+
+      // Normalize the URL so PDFs land at /image/upload/f_jpg,pg_1/ — Cloudinary's
+      // "Restricted media types" setting blocks raw PDF delivery (401), but transformation
+      // results are always served. No-op for image URLs.
+      const deliverableUrl = this.uploadsService.toDeliverableUrl(
+        proofUrl,
+        mimeType,
+      );
+
+      // After transformation, PDFs are delivered as JPEG (Cloudinary f_jpg,pg_1 conversion).
+      // Update mimeType so validator-app doesn't try to parse a JPG as a PDF.
+      const isPdf =
+        mimeType === 'application/pdf' ||
+        proofUrl.toLowerCase().endsWith('.pdf') ||
+        proofUrl.includes('/raw/upload/');
+      const validationMimeType = isPdf && deliverableUrl.includes('/f_jpg,pg_1/')
+        ? 'image/jpeg'
+        : mimeType;
 
       // Send Cloudinary URL directly to validator — validator fetches the image itself
       // No more downloading file buffer on the backend
       const result = await this.proofValidationService.validateProof(
-        proofUrl,
-        mimeType,
+        deliverableUrl,
+        validationMimeType,
         Number(request.amount),
         request.id,
         walletInfo,
@@ -350,7 +407,9 @@ export class PaymentsService {
             }
           }
         } catch (error: any) {
-          this.logger.error(`Transaction ID dedup check failed: ${error.message}`);
+          this.logger.error(
+            `Transaction ID dedup check failed: ${error.message}`,
+          );
           flags.push('FRAUD_CHECK_ERROR');
         }
       }
@@ -390,10 +449,14 @@ export class PaymentsService {
         });
         if (failedCount >= 10) {
           flags.push('VERY_HIGH_FAILURE_RATE');
-          this.logger.warn(`Very high failure rate for user ${request.userId}: ${failedCount} failures in 30 days`);
+          this.logger.warn(
+            `Very high failure rate for user ${request.userId}: ${failedCount} failures in 30 days`,
+          );
         } else if (failedCount >= 5) {
           flags.push('HIGH_FAILURE_RATE');
-          this.logger.warn(`High failure rate for user ${request.userId}: ${failedCount} failures in 30 days`);
+          this.logger.warn(
+            `High failure rate for user ${request.userId}: ${failedCount} failures in 30 days`,
+          );
         }
       } catch (error: any) {
         this.logger.error(`Failure rate check failed: ${error.message}`);
@@ -422,7 +485,9 @@ export class PaymentsService {
           distinctSenders.add(result.senderName.toLowerCase().trim());
           if (distinctSenders.size >= 3) {
             flags.push('MULTIPLE_SENDERS');
-            this.logger.warn(`Multiple senders detected for user ${request.userId}: ${distinctSenders.size} distinct senders`);
+            this.logger.warn(
+              `Multiple senders detected for user ${request.userId}: ${distinctSenders.size} distinct senders`,
+            );
           }
         } catch (error: any) {
           this.logger.error(`Multiple sender check failed: ${error.message}`);
@@ -436,12 +501,26 @@ export class PaymentsService {
         if (ac.editing_signs === 'likely' && !flags.includes('LIKELY_EDITED')) {
           flags.push('LIKELY_EDITED');
         }
-        if (ac.has_proper_formatting === false && ac.has_bank_logo === false && !flags.includes('INVALID_FORMAT')) {
+        if (
+          ac.has_proper_formatting === false &&
+          ac.has_bank_logo === false &&
+          !flags.includes('INVALID_FORMAT')
+        ) {
           flags.push('INVALID_FORMAT');
         }
       }
       if (result.transactionStatus) {
-        const approvedVariants = ['aprobada', 'aprobado', 'approved', 'exitosa', 'exitoso', 'completada', 'completado', 'acreditada', 'acreditado'];
+        const approvedVariants = [
+          'aprobada',
+          'aprobado',
+          'approved',
+          'exitosa',
+          'exitoso',
+          'completada',
+          'completado',
+          'acreditada',
+          'acreditado',
+        ];
         const isStatusApproved = approvedVariants.some((v) =>
           result.transactionStatus!.toLowerCase().includes(v),
         );
@@ -466,7 +545,10 @@ export class PaymentsService {
       }
 
       if (walletInfo && result.recipientAccount) {
-        const accountMatches = this.accountMatch(result.recipientAccount, walletInfo);
+        const accountMatches = this.accountMatch(
+          result.recipientAccount,
+          walletInfo,
+        );
         if (!accountMatches && !flags.includes('RECIPIENT_ACCOUNT_MISMATCH')) {
           flags.push('RECIPIENT_ACCOUNT_MISMATCH');
           this.logger.warn(
@@ -488,12 +570,14 @@ export class PaymentsService {
       }
 
       // Change 7a: Critical flags override isValid
+      // Nota: CROSS_USER_SENDER NO es critical — en AR es comun que un familiar (madre,
+      // pareja, etc.) pague desde su cuenta por el usuario. Sigue como flag visible para
+      // el operador en validationDetails, pero no bloquea automaticamente.
       const criticalFlags = [
         'DUPLICATE_TRANSACTION_ID',
         'CROSS_USER_DUPLICATE',
         'LIKELY_EDITED',
         'STATUS_NOT_APPROVED',
-        'CROSS_USER_SENDER',
         'VERY_HIGH_FAILURE_RATE',
         'AMOUNT_MISMATCH',
       ];
@@ -505,7 +589,13 @@ export class PaymentsService {
         result.isValid && meetsThreshold && dateValid && !hasCriticalFlags;
 
       const reasoning = !isValid
-        ? this.buildRejectionReason(result, flags, dateValid, validationThreshold, dateWindowDays)
+        ? this.buildRejectionReason(
+            result,
+            flags,
+            dateValid,
+            validationThreshold,
+            dateWindowDays,
+          )
         : undefined;
 
       return {
@@ -583,11 +673,16 @@ export class PaymentsService {
 
     return candidates.some((candidate) => {
       if (extractedNorm === candidate) return true;
-      if (extractedNorm.includes(candidate) || candidate.includes(extractedNorm))
+      if (
+        extractedNorm.includes(candidate) ||
+        candidate.includes(extractedNorm)
+      )
         return true;
       const extractedTokens = extractedNorm.split(/\s+/);
       const candidateTokens = candidate.split(/\s+/);
-      const matches = extractedTokens.filter((t) => candidateTokens.includes(t));
+      const matches = extractedTokens.filter((t) =>
+        candidateTokens.includes(t),
+      );
       return (
         matches.length >= 2 ||
         (matches.length >= 1 && candidateTokens.length === 1)
@@ -602,8 +697,7 @@ export class PaymentsService {
     extractedAccount: string,
     walletInfo: { alias?: string; cbu?: string; cvu?: string },
   ): boolean {
-    const norm = (s?: string) =>
-      s?.replace(/[\s.\-]/g, '').toLowerCase() || '';
+    const norm = (s?: string) => s?.replace(/[\s.\-]/g, '').toLowerCase() || '';
     const extracted = norm(extractedAccount);
     if (!extracted) return true; // can't compare, assume ok
     return [walletInfo.alias, walletInfo.cbu, walletInfo.cvu]
@@ -634,7 +728,9 @@ export class PaymentsService {
       reasons.push('El numero de operacion ya fue usado en otra solicitud');
     }
     if (flags.includes('CROSS_USER_DUPLICATE')) {
-      reasons.push('El comprobante corresponde a una transaccion de otro usuario');
+      reasons.push(
+        'El comprobante corresponde a una transaccion de otro usuario',
+      );
     }
     if (flags.includes('AMOUNT_MISMATCH')) {
       reasons.push('El monto no coincide con el solicitado');
@@ -657,7 +753,10 @@ export class PaymentsService {
     if (flags.includes('CROSS_USER_SENDER')) {
       reasons.push('El remitente del pago aparece asociado a otra cuenta');
     }
-    if (flags.includes('VERY_HIGH_FAILURE_RATE') || flags.includes('HIGH_FAILURE_RATE')) {
+    if (
+      flags.includes('VERY_HIGH_FAILURE_RATE') ||
+      flags.includes('HIGH_FAILURE_RATE')
+    ) {
       reasons.push('Se detectaron multiples intentos fallidos');
     }
     if (flags.includes('MULTIPLE_SENDERS')) {
@@ -673,10 +772,14 @@ export class PaymentsService {
       reasons.push('La imagen es de baja calidad');
     }
     if (flags.includes('RECIPIENT_MISMATCH')) {
-      reasons.push('El destinatario del pago no coincide con la billetera esperada');
+      reasons.push(
+        'El destinatario del pago no coincide con la billetera esperada',
+      );
     }
     if (flags.includes('RECIPIENT_ACCOUNT_MISMATCH')) {
-      reasons.push('La cuenta destino (alias/CBU/CVU) no coincide con la billetera esperada');
+      reasons.push(
+        'La cuenta destino (alias/CBU/CVU) no coincide con la billetera esperada',
+      );
     }
     if (!result.isValid && reasons.length === 0) {
       reasons.push(result.reasoning || 'No se pudo validar el comprobante');
@@ -875,7 +978,9 @@ export class PaymentsService {
    */
   async decrementWalletAmount(walletId: string, amount: number) {
     if (amount <= 0) return; // Guard against negative/zero amounts
-    const wallet = await this.prisma.paymentConfig.findUnique({ where: { id: walletId } });
+    const wallet = await this.prisma.paymentConfig.findUnique({
+      where: { id: walletId },
+    });
     if (!wallet) return;
 
     const newAmount = Math.max(0, Number(wallet.accumulatedAmount) - amount);
@@ -1037,11 +1142,15 @@ export class PaymentsService {
 
   @OnEvent(AppEvent.PAYMENT_PROOF_UPLOADED)
   async onPaymentProofUploaded(event: { requestId: string }) {
-    this.logger.log(`[Event] payment.proof.uploaded — requestId=${event.requestId}`);
+    this.logger.log(
+      `[Event] payment.proof.uploaded — requestId=${event.requestId}`,
+    );
     try {
       await this.validateProof(event.requestId);
     } catch (error) {
-      this.logger.error(`Async validation failed for request ${event.requestId}: ${error.message}`);
+      this.logger.error(
+        `Async validation failed for request ${event.requestId}: ${error.message}`,
+      );
       // Only revert to VALIDATION_FAILED if still in VALIDATING state
       try {
         const current = await this.prisma.request.findUnique({

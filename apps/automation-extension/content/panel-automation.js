@@ -8,42 +8,68 @@ if (window.panelAutomation) {
 
 // Default selectors for TioRico panel — DO NOT REMOVE
 // Custom panel profiles override these via chrome.storage.local 'panelProfile' key
+// Updated 2026-06-20 based on current MHTML snapshots
 const DEFAULT_SELECTORS = {
-  LOGIN_USERNAME_INPUT: 'input[type="text"][aria-label="Nombre de Usuario"], input[name="username"], input[name="user"], input[type="text"][placeholder*="suario"], input[type="text"][placeholder*="ombre"]',
-  LOGIN_PASSWORD_INPUT: 'input[type="password"][aria-label="Contraseña"], input[name="password"], input[type="password"]',
-  LOGIN_SUBMIT_BUTTON: 'button[type="submit"], input[type="submit"]',
-  USER_MENU: 'li.user-toggle, .user-toggle.dropdown, span.own-username, .user-menu, [data-user], .profile, .navbar .dropdown, .navbar-nav .dropdown, .sidebar-header',
-  LOGOUT_LINK: 'a[href*="logout"], a[href*="salir"], a[href*="cerrar"]',
-  USERS_PAGE_LINK: 'a.mdbvue-sidenav__item[href*="/users"], a[href*="users.php"], a[href*="users"], a[href*="/users"]',
-  USER_SEARCH_INPUT: '#filter-input, input[name="filter"], input[name="search"], input[name="q"], input[placeholder*="uscar"], input[placeholder*="iltrar"], input[type="search"]',
-  ADD_CREDITS_BUTTON_ROW: 'a.action-plus',
-  ADD_CREDITS_BUTTON_ICON: 'a .fas.fa-plus, a .fa.fa-plus, a .fa-plus, a i.fas.fa-plus, a i.fa.fa-plus',
-  SUBTRACT_CREDITS_BUTTON_ROW: 'a.action-minus',
+  LOGIN_USERNAME_INPUT: 'input[type="text"].form-control, input[type="text"][aria-label*="Usuario"], input[name="username"], input[name="user"]',
+  LOGIN_PASSWORD_INPUT: 'input[type="password"].form-control, input[type="password"][aria-label*="Contrase"], input[name="password"]',
+  LOGIN_SUBMIT_BUTTON: 'button[type="submit"].btn-default, button[type="submit"].peach-gradient, button[type="submit"]',
+  USER_MENU: 'li.user-toggle, .user-toggle.dropdown, span.own-username, .navbar-nav .dropdown .user-toggle, .nav-item.user-toggle',
+  LOGOUT_LINK: 'a[href*="logout"], a[href*="salir"], a[href*="cerrar"], .dropdown-item',
+  USERS_PAGE_LINK: 'a.mdbvue-sidenav__item[href*="/users"], a[href*="/users"]',
+  USER_SEARCH_INPUT: '#filter-input, input[type="search"][placeholder*="Usuario"], input[type="search"]',
+  ADD_CREDITS_BUTTON_ROW: 'a.action-plus, a.btn-floating.btn-cyan, a[class*="action-plus"]',
+  ADD_CREDITS_BUTTON_ICON: 'i.fas.fa-plus, i.fa.fa-plus',
+  SUBTRACT_CREDITS_BUTTON_ROW: 'a.action-minus, a[class*="action-minus"]',
   DATATABLE_PROCESSING: '#DataTables_Table_0_processing, .dataTables_processing',
-  MODAL: '.widthdraw.modal, .modal.show, .modal[style*="display: block"], [role="dialog"], .modal-dialog, .swal2-container',
-  MODAL_AMOUNT_INPUT: '.modal-body input[inputmode="decimal"], input[inputmode="decimal"], input[type="number"], input[name="amount"], input[name="credits"], input[name="monto"]',
-  MODAL_AMOUNT_INPUT_FALLBACK: '.modal-body input[aria-label="Username"]:not([disabled]), input[aria-label="Username"]:not([disabled]), input:not([type="hidden"]):not([type="password"]):not([type="search"]):not([type="email"]):not([disabled])',
-  MODAL_SUBMIT: '.modal-body button[type="submit"], .modal button[type="submit"]',
-  SUCCESS_MESSAGE: '.alert-success, .toast-success, .swal2-success, .swal2-popup.swal2-show .swal2-html-container, .swal-text, .alert.alert-success, #success-message, .notification.is-success',
-  ERROR_MESSAGE: '.alert-danger, .alert-error, .toast-error, .swal2-error, .swal2-popup.swal2-show .swal2-html-container, .swal-text, .alert.alert-danger, #error-message, .notification.is-danger',
-  OWN_BALANCE: 'span.own-balance',
-  NEW_USER_BUTTON: 'button.btn.btn-danger',
-  NEW_USER_BUTTON_ICON: 'i.fas.fa-user-plus',
-  NEW_USER_MODAL: '.insert-mo.modal',
-  NEW_USER_NICKNAME_INPUT: '.insert-mo input[type="text"][aria-label="Nickname"]',
-  NEW_USER_PASSWORD_INPUT: '.insert-mo input[type="password"][aria-label="Contraseña"]',
-  NEW_USER_SUBMIT: '.insert-mo button[type="submit"].btn.btn-cyan',
-  NEW_USER_CANCEL: '.insert-mo button.btn.btn-outline-cyan',
-  CHANGE_PASSWORD_BUTTON: 'a.action-password',
-  PASSWORD_MODAL: '.insert-mo.modal',
-  PASSWORD_INPUT: '.insert-mo input[type="password"][aria-label="Contraseña"], .modal-body input[type="password"]:first-of-type',
-  PASSWORD_CONFIRM_INPUT: '.insert-mo input[type="password"][aria-label="Confirmación Contraseña"], .modal-body input[type="password"]:nth-of-type(2)',
-  PASSWORD_SUBMIT: '.insert-mo button.btn.btn-cyan, .modal-body button[type="submit"]'
+  MODAL: '.widthdraw.modal, .modal.show, .cascading-modal, .modal[style*="opacity"], [role="dialog"]',
+  MODAL_AMOUNT_INPUT: 'input[inputmode="decimal"][placeholder*="0,00"], input[inputmode="decimal"], .modal-body input[type="text"]:not([disabled])',
+  MODAL_AMOUNT_INPUT_FALLBACK: '.modal-body input[aria-label="Username"]:not([disabled]), .modal-body input[type="text"]:not([disabled]):first-of-type',
+  MODAL_SUBMIT: 'button[type="submit"].btn-cyan, .modal-body button[type="submit"], button.btn-cyan[type="submit"]',
+  SUCCESS_MESSAGE: '.alert-success, .toast-success, .md-toast-success, .b-toast-success, .swal2-success, [class*="success"]',
+  ERROR_MESSAGE: '.alert-danger, .alert-error, .toast-error, .md-toast-error, .b-toast-danger, .swal2-error, [class*="error"], [class*="danger"]',
+  OWN_BALANCE: 'span.own-balance, span.clearfix.d-sm-inline-block.own-balance, [class*="own-balance"]',
+  NEW_USER_BUTTON: 'button.btn.btn-danger, i.fas.fa-user-plus',
+  NEW_USER_BUTTON_ICON: 'i.fas.fa-user-plus, i.fa.fa-user-plus',
+  NEW_USER_MODAL: '.insert-mo.modal, .modal[style*="display"][class*="modal"]',
+  NEW_USER_NICKNAME_INPUT: 'input[type="text"][aria-label*="Nickname"], input[aria-label*="nombre"], .insert-mo input[type="text"]:first-of-type',
+  NEW_USER_PASSWORD_INPUT: 'input[type="password"][aria-label*="Contrase"], .insert-mo input[type="password"]:first-of-type',
+  NEW_USER_SUBMIT: 'button[type="submit"].btn-cyan, .insert-mo button[type="submit"]',
+  NEW_USER_CANCEL: 'button.btn.btn-outline-cyan, .insert-mo button.btn-outline-cyan',
+  CHANGE_PASSWORD_BUTTON: 'a.action-password, a.btn-floating[class*="password"], a[class*="action-password"]',
+  PASSWORD_MODAL: '.modal[style*="display"], .cascading-modal, [role="dialog"]',
+  PASSWORD_INPUT: 'input[type="password"][aria-label*="Contrase"], .modal-body input[type="password"]:first-of-type, input.form-control[type="password"]',
+  PASSWORD_CONFIRM_INPUT: 'input[type="password"][aria-label*="Confirmaci"], .modal-body input[type="password"]:nth-of-type(2), .modal-body input[type="password"]:last-of-type',
+  PASSWORD_SUBMIT: 'button[type="submit"].btn-cyan, .modal-body button[type="submit"], button.btn[type="submit"].btn-cyan'
 };
 
 // Active selectors — merged from custom panel profile (if any) + defaults
 // Custom profile only needs to override the keys that differ from TioRico
 let SELECTORS = { ...DEFAULT_SELECTORS };
+
+// Keys where an override must NEVER lose default selectors. The new toast classes
+// (e.g. md-toast-error) were added defensively to DEFAULT_SELECTORS — if a cached
+// profile from an older deploy reaches us with a narrower override, we still want
+// the defaults active. CSS comma-lists tolerate duplicates harmlessly.
+const ADDITIVE_SELECTOR_KEYS = new Set(['ERROR_MESSAGE', 'SUCCESS_MESSAGE']);
+
+function applyProfile(overrides) {
+  const merged = { ...DEFAULT_SELECTORS };
+  for (const [k, v] of Object.entries(overrides)) {
+    if (ADDITIVE_SELECTOR_KEYS.has(k) && DEFAULT_SELECTORS[k]) {
+      // Concat default + override into a single CSS list (de-dup by trimmed token)
+      const seen = new Set();
+      const out = [];
+      for (const part of `${DEFAULT_SELECTORS[k]}, ${v}`.split(',')) {
+        const t = part.trim();
+        if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+      }
+      merged[k] = out.join(', ');
+    } else {
+      merged[k] = v;
+    }
+  }
+  return merged;
+}
 
 // Load custom panel profile from storage + optional remote URL (async, runs on injection)
 (async () => {
@@ -62,7 +88,7 @@ let SELECTORS = { ...DEFAULT_SELECTORS };
           if (remote && typeof remote === 'object' && !Array.isArray(remote)) {
             // Remove meta keys (start with _)
             const cleaned = Object.fromEntries(Object.entries(remote).filter(([k]) => !k.startsWith('_')));
-            SELECTORS = { ...DEFAULT_SELECTORS, ...cleaned };
+            SELECTORS = applyProfile(cleaned);
             // Cache locally so it works offline next time
             await chrome.storage.local.set({ panelProfile: cleaned });
             console.log('[PanelAutomation] Remote profile loaded from', profileUrl, '—', Object.keys(cleaned).length, 'overrides');
@@ -76,7 +102,7 @@ let SELECTORS = { ...DEFAULT_SELECTORS };
 
     // 2. Fallback to local storage profile
     if (stored.panelProfile && typeof stored.panelProfile === 'object') {
-      SELECTORS = { ...DEFAULT_SELECTORS, ...stored.panelProfile };
+      SELECTORS = applyProfile(stored.panelProfile);
       console.log('[PanelAutomation] Local panel profile loaded:', Object.keys(stored.panelProfile).length, 'overrides');
     }
   } catch (e) {
@@ -460,28 +486,44 @@ window.panelAutomation = {
           const rows = document.querySelectorAll('table tbody tr');
           if (rows.length > 0) {
             for (let i = 0; i < rows.length; i++) {
-              // TioRico: username is in <span class="color"> with leading/trailing spaces
-              const usernameSpan = rows[i].querySelector('span.color, td:first-child span, span.username, span.user-name');
-              const rowText = usernameSpan
-                ? usernameSpan.textContent.trim().toLowerCase()
-                : rows[i].textContent.toLowerCase();
+              // Strategy 1: Try data-username attribute (most reliable)
+              const dataUsername = rows[i].querySelector('[data-username]');
+              if (dataUsername) {
+                const username = dataUsername.getAttribute('data-username').toLowerCase().trim();
+                if (username === targetLower) {
+                  humanize.log(`Search results loaded, user found in row ${i + 1} (via data-username)`);
+                  return;
+                }
+              }
 
-              if (rowText.includes(targetLower)) {
-                humanize.log(`Search results loaded, user found in row ${i + 1}`);
-                return;
+              // Strategy 2: Try span.color or other text-based selectors (fallback)
+              const usernameSpan = rows[i].querySelector('span.color, td:first-child span, span.username, span.user-name');
+              if (usernameSpan) {
+                const rowText = usernameSpan.textContent.trim().toLowerCase();
+                if (rowText === targetLower || rowText.includes(targetLower)) {
+                  humanize.log(`Search results loaded, user found in row ${i + 1} (via text selector)`);
+                  return;
+                }
               }
             }
           }
           await new Promise(resolve => setTimeout(resolve, 300));
         }
 
-        // Log what we found for debugging
+        // Log detailed debugging info
         const rows = document.querySelectorAll('table tbody tr');
-        humanize.log('Search results timeout. Rows found:', rows.length);
+        humanize.log('Search results timeout. Details:', {
+          rowsFound: rows.length,
+          targetUsername: jobData.targetUsername,
+          elapsed: Date.now() - startTime,
+        });
         if (rows.length > 0) {
-          const spans = rows[0].querySelectorAll('span.color');
-          humanize.log('First row username span:', spans.length > 0 ? spans[0].textContent : 'no span.color');
-          humanize.log('First row text:', rows[0].textContent.substring(0, 200));
+          const firstRow = rows[0];
+          const dataUsernames = Array.from(firstRow.querySelectorAll('[data-username]')).map(el => el.getAttribute('data-username'));
+          humanize.log('First row data-username values:', dataUsernames);
+          const spans = firstRow.querySelectorAll('span.color');
+          humanize.log('First row span.color:', spans.length > 0 ? spans[0].textContent : 'none found');
+          humanize.log('First row text:', firstRow.textContent.substring(0, 300));
         }
 
         throw new Error(`User "${jobData.targetUsername}" not found in search results after ${timeout}ms`);
@@ -897,6 +939,8 @@ window.panelAutomation = {
         const startTime = Date.now();
         const timeout = 15000;
         const targetLower = targetUsername.toLowerCase().trim();
+        // Escape for use inside a CSS attribute selector value
+        const escaped = targetLower.replace(/["\\]/g, '\\$&');
 
         while (Date.now() - startTime < timeout) {
           const processing = document.querySelector(SELECTORS.DATATABLE_PROCESSING);
@@ -905,6 +949,22 @@ window.panelAutomation = {
             continue;
           }
 
+          // Primary: exact match by data-username on the action buttons. The MHTML
+          // confirms every row has <a class="action-plus" data-username="X" data-balance="N">,
+          // so this avoids substring false positives ("ana" matching "ana123") and
+          // ambiguity when the username appears inside a different node.
+          const exactBtn =
+            document.querySelector(`table tbody tr a.action-plus[data-username="${escaped}" i]`) ||
+            document.querySelector(`table tbody tr a.action-minus[data-username="${escaped}" i]`);
+          if (exactBtn) {
+            const balance = parseInt(exactBtn.getAttribute('data-balance') || '0', 10);
+            humanize.log(`User "${targetUsername}" found (exact match), balance: ${balance}`);
+            return { success: true, balance };
+          }
+
+          // Fallback: legacy substring matching, for custom panel profiles that
+          // don't expose data-username. Slower and looser but keeps us working
+          // if the panel's DOM diverges from TíoRico's.
           const rows = document.querySelectorAll('table tbody tr');
           for (const row of rows) {
             const usernameSpan = row.querySelector('span.color, td:first-child span, span.username, span.user-name');
@@ -913,14 +973,12 @@ window.panelAutomation = {
               : row.textContent.toLowerCase();
 
             if (rowText.includes(targetLower)) {
-              // Read data-balance from action buttons
               const actionBtn = row.querySelector('a.action-plus, a.action-minus');
               if (actionBtn) {
                 const balance = parseInt(actionBtn.getAttribute('data-balance') || '0', 10);
-                humanize.log(`User "${targetUsername}" found, balance: ${balance}`);
+                humanize.log(`User "${targetUsername}" found (fallback match), balance: ${balance}`);
                 return { success: true, balance };
               }
-              // Fallback: read from td.sorting_1
               const balanceCell = row.querySelector('td.sorting_1');
               if (balanceCell) {
                 const balance = parseArgentineNumber(balanceCell.textContent);
@@ -1175,45 +1233,77 @@ window.panelAutomation = {
       }, context);
 
       // Step 4: Wait for search results — poll until target user appears in table
+      // Timeout increased to 45s to handle high concurrency (many jobs running simultaneously)
       await executeStep('wait_for_search_results', async () => {
         const startTime = Date.now();
-        const timeout = 15000;
+        const timeout = 45000; // 45s: allows for panel latency under load
         const targetLower = jobData.targetUsername.toLowerCase().trim();
+        let lastLogTime = startTime;
+        const logInterval = 10000; // Log progress every 10s
 
         while (Date.now() - startTime < timeout) {
           // Wait for DataTables processing overlay to disappear
           const processing = document.querySelector(SELECTORS.DATATABLE_PROCESSING);
           if (processing && processing.offsetParent !== null && getComputedStyle(processing).display !== 'none') {
+            const elapsed = Date.now() - startTime;
+            if (elapsed - (lastLogTime - startTime) >= logInterval) {
+              humanize.log(`[${elapsed}ms] Waiting for panel to finish processing...`);
+              lastLogTime = Date.now();
+            }
             await new Promise(resolve => setTimeout(resolve, 300));
             continue;
           }
 
-          // Check if user appears in table rows
+          // Check if user appears in table rows (prefer data-username attribute, fallback to text)
           const rows = document.querySelectorAll('table tbody tr');
           if (rows.length > 0) {
             for (const row of rows) {
+              // Strategy 1: Try data-username attribute (most reliable)
+              const dataUsername = row.querySelector('[data-username]');
+              if (dataUsername) {
+                const username = dataUsername.getAttribute('data-username').toLowerCase().trim();
+                if (username === targetLower) {
+                  humanize.log(`✓ Found user "${jobData.targetUsername}" after ${Date.now() - startTime}ms (via data-username)`);
+                  return;
+                }
+              }
+
+              // Strategy 2: Try span.color or other text-based selectors (fallback)
               const usernameSpan = row.querySelector('span.color, td:first-child span, span.username, span.user-name');
-              const rowText = usernameSpan
-                ? usernameSpan.textContent.trim().toLowerCase()
-                : row.textContent.toLowerCase();
-              if (rowText.includes(targetLower)) {
-                humanize.log('User found in search results for password change');
-                return;
+              if (usernameSpan) {
+                const rowText = usernameSpan.textContent.trim().toLowerCase();
+                if (rowText === targetLower || rowText.includes(targetLower)) {
+                  humanize.log(`✓ Found user "${jobData.targetUsername}" after ${Date.now() - startTime}ms (via text selector)`);
+                  return;
+                }
               }
             }
           }
+
+          // Log progress if we've been waiting long
+          const elapsed = Date.now() - startTime;
+          if (elapsed - (lastLogTime - startTime) >= logInterval) {
+            const rowsCount = rows.length;
+            humanize.log(`[${elapsed}ms] Still searching for "${jobData.targetUsername}"... (found ${rowsCount} rows so far)`);
+            lastLogTime = Date.now();
+          }
+
           await new Promise(resolve => setTimeout(resolve, 300));
         }
 
-        // Log for debugging
+        // TIMEOUT - Log detailed debugging info for troubleshooting
         const rows = document.querySelectorAll('table tbody tr');
-        humanize.log('Search results timeout. Rows found:', rows.length);
+        const elapsed = Date.now() - startTime;
+        humanize.log(`✗ TIMEOUT after ${elapsed}ms searching for user "${jobData.targetUsername}"`);
+        humanize.log(`Found ${rows.length} rows in table. Possible causes: panel under heavy load, user doesn't exist on panel, network latency`);
+
         if (rows.length > 0) {
-          const spans = rows[0].querySelectorAll('span.color');
-          humanize.log('First row username span:', spans.length > 0 ? spans[0].textContent : 'no span.color');
+          const firstRow = rows[0];
+          const dataUsernames = Array.from(firstRow.querySelectorAll('[data-username]')).map(el => el.getAttribute('data-username'));
+          humanize.log('Sample data-username values:', dataUsernames.slice(0, 3));
         }
 
-        throw new Error(`User "${jobData.targetUsername}" not found in search results after ${timeout}ms`);
+        throw new Error(`User "${jobData.targetUsername}" not found in search results after ${elapsed}ms (timeout: ${timeout}ms)`);
       }, context);
 
       // Step 5: Find the password change button in target row (using span.color like loadCredits)
@@ -1287,59 +1377,14 @@ window.panelAutomation = {
         await humanize.randomDelay(500, 1000);
       }, context);
 
-      // Step 8: Click Aceptar
-      await executeStep('click_aceptar', async () => {
-        const modal = document.querySelector(SELECTORS.PASSWORD_MODAL);
-        if (!modal) throw new Error('Modal disappeared');
-
-        let submitBtn = modal.querySelector(SELECTORS.PASSWORD_SUBMIT);
-        if (!submitBtn) {
-          // Fallback: find button with "Aceptar" text
-          const buttons = Array.from(modal.querySelectorAll('button'));
-          submitBtn = buttons.find(b => b.textContent.trim().toLowerCase().includes('aceptar'));
-        }
-        if (!submitBtn) throw new Error('Aceptar button not found in modal');
-
-        await humanize.clickElement(submitBtn);
-      }, context);
-
-      // Step 9: Verify result
-      await executeStep('verify_password_change', async () => {
-        // Wait for modal to close or success/error to appear
-        let attempts = 0;
-        while (attempts < 30) {
-          // Check for success message (SweetAlert or toast)
-          const success = document.querySelector(SELECTORS.SUCCESS_MESSAGE);
-          if (success && success.offsetParent !== null) {
-            humanize.log('Password change success message detected');
-            return;
-          }
-
-          // Check for error message
-          const error = document.querySelector(SELECTORS.ERROR_MESSAGE);
-          if (error && error.offsetParent !== null) {
-            throw new Error(`Panel error: ${error.textContent.trim()}`);
-          }
-
-          // Check if modal closed (success)
-          const modal = document.querySelector(SELECTORS.PASSWORD_MODAL);
-          if (!modal || window.getComputedStyle(modal).opacity === '0' || window.getComputedStyle(modal).display === 'none') {
-            humanize.log('Modal closed — password change likely succeeded');
-            return;
-          }
-
-          await new Promise(r => setTimeout(r, 300));
-          attempts++;
-        }
-        // If we get here, assume success (modal still open but no error)
-        humanize.log('No error detected after timeout — assuming success');
-      }, context);
-
-      humanize.log('Password change completed successfully');
+      // Click "Aceptar" y verificación los hace el background en MAIN world.
+      // Vue ignora clicks sintéticos desde isolated world — antes esto pasaba
+      // de largo y el flow asumía éxito sin que el panel cambiara nada.
+      humanize.log('Password fields filled, handing off to MAIN world for click');
       return {
         success: true,
+        needsMainWorldClick: true,
         targetUsername: jobData.targetUsername,
-        message: 'Password changed successfully'
       };
 
     } catch (error) {
@@ -1589,8 +1634,32 @@ window.panelAutomation = {
         const startTime = Date.now();
         const timeout = 15000;
 
+        // Grace window after the modal disappears: keep polling for an error toast
+        // before declaring success. Some panels close the modal with animation
+        // ~200-400ms before the error toast renders — without this, we'd report
+        // false-positive "created OK" on duplicate-user errors.
+        const ERROR_GRACE_MS = 800;
+        let modalGoneSince = null;
+
+        const lookForError = () => {
+          const swalError = document.querySelector('.swal2-popup .swal2-icon.swal2-error');
+          if (swalError) {
+            const swalText = document.querySelector('.swal2-popup .swal2-html-container, .swal2-popup .swal2-content, .swal2-popup .swal2-title');
+            return `Panel returned error: ${swalText?.textContent?.trim() || 'Error desconocido'}`;
+          }
+          const errorMsg = document.querySelector(SELECTORS.ERROR_MESSAGE);
+          if (errorMsg && errorMsg.offsetParent !== null) {
+            return `Panel returned error: ${errorMsg.textContent.trim()}`;
+          }
+          return null;
+        };
+
         while (Date.now() - startTime < timeout) {
-          // Check for SweetAlert2 success
+          // 1) Always check error first — wins over any "success by modal close" inference.
+          const err = lookForError();
+          if (err) throw new Error(err);
+
+          // 2) Check explicit success (SweetAlert2)
           const swalSuccess = document.querySelector('.swal2-popup .swal2-icon.swal2-success');
           if (swalSuccess) {
             const swalText = document.querySelector('.swal2-popup .swal2-html-container, .swal2-popup .swal2-content, .swal2-popup .swal2-title');
@@ -1604,31 +1673,22 @@ window.panelAutomation = {
             };
           }
 
-          // Check for SweetAlert2 error
-          const swalError = document.querySelector('.swal2-popup .swal2-icon.swal2-error');
-          if (swalError) {
-            const swalText = document.querySelector('.swal2-popup .swal2-html-container, .swal2-popup .swal2-content, .swal2-popup .swal2-title');
-            throw new Error(`Panel returned error: ${swalText?.textContent?.trim() || 'Error desconocido'}`);
-          }
-
-          // Check for standard error message
-          const errorMsg = document.querySelector(SELECTORS.ERROR_MESSAGE);
-          if (errorMsg && errorMsg.offsetParent !== null) {
-            throw new Error(`Panel returned error: ${errorMsg.textContent.trim()}`);
-          }
-
-          // Check if modal closed (indicates success)
+          // 3) Check modal state — only declare success after grace window without error
           const modalEl = document.querySelector(SELECTORS.NEW_USER_MODAL);
-          if (modalEl) {
-            const modalStyle = getComputedStyle(modalEl);
-            const isHidden = (
-              modalStyle.display === 'none' ||
-              modalStyle.visibility === 'hidden' ||
-              parseFloat(modalStyle.opacity) === 0 ||
+          const modalGone = !modalEl || (() => {
+            const s = getComputedStyle(modalEl);
+            return (
+              s.display === 'none' ||
+              s.visibility === 'hidden' ||
+              parseFloat(s.opacity) === 0 ||
               modalEl.offsetParent === null
             );
-            if (isHidden) {
-              humanize.log('New user modal closed - assuming success');
+          })();
+
+          if (modalGone) {
+            if (modalGoneSince == null) modalGoneSince = Date.now();
+            if (Date.now() - modalGoneSince >= ERROR_GRACE_MS) {
+              humanize.log('New user modal gone for grace window - assuming success');
               return {
                 success: true,
                 targetUsername,
@@ -1637,14 +1697,8 @@ window.panelAutomation = {
               };
             }
           } else {
-            // Modal removed from DOM entirely = success
-            humanize.log('New user modal no longer in DOM - assuming success');
-            return {
-              success: true,
-              targetUsername,
-              password: DEFAULT_PASSWORD,
-              message: 'User created successfully (modal removed)'
-            };
+            // Modal came back / never gone — reset grace timer
+            modalGoneSince = null;
           }
 
           await new Promise(resolve => setTimeout(resolve, 200));
@@ -1763,11 +1817,23 @@ window.panelAutomation = {
         await humanize.clickElement(buscarButton);
       }, context);
 
-      // Step 4: Wait for search results and check if user exists
-      const found = await executeStep('check_search_results', async () => {
+      // Step 4: Wait for search results and check if user exists.
+      // Returns { found, matched, totalRows, paginationHint } so the backend can debug
+      // false-negatives reported during discovery (we had an incident where the user
+      // existed on another panel but a slow/false-negative response auto-created elsewhere).
+      const result = await executeStep('check_search_results', async () => {
         const startTime = Date.now();
         const timeout = 15000;
-        const targetLower = targetUsername.toLowerCase().trim();
+        // Normalize aggressively to absorb whitespace, case, zero-width chars and
+        // common punctuation variations. Keep alphanumeric only — that's enough to
+        // identify a panel username uniquely.
+        const normalize = (s) => (s || '')
+          .toString()
+          .toLowerCase()
+          .normalize('NFKC')
+          .replace(/​|‌|‍|﻿/g, '')
+          .replace(/[^a-z0-9]/g, '');
+        const targetNorm = normalize(targetUsername);
 
         while (Date.now() - startTime < timeout) {
           const processing = document.querySelector(SELECTORS.DATATABLE_PROCESSING);
@@ -1782,7 +1848,7 @@ window.panelAutomation = {
             const emptyText = emptyCell.textContent.toLowerCase();
             if (emptyText.includes('no data') || emptyText.includes('no hay datos') || emptyText.includes('no matching') || emptyText.includes('no entries')) {
               humanize.log(`User "${targetUsername}" not found — table shows empty message: "${emptyCell.textContent.trim()}"`);
-              return false;
+              return { found: false, matched: 0, totalRows: 0, reason: 'empty_table' };
             }
           }
 
@@ -1790,33 +1856,46 @@ window.panelAutomation = {
           if (rows.length > 0) {
             for (let i = 0; i < rows.length; i++) {
               const usernameSpan = rows[i].querySelector('span.color, td:first-child span, span.username, span.user-name');
-              const rowText = usernameSpan
-                ? usernameSpan.textContent.trim().toLowerCase()
-                : rows[i].textContent.toLowerCase();
+              const rawCandidate = usernameSpan
+                ? usernameSpan.textContent
+                : rows[i].textContent;
+              const candidateNorm = normalize(rawCandidate);
 
-              if (rowText.includes(targetLower)) {
-                humanize.log(`User "${targetUsername}" found in row ${i + 1}`);
-                return true;
+              // Try exact match first (most reliable), then includes as fallback.
+              if (candidateNorm === targetNorm || candidateNorm.includes(targetNorm)) {
+                humanize.log(`User "${targetUsername}" found in row ${i + 1} (normalized "${candidateNorm}")`);
+                return { found: true, matched: 1, totalRows: rows.length };
               }
             }
           }
           await new Promise(resolve => setTimeout(resolve, 300));
         }
 
-        // Log what we found for debugging
+        // Log what we found for debugging + return metadata so the backend can decide
+        // whether to trust this NOT_FOUND (e.g. paginated table → don't auto-create).
         const rows = document.querySelectorAll('table tbody tr');
-        humanize.log('Search-only timeout. Rows found:', rows.length);
+        const paginationVisible = !!document.querySelector('.dataTables_paginate, ul.pagination, nav[aria-label*="agina"]');
+        const pageInfo = document.querySelector('.dataTables_info, .pagination-info');
+        const pageInfoText = pageInfo ? pageInfo.textContent.trim() : null;
+        humanize.log('Search-only timeout. Rows:', rows.length, 'paginationVisible:', paginationVisible, 'pageInfo:', pageInfoText);
         if (rows.length > 0) {
           const spans = rows[0].querySelectorAll('span.color');
           humanize.log('First row username span:', spans.length > 0 ? spans[0].textContent : 'no span.color');
           humanize.log('First row text:', rows[0].textContent.substring(0, 200));
         }
 
-        return false;
+        return {
+          found: false,
+          matched: 0,
+          totalRows: rows.length,
+          paginationVisible,
+          pageInfoText,
+          reason: 'no_match',
+        };
       }, context);
 
-      humanize.log(`Search-only result for "${targetUsername}": found=${found}`);
-      return { success: true, found };
+      humanize.log(`Search-only result for "${targetUsername}":`, result);
+      return { success: true, ...result };
 
     } catch (error) {
       humanize.log('searchOnly failed', error.message);
