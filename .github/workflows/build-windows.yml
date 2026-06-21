@@ -19,9 +19,12 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install global dependencies
+        run: npm install -g electron-builder app-builder-bin
+
       - name: Install dependencies - ${{ matrix.app }}
         working-directory: apps/${{ matrix.app }}
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Build Windows installer - ${{ matrix.app }}
         working-directory: apps/${{ matrix.app }}
