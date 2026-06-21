@@ -1,0 +1,58 @@
+name: Build Windows Installers
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    strategy:
+      matrix:
+        app: [validator-app, operator-panel]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies - ${{ matrix.app }}
+        working-directory: apps/${{ matrix.app }}
+        run: npm install
+
+      - name: Build Windows installer - ${{ matrix.app }}
+        working-directory: apps/${{ matrix.app }}
+        run: npm run build:win
+
+      - name: Upload artifact - ${{ matrix.app }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app }}-installer
+          path: apps/${{ matrix.app }}/dist/*.exe
+          retention-days: 30
+
+  upload-to-releases:
+    needs: build-windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: installers/
+
+      - name: List artifacts
+        run: find installers/ -name "*.exe" -type f
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: installers/**/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
