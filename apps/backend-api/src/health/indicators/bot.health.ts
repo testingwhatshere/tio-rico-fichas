@@ -1,5 +1,9 @@
 import { Injectable, Inject, forwardRef } from '@nestjs/common';
-import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
+import {
+  HealthIndicator,
+  HealthIndicatorResult,
+  HealthCheckError,
+} from '@nestjs/terminus';
 import { BotService } from '../../bot/bot.service';
 
 @Injectable()

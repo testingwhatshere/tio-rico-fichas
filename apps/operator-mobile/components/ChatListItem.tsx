@@ -52,16 +52,19 @@ export default function ChatListItem({ chat, onPress }: ChatListItemProps) {
   const timestamp = formatRelativeTime(chat.updatedAt || chat.lastMessage?.createdAt);
   const unreadCount: number = chat.unreadCount || 0;
   const isOnline: boolean = chat.user?.isOnline === true;
+  const needsHelp: boolean = !!chat.needsHelp;
+  const helpContextLabel = chat.helpContext === 'prize' ? 'premio' : 'chat';
 
   return (
     <TouchableOpacity
-      style={styles.container}
+      style={[styles.container, needsHelp && styles.containerHelp]}
       onPress={onPress}
       activeOpacity={0.65}
     >
+      {needsHelp && <View style={styles.helpBar} />}
       {/* Avatar area with online indicator */}
       <View style={styles.avatarContainer}>
-        <View style={styles.avatar}>
+        <View style={[styles.avatar, needsHelp && styles.avatarHelp]}>
           <Text style={styles.avatarText}>
             {username.charAt(0).toUpperCase()}
           </Text>
@@ -71,8 +74,20 @@ export default function ChatListItem({ chat, onPress }: ChatListItemProps) {
 
       {/* Content */}
       <View style={styles.content}>
+        {needsHelp && (
+          <View style={styles.helpBadge}>
+            <Text style={styles.helpBadgeText}>🙋 AYUDA · {helpContextLabel}</Text>
+          </View>
+        )}
         <View style={styles.topRow}>
-          <Text style={[styles.username, unreadCount > 0 && styles.usernameUnread]} numberOfLines={1}>
+          <Text
+            style={[
+              styles.username,
+              unreadCount > 0 && styles.usernameUnread,
+              needsHelp && styles.usernameHelp,
+            ]}
+            numberOfLines={1}
+          >
             {username}
           </Text>
           <Text style={[styles.timestamp, unreadCount > 0 && styles.timestampUnread]}>
@@ -108,6 +123,38 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
+  },
+  containerHelp: {
+    backgroundColor: 'rgba(245, 101, 101, 0.08)',
+  },
+  helpBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    backgroundColor: colors.error,
+  },
+  avatarHelp: {
+    borderWidth: 2,
+    borderColor: colors.error,
+  },
+  helpBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.error,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginBottom: 4,
+  },
+  helpBadgeText: {
+    color: colors.white,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  usernameHelp: {
+    color: colors.error,
   },
   avatarContainer: {
     position: 'relative',

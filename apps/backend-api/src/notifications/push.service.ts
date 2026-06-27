@@ -45,7 +45,9 @@ export class PushService {
 
       return this.sendToTokens([user.pushToken], title, body, data);
     } catch (error: any) {
-      this.logger.error(`Failed to send push to user ${userId}: ${error.message}`);
+      this.logger.error(
+        `Failed to send push to user ${userId}: ${error.message}`,
+      );
       return false;
     }
   }
@@ -70,7 +72,9 @@ export class PushService {
 
       return this.sendToTokens(tokens, title, body, data);
     } catch (error: any) {
-      this.logger.error(`Failed to send push to ${userIds.length} users: ${error.message}`);
+      this.logger.error(
+        `Failed to send push to ${userIds.length} users: ${error.message}`,
+      );
       return false;
     }
   }
@@ -144,7 +148,9 @@ export class PushService {
         });
 
         if (!response.ok) {
-          this.logger.error(`Expo Push API error: ${response.status} ${response.statusText}`);
+          this.logger.error(
+            `Expo Push API error: ${response.status} ${response.statusText}`,
+          );
           allSuccess = false;
           continue;
         }
@@ -164,14 +170,18 @@ export class PushService {
         });
 
         if (tokensToRemove.length > 0) {
-          this.logger.warn(`Cleaning ${tokensToRemove.length} invalid push tokens`);
+          this.logger.warn(
+            `Cleaning ${tokensToRemove.length} invalid push tokens`,
+          );
           await this.prisma.user.updateMany({
             where: { pushToken: { in: tokensToRemove } },
             data: { pushToken: null },
           });
         }
 
-        this.logger.debug(`Push sent to ${chunk.length} devices, ${tokensToRemove.length} invalid tokens cleaned`);
+        this.logger.debug(
+          `Push sent to ${chunk.length} devices, ${tokensToRemove.length} invalid tokens cleaned`,
+        );
       } catch (error: any) {
         this.logger.error(`Failed to send push batch: ${error.message}`);
         allSuccess = false;

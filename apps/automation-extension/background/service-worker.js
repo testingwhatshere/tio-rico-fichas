@@ -709,9 +709,18 @@ async function connectWebSocket() {
         };
 
         if (eventName === 'new_job') {
-          // ACK immediately to confirm receipt, then process
-          sendAck({ received: true, jobId: eventData?.id });
-          await handleNewJob(eventData);
+          // Synchronous guards BEFORE the ACK: if we can't take the job right
+          // now, reject it in the ACK so the backend reverts it to QUEUED and
+          // re-dispatches later. ACKing first and silently dropping leaves the
+          // job stuck in PROCESSING server-side (it gets auto-failed at 5min).
+          const rejection = getJobRejectionReason(eventData);
+          if (rejection) {
+            console.warn(`[ServiceWorker] Rejecting job ${eventData?.id} in ACK: ${rejection}`);
+            sendAck({ received: true, accepted: false, jobId: eventData?.id, reason: rejection });
+          } else {
+            sendAck({ received: true, accepted: true, jobId: eventData?.id });
+            await handleNewJob(eventData);
+          }
         } else if (eventName === 'search_user') {
           await handleSearchUser(eventData);
         } else if (eventName === 'create_user') {
@@ -981,6 +990,25 @@ function startPolling(aggressive = false) {
 }
 
 // Handle new job
+// Synchronous pre-acceptance check. Returns a rejection reason string when the
+// job cannot start right now (so the backend re-queues it), or null to accept.
+// Only transient conditions belong here — terminal ones (circuit breaker,
+// duplicates) are handled inside handleNewJob so they don't re-dispatch forever.
+function getJobRejectionReason(job) {
+  if (state.status === 'PROCESSING') {
+    return 'busy';
+  }
+  if (state.config.panelId && job?.panelId && job.panelId !== state.config.panelId) {
+    return `wrong_panel (configured for ${state.config.panelId})`;
+  }
+  const COOLDOWN_MS = 30000;
+  const timeSinceLastJob = Date.now() - state.lastJobCompletedAt;
+  if (state.lastJobCompletedAt > 0 && timeSinceLastJob < COOLDOWN_MS) {
+    return `cooldown (${Math.ceil((COOLDOWN_MS - timeSinceLastJob) / 1000)}s remaining)`;
+  }
+  return null;
+}
+
 async function handleNewJob(job) {
   console.log('[ServiceWorker] New job received:', job);
 
@@ -1369,14 +1397,22 @@ async function handleSearchUser(data) {
   try {
     const result = await JobProcessor.searchUser(targetUsername, state.config);
 
-    console.log(`[ServiceWorker] Discovery result for "${targetUsername}": found=${result.found}`);
-    const httpResult = await ApiClient.reportDiscoveryResult(state.config, taskId, {
-      found: result.found,
-    });
+    console.log(`[ServiceWorker] Discovery result for "${targetUsername}":`, result);
+    // Forward all metadata (matched, totalRows, paginationVisible, reason) so the
+    // backend can decide whether to trust a NOT_FOUND or wait for other panels.
+    const payload = {
+      found: !!result.found,
+      matched: result.matched,
+      totalRows: result.totalRows,
+      paginationVisible: result.paginationVisible,
+      pageInfoText: result.pageInfoText,
+      reason: result.reason,
+    };
+    const httpResult = await ApiClient.reportDiscoveryResult(state.config, taskId, payload);
     // Fallback: if HTTP failed, report via WebSocket
     if (!httpResult && state.websocket?.readyState === WebSocket.OPEN) {
       console.log('[ServiceWorker] HTTP report failed, sending discovery result via WebSocket fallback');
-      state.websocket.send('42/bot,' + JSON.stringify(['discovery_result', { taskId, panelId: state.config.panelId, found: result.found }]));
+      state.websocket.send('42/bot,' + JSON.stringify(['discovery_result', { taskId, panelId: state.config.panelId, ...payload }]));
     }
   } catch (error) {
     console.error(`[ServiceWorker] Discovery search failed for "${targetUsername}":`, error.message);

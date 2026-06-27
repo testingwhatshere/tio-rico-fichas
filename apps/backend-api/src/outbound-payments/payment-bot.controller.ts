@@ -94,7 +94,10 @@ export class PaymentBotController {
     }
 
     if (payment.status !== 'QUEUED') {
-      return { success: false, error: `Payment in unexpected status: ${payment.status}` };
+      return {
+        success: false,
+        error: `Payment in unexpected status: ${payment.status}`,
+      };
     }
 
     await this.prisma.outboundPayment.update({
@@ -114,7 +117,13 @@ export class PaymentBotController {
   @HttpCode(HttpStatus.OK)
   async reportResult(
     @Param('jobId') jobId: string,
-    @Body() dto: { success: boolean; operationNumber?: string; screenshotUrl?: string; error?: string },
+    @Body()
+    dto: {
+      success: boolean;
+      operationNumber?: string;
+      screenshotUrl?: string;
+      error?: string;
+    },
   ) {
     this.logger.log(`Payment result for job ${jobId}: success=${dto.success}`);
     return this.outboundPaymentsService.handlePaymentResult(jobId, dto);
@@ -165,8 +174,12 @@ export class PaymentBotStatusController {
    */
   @Post('payment-heartbeat')
   @HttpCode(HttpStatus.OK)
-  async heartbeat(@Body() dto: { walletType: string; status: string; currentJobId?: string }) {
-    this.logger.debug(`Payment bot heartbeat: ${dto.walletType} (${dto.status})`);
+  async heartbeat(
+    @Body() dto: { walletType: string; status: string; currentJobId?: string },
+  ) {
+    this.logger.debug(
+      `Payment bot heartbeat: ${dto.walletType} (${dto.status})`,
+    );
     return { ack: true, timestamp: new Date().toISOString() };
   }
 

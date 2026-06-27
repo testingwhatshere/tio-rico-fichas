@@ -1,4 +1,11 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ForbiddenException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
@@ -49,7 +56,9 @@ export class MessagesService {
     // Check access: user must be chat owner or assigned operator
     const isOwner = chat.userId === senderId;
     const isAssignedOperator = chat.operatorId === senderId;
-    const isOperatorRole = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(senderRole);
+    const isOperatorRole = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(
+      senderRole,
+    );
 
     if (!isOwner && !isAssignedOperator && !isOperatorRole) {
       throw new ForbiddenException('You do not have access to this chat');
@@ -79,7 +88,21 @@ export class MessagesService {
       },
       include: {
         sender: {
-          select: { id: true, email: true, role: true, operator: { select: { displayName: true } } },
+          select: {
+            id: true,
+            email: true,
+            role: true,
+            operator: { select: { displayName: true } },
+          },
+        },
+        request: {
+          select: {
+            id: true,
+            amount: true,
+            status: true,
+            targetUsername: true,
+            proofUrl: true,
+          },
         },
       },
     });
@@ -99,7 +122,11 @@ export class MessagesService {
 
     // Emit to /chats namespace (where chat app connects)
     // Chat app joins `chat:${chatId}` room and listens for 'message:new'
-    this.chatsGateway.emitToChatRoom(dto.chatId, 'message:new', formattedMessage);
+    this.chatsGateway.emitToChatRoom(
+      dto.chatId,
+      'message:new',
+      formattedMessage,
+    );
 
     // Emit to /operator namespace (where operator panel connects)
     // Operators receive all messages to stay updated on chats
@@ -125,7 +152,9 @@ export class MessagesService {
       // any operator chimes in. Clear the flag so the chat stops being
       // highlighted in the operator panel sidebar.
       this.chatsService.clearHelpFlag(dto.chatId).catch((err) => {
-        this.logger.warn(`clearHelpFlag failed for ${dto.chatId}: ${err.message}`);
+        this.logger.warn(
+          `clearHelpFlag failed for ${dto.chatId}: ${err.message}`,
+        );
       });
     }
 
@@ -135,7 +164,12 @@ export class MessagesService {
   /**
    * Send a system message (for automated notifications)
    */
-  async sendSystemMessage(chatId: string, content: string, requestId?: string): Promise<MessageResponseDto> {
+  async sendSystemMessage(
+    chatId: string,
+    content: string,
+    requestId?: string,
+    imageUrl?: string,
+  ): Promise<MessageResponseDto> {
     const chat = await this.prisma.chat.findUnique({
       where: { id: chatId },
     });
@@ -152,10 +186,25 @@ export class MessagesService {
         content,
         type: 'SYSTEM',
         ...(requestId && { requestId }),
+        ...(imageUrl && { imageUrl }),
       },
       include: {
         sender: {
-          select: { id: true, email: true, role: true, operator: { select: { displayName: true } } },
+          select: {
+            id: true,
+            email: true,
+            role: true,
+            operator: { select: { displayName: true } },
+          },
+        },
+        request: {
+          select: {
+            id: true,
+            amount: true,
+            status: true,
+            targetUsername: true,
+            proofUrl: true,
+          },
         },
       },
     });
@@ -188,7 +237,11 @@ export class MessagesService {
     userId: string,
     userRole: string,
     query: GetMessagesQueryDto,
-  ): Promise<{ messages: MessageResponseDto[]; hasMore: boolean; nextCursor?: string }> {
+  ): Promise<{
+    messages: MessageResponseDto[];
+    hasMore: boolean;
+    nextCursor?: string;
+  }> {
     // Verify access
     const chat = await this.prisma.chat.findUnique({
       where: { id: chatId },
@@ -200,7 +253,9 @@ export class MessagesService {
 
     const isOwner = chat.userId === userId;
     const isAssignedOperator = chat.operatorId === userId;
-    const isOperatorRole = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(userRole);
+    const isOperatorRole = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(
+      userRole,
+    );
 
     if (!isOwner && !isAssignedOperator && !isOperatorRole) {
       throw new ForbiddenException('You do not have access to this chat');
@@ -229,7 +284,24 @@ export class MessagesService {
       where,
       include: {
         sender: {
-          select: { id: true, email: true, role: true, operator: { select: { displayName: true } } },
+          select: {
+            id: true,
+            email: true,
+            role: true,
+            operator: { select: { displayName: true } },
+          },
+        },
+        // Include linked Request so the operator-panel can render an inline card
+        // (status + amount) instead of just an image. Helps the operator see at
+        // a glance which message corresponds to which carga pendiente.
+        request: {
+          select: {
+            id: true,
+            amount: true,
+            status: true,
+            targetUsername: true,
+            proofUrl: true,
+          },
         },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -241,9 +313,10 @@ export class MessagesService {
       messages.pop(); // Remove the extra message
     }
 
-    const nextCursor = hasMore && messages.length > 0
-      ? messages[messages.length - 1].id
-      : undefined;
+    const nextCursor =
+      hasMore && messages.length > 0
+        ? messages[messages.length - 1].id
+        : undefined;
 
     return {
       messages: messages.map((m) => this.formatMessage(m)),
@@ -255,7 +328,11 @@ export class MessagesService {
   /**
    * Mark messages as read
    */
-  async markAsRead(chatId: string, userId: string, userRole?: string): Promise<{ count: number }> {
+  async markAsRead(
+    chatId: string,
+    userId: string,
+    userRole?: string,
+  ): Promise<{ count: number }> {
     const chat = await this.prisma.chat.findUnique({
       where: { id: chatId },
     });
@@ -267,7 +344,8 @@ export class MessagesService {
     // Authorization: only chat owner, assigned operator, or operator roles
     const isOwner = chat.userId === userId;
     const isAssignedOperator = chat.operatorId === userId;
-    const isOperatorRole = userRole && ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(userRole);
+    const isOperatorRole =
+      userRole && ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(userRole);
 
     if (!isOwner && !isAssignedOperator && !isOperatorRole) {
       throw new ForbiddenException('You do not have access to this chat');
@@ -286,7 +364,9 @@ export class MessagesService {
     });
 
     if (result.count > 0) {
-      this.logger.log(`Marked ${result.count} messages as read in chat ${chatId}`);
+      this.logger.log(
+        `Marked ${result.count} messages as read in chat ${chatId}`,
+      );
 
       const readData = {
         chatId,
@@ -331,7 +411,12 @@ export class MessagesService {
   /**
    * Emit typing indicator
    */
-  async emitTyping(chatId: string, userId: string, userRole: string, isTyping: boolean): Promise<void> {
+  async emitTyping(
+    chatId: string,
+    userId: string,
+    userRole: string,
+    isTyping: boolean,
+  ): Promise<void> {
     // Verify chat exists and user has access before broadcasting
     const chat = await this.prisma.chat.findUnique({
       where: { id: chatId },
@@ -341,7 +426,9 @@ export class MessagesService {
 
     const isOwner = chat.userId === userId;
     const isAssignedOperator = chat.operatorId === userId;
-    const isOperatorRole = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(userRole);
+    const isOperatorRole = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(
+      userRole,
+    );
 
     if (!isOwner && !isAssignedOperator && !isOperatorRole) return; // Silently ignore unauthorized typing
 
@@ -372,12 +459,23 @@ export class MessagesService {
       isRead: message.isRead,
       createdAt: message.createdAt,
       ...(message.requestId && { requestId: message.requestId }),
-      sender: message.sender ? {
-        id: message.sender.id,
-        email: message.sender.email,
-        role: message.sender.role,
-        displayName: message.sender.operator?.displayName,
-      } : undefined,
+      ...(message.request && {
+        request: {
+          id: message.request.id,
+          amount: message.request.amount.toString(),
+          status: message.request.status,
+          targetUsername: message.request.targetUsername,
+          proofUrl: message.request.proofUrl,
+        },
+      }),
+      sender: message.sender
+        ? {
+            id: message.sender.id,
+            email: message.sender.email,
+            role: message.sender.role,
+            displayName: message.sender.operator?.displayName,
+          }
+        : undefined,
     };
   }
 }

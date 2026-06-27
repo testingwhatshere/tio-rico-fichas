@@ -23,6 +23,9 @@ export class HealthController {
   @Public()
   @HealthCheck()
   check() {
+    // Render apunta su healthCheckPath a /api/health. Si incluimos bot acá, un deploy en frío
+    // (cuando todavía no hay automation-extension conectado) marca el servicio como unhealthy y
+    // Render lo rechaza. El bot tiene su propio endpoint en /api/health/bot y el /full lo incluye.
     return this.health.check([
       () => this.prismaHealth.isHealthy('database'),
       () => this.memory.checkHeap('memory_heap', 150 * 1024 * 1024), // 150 MB
@@ -32,7 +35,6 @@ export class HealthController {
           path: '/',
           thresholdPercent: 0.9,
         }),
-      () => this.botHealthIndicator.isHealthy('bot'),
     ]);
   }
 
@@ -40,9 +42,7 @@ export class HealthController {
   @Public()
   @HealthCheck()
   readiness() {
-    return this.health.check([
-      () => this.prismaHealth.isHealthy('database'),
-    ]);
+    return this.health.check([() => this.prismaHealth.isHealthy('database')]);
   }
 
   @Get('live')
@@ -55,9 +55,7 @@ export class HealthController {
   @Public()
   @HealthCheck()
   botHealth() {
-    return this.health.check([
-      () => this.botHealthIndicator.isHealthy('bot'),
-    ]);
+    return this.health.check([() => this.botHealthIndicator.isHealthy('bot')]);
   }
 
   @Get('full')

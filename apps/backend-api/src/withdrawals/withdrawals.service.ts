@@ -11,7 +11,11 @@ import { Decimal } from '@prisma/client/runtime/library';
 import { PrismaService } from '../prisma/prisma.service';
 import { BalanceService } from '../balance/balance.service';
 import { EventsGateway } from '../events/events.gateway';
-import { CreateWithdrawalDto, ApproveWithdrawalDto, RejectWithdrawalDto } from './dto';
+import {
+  CreateWithdrawalDto,
+  ApproveWithdrawalDto,
+  RejectWithdrawalDto,
+} from './dto';
 import { MIN_WITHDRAWAL_AMOUNT } from '../common/constants/timeouts';
 
 @Injectable()
@@ -27,7 +31,9 @@ export class WithdrawalsService {
 
   async create(userId: string, dto: CreateWithdrawalDto) {
     if (dto.amount < MIN_WITHDRAWAL_AMOUNT) {
-      throw new BadRequestException(`El monto mínimo de retiro es $${MIN_WITHDRAWAL_AMOUNT}`);
+      throw new BadRequestException(
+        `El monto mínimo de retiro es $${MIN_WITHDRAWAL_AMOUNT}`,
+      );
     }
 
     let withdrawal: any;
@@ -82,7 +88,9 @@ export class WithdrawalsService {
       );
     } catch (error: any) {
       if (error.code === 'P2034') {
-        throw new BadRequestException('Solicitud concurrente detectada. Reintentá.');
+        throw new BadRequestException(
+          'Solicitud concurrente detectada. Reintentá.',
+        );
       }
       throw error;
     }
@@ -345,7 +353,9 @@ export class WithdrawalsService {
       throw error;
     }
 
-    this.logger.log(`Withdrawal ${id} marked as completed by operator ${operatorId}`);
+    this.logger.log(
+      `Withdrawal ${id} marked as completed by operator ${operatorId}`,
+    );
 
     // Emit events after commit (Fix 45)
     this.events.emitToUser(withdrawalUserId!, 'withdrawal:completed', {
@@ -368,7 +378,9 @@ export class WithdrawalsService {
     return this.prisma.withdrawal.findMany({
       where: { status: 'PENDING_APPROVAL' },
       include: {
-        user: { select: { id: true, username: true, email: true, balance: true } },
+        user: {
+          select: { id: true, username: true, email: true, balance: true },
+        },
       },
       orderBy: { createdAt: 'asc' },
     });

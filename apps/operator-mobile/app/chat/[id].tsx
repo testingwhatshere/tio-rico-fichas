@@ -26,6 +26,16 @@ import colors from '@/constants/colors';
 
 const PAGE_SIZE = 30;
 
+function formatHelpRequestedAt(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (!t || isNaN(t)) return '';
+  const diff = Math.floor((Date.now() - t) / 1000);
+  if (diff < 60) return 'hace segundos';
+  if (diff < 3600) return `hace ${Math.floor(diff / 60)} min`;
+  if (diff < 86400) return `hace ${Math.floor(diff / 3600)} h`;
+  return `hace ${Math.floor(diff / 86400)} d`;
+}
+
 export default function ChatDetailScreen() {
   const { id: chatId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -48,6 +58,11 @@ export default function ChatDetailScreen() {
   const [isLoadingInitial, setIsLoadingInitial] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [userTyping, setUserTyping] = useState(false);
+  const [panelInfo, setPanelInfo] = useState<{
+    savedTargetUsername: string | null;
+    panelPassword: string | null;
+  } | null>(null);
+  const [showPanelPwd, setShowPanelPwd] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatIdRef = useRef(chatId);
   const flatListRef = useRef<FlatList>(null);
@@ -78,6 +93,29 @@ export default function ChatDetailScreen() {
       }
     };
   }, [chatId, setSelectedChat]);
+
+  // ---- Load panel-game credentials for this user (support visibility) ----
+  useEffect(() => {
+    const userId = chat?.user?.id;
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await emitWithTimeout<any>('operator:get_user_panel_info', { userId });
+        if (!cancelled && res?.success && res.data) {
+          setPanelInfo({
+            savedTargetUsername: res.data.savedTargetUsername || null,
+            panelPassword: res.data.panelPassword || null,
+          });
+        }
+      } catch {
+        // Silent — block stays hidden if it fails
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chat?.user?.id]);
 
   // ---- Load initial messages ----
   useEffect(() => {
@@ -114,11 +152,12 @@ export default function ChatDetailScreen() {
     };
 
     socket.on('new_message', handleNewMessage);
-    socket.on('typing', handleTyping);
+    // El backend emite 'user_typing' al namespace /operator (no 'typing')
+    socket.on('user_typing', handleTyping);
 
     return () => {
       socket.off('new_message', handleNewMessage);
-      socket.off('typing', handleTyping);
+      socket.off('user_typing', handleTyping);
     };
   }, [addMessage]);
 
@@ -320,6 +359,60 @@ export default function ChatDetailScreen() {
           </View>
         )}
 
+        {/* Help requested banner */}
+        {chat?.needsHelp && (
+          <View style={styles.helpBanner}>
+            <Text style={styles.helpBannerIcon}>🙋</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.helpBannerTitle}>AYUDA solicitada</Text>
+              <Text style={styles.helpBannerSubtitle}>
+                Contexto:{' '}
+                {chat.helpContext === 'prize' ? 'cobro de premio' : 'soporte general'}
+                {chat.helpRequestedAt
+                  ? ` · ${formatHelpRequestedAt(chat.helpRequestedAt)}`
+                  : ''}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Datos del panel (game-panel credentials for support) */}
+        {panelInfo && (
+          <View style={styles.panelInfoBlock}>
+            <View style={styles.panelInfoRow}>
+              <Text style={styles.panelInfoLabel}>Usuario panel:</Text>
+              <Text style={styles.panelInfoValue} numberOfLines={1}>
+                {panelInfo.savedTargetUsername || '(sin asignar)'}
+              </Text>
+            </View>
+            <View style={styles.panelInfoRow}>
+              <Text style={styles.panelInfoLabel}>Contraseña:</Text>
+              {panelInfo.panelPassword ? (
+                <>
+                  <Text style={styles.panelInfoValueMono} numberOfLines={1}>
+                    {showPanelPwd ? panelInfo.panelPassword : '••••••••'}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setShowPanelPwd((v) => !v)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons
+                      name={showPanelPwd ? 'eye-off-outline' : 'eye-outline'}
+                      size={18}
+                      color={colors.textMuted}
+                    />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.panelInfoValueMonoItalic}>123casino</Text>
+                  <Text style={styles.panelInfoHint}>(default — si no la cambió)</Text>
+                </>
+              )}
+            </View>
+          </View>
+        )}
+
         {/* Messages */}
         {isLoadingInitial ? (
           <View style={styles.loadingContainer}>
@@ -456,6 +549,77 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 13,
     fontWeight: '600',
+  },
+
+  // Help requested banner (high-priority, mirrors desktop chat-help-banner)
+  helpBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(245, 101, 101, 0.15)',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.error,
+    gap: 10,
+  },
+  helpBannerIcon: {
+    fontSize: 20,
+  },
+  helpBannerTitle: {
+    color: colors.error,
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  helpBannerSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    marginTop: 1,
+  },
+
+  // Panel info (game-panel credentials block)
+  panelInfoBlock: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(212, 160, 23, 0.06)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 4,
+  },
+  panelInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  panelInfoLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  panelInfoValue: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  panelInfoValueMono: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    letterSpacing: 1,
+  },
+  panelInfoValueMonoItalic: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontStyle: 'italic',
+    opacity: 0.85,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  panelInfoHint: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontStyle: 'italic',
   },
 
   // Messages list

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tio Rico Bot",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Tio Rico - Carga automatica de fichas",
   "permissions": [
     "storage",

@@ -21,6 +21,13 @@ const PENDING_STATUSES = ['VERIFIED', 'CHIPS_WITHDRAWN', 'FAILED'];
 const PROCESSING_STATUSES = ['PROCESSING'];
 const COMPLETED_STATUSES = ['COMPLETED', 'REJECTED'];
 
+// Pendiente = requiere acción del operador. VERIFICATION_FAILED solo cuenta
+// cuando fue un error de verificación (sin verifiedBalance); fichas
+// insuficientes ya le indicó al usuario qué hacer.
+const isPendingClaim = (c: { status: string; verifiedBalance?: unknown }) =>
+  PENDING_STATUSES.includes(c.status) ||
+  (c.status === 'VERIFICATION_FAILED' && c.verifiedBalance == null);
+
 export default function PrizesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -29,13 +36,13 @@ export default function PrizesScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const filteredClaims = prizeClaims.filter((c) => {
-    if (activeFilter === 'pending') return PENDING_STATUSES.includes(c.status);
+    if (activeFilter === 'pending') return isPendingClaim(c);
     if (activeFilter === 'processing') return PROCESSING_STATUSES.includes(c.status);
     if (activeFilter === 'completed') return COMPLETED_STATUSES.includes(c.status);
     return true;
   });
 
-  const pendingCount = prizeClaims.filter((c) => PENDING_STATUSES.includes(c.status)).length;
+  const pendingCount = prizeClaims.filter(isPendingClaim).length;
   const processingCount = prizeClaims.filter((c) => PROCESSING_STATUSES.includes(c.status)).length;
   const completedCount = prizeClaims.filter((c) => COMPLETED_STATUSES.includes(c.status)).length;
 

@@ -14,13 +14,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import colors from '@/constants/colors';
 import { useOperatorStore } from '@/stores/operator.store';
-import { getApi } from '@/services/api';
+import { emitWithTimeout } from '@/services/socket';
+import { uploadPayoutProof } from '@/services/api';
 import { parseAmount, formatAmount } from '@/utils/amount';
 import { hapticSuccess, hapticError } from '@/utils/haptics';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   PENDING: { label: 'Pendiente', color: colors.textMuted },
   VERIFIED: { label: 'Verificado', color: colors.warning },
+  VERIFICATION_FAILED: { label: 'Verificación fallida', color: colors.chipFailed },
   PROCESSING: { label: 'Procesando', color: colors.chipProcessing },
   CHIPS_WITHDRAWN: { label: 'Fichas retiradas', color: colors.chipPending },
   COMPLETED: { label: 'Completado', color: colors.chipCompleted },
@@ -81,8 +85,8 @@ export default function PrizeDetailScreen() {
           onPress: async () => {
             setIsProcessing(true);
             try {
-              const api = getApi();
-              await api.post(`/prize-claims/${claim.id}/process`);
+              const res: any = await emitWithTimeout('operator:process_prize_claim', { claimId: claim.id }, 30000);
+              if (res && res.success === false) throw new Error(res.error || 'No se pudo procesar el retiro');
               updatePrizeClaim(claim.id, { status: 'PROCESSING' });
               hapticSuccess();
               Alert.alert('Procesando', 'El retiro esta siendo procesado.');
@@ -98,32 +102,129 @@ export default function PrizeDetailScreen() {
     );
   };
 
-  const handleMarkPaid = () => {
+  // La verificación automática falló; el operador decide retirar igual tras
+  // chequear las fichas a mano en el panel.
+  const handleProcessAnyway = () => {
     Alert.alert(
-      'Marcar como Pagado',
-      `Confirmas que el pago de $${formatAmount(amount)} fue enviado a ${targetUsername}?`,
+      'Procesar sin verificación',
+      `La verificación automática de fichas falló. Verificá a mano en el panel que ${targetUsername} tenga $${formatAmount(amount)} antes de continuar. ¿Procesar el retiro igual?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
-          text: 'Confirmar',
+          text: 'Procesar igual',
+          style: 'destructive',
           onPress: async () => {
             setIsProcessing(true);
             try {
-              const api = getApi();
-              await api.post(`/prize-claims/${claim.id}/complete`);
-              updatePrizeClaim(claim.id, { status: 'COMPLETED' });
+              const res: any = await emitWithTimeout('operator:process_prize_claim', { claimId: claim.id }, 30000);
+              if (res && res.success === false) throw new Error(res.error || 'No se pudo procesar el retiro');
+              updatePrizeClaim(claim.id, { status: 'PROCESSING' });
               hapticSuccess();
-              Alert.alert('Completado', 'El premio fue marcado como pagado.', [
-                { text: 'OK', onPress: () => router.back() },
-              ]);
+              Alert.alert('Procesando', 'El retiro esta siendo procesado.');
             } catch (err: any) {
               hapticError();
-              Alert.alert('Error', err.message || 'No se pudo completar el premio');
+              Alert.alert('Error', err.message || 'No se pudo procesar el retiro');
             } finally {
               setIsProcessing(false);
             }
           },
         },
+      ],
+    );
+  };
+
+  // Pide comprobante (imagen o PDF) y completa el premio. El comprobante queda persistido en
+  // PrizeClaim.payoutProofUrl y el backend lo entrega al usuario como mensaje SYSTEM en el chat,
+  // así tiene evidencia visible del pago dentro de la app.
+  const pickAndUploadProof = async (
+    kind: 'image' | 'pdf',
+  ): Promise<{ url: string; type: 'image' | 'pdf' } | null> => {
+    if (kind === 'pdf') {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        multiple: false,
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return null;
+      const asset = result.assets?.[0];
+      if (!asset?.uri) {
+        Alert.alert('Error', 'No se pudo leer el archivo seleccionado.');
+        return null;
+      }
+      const filename = asset.name || `comprobante-${Date.now()}.pdf`;
+      const mimeType = asset.mimeType || 'application/pdf';
+      const upload = await uploadPayoutProof(asset.uri, filename, mimeType);
+      if (!upload.url) {
+        Alert.alert('Error', upload.error || 'No se pudo subir el comprobante.');
+        return null;
+      }
+      return { url: upload.url, type: upload.type || 'pdf' };
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permiso requerido', 'Necesito acceso a la galería para adjuntar la imagen.');
+      return null;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: false,
+      quality: 0.85,
+    });
+    if (result.canceled) return null;
+    const asset = result.assets?.[0];
+    if (!asset?.uri) {
+      Alert.alert('Error', 'No se pudo leer la imagen seleccionada.');
+      return null;
+    }
+    const guessedExt = (asset.fileName?.split('.').pop() || 'jpg').toLowerCase();
+    const filename = asset.fileName || `comprobante-${Date.now()}.${guessedExt}`;
+    const mimeType = asset.mimeType || (guessedExt === 'png' ? 'image/png' : 'image/jpeg');
+    const upload = await uploadPayoutProof(asset.uri, filename, mimeType);
+    if (!upload.url) {
+      Alert.alert('Error', upload.error || 'No se pudo subir el comprobante.');
+      return null;
+    }
+    return { url: upload.url, type: upload.type || 'image' };
+  };
+
+  const completeWithProof = async (kind: 'image' | 'pdf') => {
+    setIsProcessing(true);
+    try {
+      const proof = await pickAndUploadProof(kind);
+      if (!proof) {
+        setIsProcessing(false);
+        return;
+      }
+      const res: any = await emitWithTimeout(
+        'operator:complete_prize_claim',
+        { claimId: claim.id, proofUrl: proof.url, proofType: proof.type },
+        30000,
+      );
+      if (res && res.success === false) {
+        throw new Error(res.error || 'No se pudo completar el premio');
+      }
+      updatePrizeClaim(claim.id, { status: 'COMPLETED' });
+      hapticSuccess();
+      Alert.alert('Completado', 'El premio fue marcado como pagado y el comprobante fue enviado al usuario.', [
+        { text: 'OK', onPress: () => router.back() },
+      ]);
+    } catch (err: any) {
+      hapticError();
+      Alert.alert('Error', err.message || 'No se pudo completar el premio');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleMarkPaid = () => {
+    Alert.alert(
+      'Marcar como Pagado',
+      `Confirmás que el pago de $${formatAmount(amount)} fue enviado a ${targetUsername}?\n\nNecesito el comprobante (imagen o PDF) de la transferencia para mandárselo al usuario.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Adjuntar imagen', onPress: () => completeWithProof('image') },
+        { text: 'Adjuntar PDF', onPress: () => completeWithProof('pdf') },
       ],
     );
   };
@@ -139,8 +240,9 @@ export default function PrizeDetailScreen() {
           onPress: async () => {
             setIsProcessing(true);
             try {
-              const api = getApi();
-              await api.post(`/prize-claims/${claim.id}/retry`);
+              // Desktop usa el mismo flujo "process" para reintentar un claim FAILED.
+              const res: any = await emitWithTimeout('operator:process_prize_claim', { claimId: claim.id }, 30000);
+              if (res && res.success === false) throw new Error(res.error || 'No se pudo reintentar el retiro');
               updatePrizeClaim(claim.id, { status: 'PROCESSING' });
               hapticSuccess();
               Alert.alert('Reintentando', 'El retiro esta siendo procesado nuevamente.');
@@ -178,8 +280,12 @@ export default function PrizeDetailScreen() {
           onPress: async () => {
             setIsProcessing(true);
             try {
-              const api = getApi();
-              await api.post(`/prize-claims/${claim.id}/reject`, { reason: rejectReason.trim() });
+              const res: any = await emitWithTimeout(
+                'operator:reject_prize_claim',
+                { claimId: claim.id, reason: rejectReason.trim() },
+                30000,
+              );
+              if (res && res.success === false) throw new Error(res.error || 'No se pudo rechazar el reclamo');
               updatePrizeClaim(claim.id, { status: 'REJECTED' });
               hapticSuccess();
               Alert.alert('Rechazado', 'El reclamo fue rechazado.', [
@@ -380,6 +486,17 @@ export default function PrizeDetailScreen() {
                 >
                   <Ionicons name="refresh" size={20} color={colors.white} />
                   <Text style={styles.actionBtnText}>Reintentar</Text>
+                </TouchableOpacity>
+              )}
+
+              {status === 'VERIFICATION_FAILED' && (
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.primaryBtn]}
+                  activeOpacity={0.7}
+                  onPress={handleProcessAnyway}
+                >
+                  <Ionicons name="arrow-forward-circle" size={20} color={colors.white} />
+                  <Text style={styles.actionBtnText}>Procesar igual</Text>
                 </TouchableOpacity>
               )}
             </>

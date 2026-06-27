@@ -37,7 +37,6 @@ function MenuItem({ icon, label, subtitle, onPress, badge }: MenuItemProps) {
 export default function MoreScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const pendingPrizeClaims = useOperatorStore((s) => s.pendingPrizeClaims);
   const pendingPayments = useOperatorStore((s) =>
     s.outboundPayments.filter((p: any) => p.status === 'PENDING' || p.status === 'CONFIRMED').length
   );
@@ -55,18 +54,23 @@ export default function MoreScreen() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Operaciones</Text>
         <MenuItem
-          icon="trophy-outline"
-          label="Premios"
-          subtitle="Reclamos de premios de usuarios"
-          onPress={() => router.push('/(tabs)/prizes')}
-          badge={pendingPrizeClaims}
-        />
-        <MenuItem
           icon="cash-outline"
           label="Pagos"
           subtitle="Pagos salientes de premios"
           onPress={() => router.push('/(tabs)/payments')}
           badge={pendingPayments}
+        />
+        <MenuItem
+          icon="briefcase-outline"
+          label="Jobs"
+          subtitle="Cola de carga de créditos"
+          onPress={() => router.push('/(tabs)/jobs')}
+        />
+        <MenuItem
+          icon="documents-outline"
+          label="Solicitudes"
+          subtitle="Historial completo de pedidos"
+          onPress={() => router.push('/(tabs)/requests')}
         />
         <MenuItem
           icon="time-outline"
@@ -89,6 +93,12 @@ export default function MoreScreen() {
           label="Usuarios"
           subtitle="Clientes registrados"
           onPress={() => router.push('/(tabs)/users')}
+        />
+        <MenuItem
+          icon="cloud-upload-outline"
+          label="Pre-cargar usuarios"
+          subtitle="Importar CSV / Google Contacts"
+          onPress={() => router.push('/(tabs)/preload-users')}
         />
         <MenuItem
           icon="desktop-outline"

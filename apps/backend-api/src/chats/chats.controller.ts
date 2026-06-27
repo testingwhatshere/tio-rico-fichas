@@ -44,8 +44,14 @@ export class ChatsController {
    * conversation. `context` distinguishes plain chat help from prize-flow help.
    */
   @Post('me/help')
-  async requestHelp(@Request() req: any, @Body() body: { context?: 'chat' | 'prize' }) {
-    return this.chatsService.requestHelp(req.user.sub, body?.context === 'prize' ? 'prize' : 'chat');
+  async requestHelp(
+    @Request() req: any,
+    @Body() body: { context?: 'chat' | 'prize' },
+  ) {
+    return this.chatsService.requestHelp(
+      req.user.sub,
+      body?.context === 'prize' ? 'prize' : 'chat',
+    );
   }
 
   /**
@@ -94,6 +100,16 @@ export class ChatsController {
   async getChatById(@Param('id') id: string, @Request() req: any) {
     // Pass userId for access control (user can only see their own chats)
     return this.chatsService.getChatById(id, req.user.sub);
+  }
+
+  /**
+   * Pending Requests + PrizeClaims of the chat's user. Consumed by the operator-panel
+   * chat sidebar so the operator sees pending cargas/premios at a glance.
+   */
+  @Get(':id/pending-summary')
+  @Roles('OPERATOR', 'SENIOR_OPERATOR', 'ADMIN')
+  async getPendingSummary(@Param('id') id: string) {
+    return this.chatsService.getPendingSummary(id);
   }
 
   /**

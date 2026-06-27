@@ -1,4 +1,11 @@
-import { Injectable, Logger, NotFoundException, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  Inject,
+  forwardRef,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ModuleRef } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -10,12 +17,25 @@ import { SettingsService } from '../settings/settings.service';
 import { TelegramService } from '../notifications/telegram.service';
 import { PushService } from '../notifications/push.service';
 import { JobStatus, RequestStatus, JobType } from '@prisma/client';
-import { JobResultDto, JobProgressDto, BotStatusDto, HeartbeatDto } from './dto';
-import { STALE_PROGRESS_MS, BOT_HEARTBEAT_TIMEOUT_MS } from '../common/constants/timeouts';
+import {
+  JobResultDto,
+  JobProgressDto,
+  BotStatusDto,
+  HeartbeatDto,
+} from './dto';
+import {
+  STALE_PROGRESS_MS,
+  BOT_HEARTBEAT_TIMEOUT_MS,
+} from '../common/constants/timeouts';
 import { PrizeClaimsService } from '../prize-claims/prize-claims.service';
 import { ChatsService } from '../chats/chats.service';
 import { MessagesService } from '../messages/messages.service';
-import { AppEvent, JobCompletedEvent, JobFailedEvent, JobStartedEvent } from '../common/events/app-events';
+import {
+  AppEvent,
+  JobCompletedEvent,
+  JobFailedEvent,
+  JobStartedEvent,
+} from '../common/events/app-events';
 
 // Bot state (in-memory, will be reset on server restart)
 export interface BotState {
@@ -69,7 +89,12 @@ export class BotService implements OnModuleInit {
    */
   async onModuleInit() {
     try {
-      const keys = ['BOT_STATUS', 'BOT_LAST_HEARTBEAT', 'BOT_LAST_JOB_ID', 'BOT_VERSION'];
+      const keys = [
+        'BOT_STATUS',
+        'BOT_LAST_HEARTBEAT',
+        'BOT_LAST_JOB_ID',
+        'BOT_VERSION',
+      ];
       const settings = await this.prisma.setting.findMany({
         where: { key: { in: keys } },
       });
@@ -79,7 +104,8 @@ export class BotService implements OnModuleInit {
       if (map.has('BOT_STATUS')) {
         const status = map.get('BOT_STATUS') as BotState['status'];
         // If it was 'online' or 'busy' before restart, mark as unknown (needs heartbeat to confirm)
-        this.botState.status = (status === 'online' || status === 'busy') ? 'unknown' : status;
+        this.botState.status =
+          status === 'online' || status === 'busy' ? 'unknown' : status;
       }
       if (map.has('BOT_LAST_HEARTBEAT')) {
         this.botState.lastHeartbeat = new Date(map.get('BOT_LAST_HEARTBEAT')!);
@@ -91,7 +117,9 @@ export class BotService implements OnModuleInit {
         this.botState.version = map.get('BOT_VERSION')!;
       }
 
-      this.logger.log(`Bot state restored from DB: status=${this.botState.status}`);
+      this.logger.log(
+        `Bot state restored from DB: status=${this.botState.status}`,
+      );
     } catch (error) {
       this.logger.warn(`Failed to restore bot state from DB: ${error.message}`);
     }
@@ -106,10 +134,16 @@ export class BotService implements OnModuleInit {
         { key: 'BOT_STATUS', value: this.botState.status },
       ];
       if (this.botState.lastHeartbeat) {
-        entries.push({ key: 'BOT_LAST_HEARTBEAT', value: this.botState.lastHeartbeat.toISOString() });
+        entries.push({
+          key: 'BOT_LAST_HEARTBEAT',
+          value: this.botState.lastHeartbeat.toISOString(),
+        });
       }
       if (this.botState.lastJobId) {
-        entries.push({ key: 'BOT_LAST_JOB_ID', value: this.botState.lastJobId });
+        entries.push({
+          key: 'BOT_LAST_JOB_ID',
+          value: this.botState.lastJobId,
+        });
       }
       if (this.botState.version) {
         entries.push({ key: 'BOT_VERSION', value: this.botState.version });
@@ -150,7 +184,10 @@ export class BotService implements OnModuleInit {
       this.logger.warn(
         `Job ${jobId} already in final state ${job.status}, ignoring duplicate result`,
       );
-      return { success: true, message: 'Job result already processed (idempotent)' };
+      return {
+        success: true,
+        message: 'Job result already processed (idempotent)',
+      };
     }
 
     // Update job status
@@ -171,17 +208,29 @@ export class BotService implements OnModuleInit {
     if (job.type === 'WITHDRAW_CHIPS') {
       if (job.prizeClaim) {
         try {
-          const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, { strict: false });
+          const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, {
+            strict: false,
+          });
           if (!prizeClaimsService) {
-            this.logger.error(`PrizeClaimsService not available — cannot process withdrawal result for job ${jobId}`);
+            this.logger.error(
+              `PrizeClaimsService not available — cannot process withdrawal result for job ${jobId}`,
+            );
           } else {
-            await prizeClaimsService.handleWithdrawalResult(job.prizeClaim.id, dto.success, dto.error);
+            await prizeClaimsService.handleWithdrawalResult(
+              job.prizeClaim.id,
+              dto.success,
+              dto.error,
+            );
           }
         } catch (error: any) {
-          this.logger.error(`Failed to handle prize withdrawal result: ${error.message}`);
+          this.logger.error(
+            `Failed to handle prize withdrawal result: ${error.message}`,
+          );
         }
       } else {
-        this.logger.error(`WITHDRAW_CHIPS job ${jobId} has no associated prize claim`);
+        this.logger.error(
+          `WITHDRAW_CHIPS job ${jobId} has no associated prize claim`,
+        );
       }
 
       // Clear progress, update bot state, mark panel idle
@@ -191,13 +240,19 @@ export class BotService implements OnModuleInit {
       this.persistBotState();
       if (job.panelId) {
         this.botGateway.markPanelIdle(job.panelId);
-        this.updatePanelState(job.panelId, { status: 'online', lastJobId: jobId });
+        this.updatePanelState(job.panelId, {
+          status: 'online',
+          lastJobId: jobId,
+        });
       }
       this.eventsGateway.emitDashboardUpdate();
 
       // Try dispatch next job
       if (job.panelId) {
-        this.eventEmitter.emit(AppEvent.JOB_COMPLETED, { jobId, panelId: job.panelId });
+        this.eventEmitter.emit(AppEvent.JOB_COMPLETED, {
+          jobId,
+          panelId: job.panelId,
+        });
       }
 
       return { success: true, message: 'Withdrawal job result recorded' };
@@ -205,7 +260,26 @@ export class BotService implements OnModuleInit {
 
     // Handle CHANGE_PASSWORD jobs
     if (job.type === 'CHANGE_PASSWORD') {
-      // Clear newPassword from DB immediately (security)
+      // On success, persist the new password on the user so operators can see it
+      // for support (plaintext — it's the panel-game password, not auth). Done
+      // BEFORE the cleanup so we don't lose it.
+      if (dto.success && job.requestingUserId && job.newPassword) {
+        try {
+          await this.prisma.user.update({
+            where: { id: job.requestingUserId },
+            data: {
+              panelPassword: job.newPassword,
+              panelPasswordUpdatedAt: new Date(),
+            },
+          });
+        } catch (err: any) {
+          this.logger.warn(
+            `Failed to persist panelPassword after CHANGE_PASSWORD: ${err.message}`,
+          );
+        }
+      }
+
+      // Clear newPassword from the Job row (it was for transport only).
       await this.prisma.job.update({
         where: { id: jobId },
         data: { newPassword: null },
@@ -214,26 +288,38 @@ export class BotService implements OnModuleInit {
       // Send system message to user's chat + native push notification.
       if (job.requestingUserId) {
         try {
-          const chatsService = this.moduleRef.get(ChatsService, { strict: false });
-          const messagesService = this.moduleRef.get(MessagesService, { strict: false });
+          const chatsService = this.moduleRef.get(ChatsService, {
+            strict: false,
+          });
+          const messagesService = this.moduleRef.get(MessagesService, {
+            strict: false,
+          });
           const chat = await chatsService.getOrCreateChat(job.requestingUserId);
           const msg = dto.success
             ? '✅ Tu contraseña fue cambiada con éxito. Ya podés usar la nueva contraseña para ingresar.'
             : `❌ No se pudo cambiar tu contraseña. ${dto.error || 'Contacta a soporte para más información.'}`;
           await messagesService.sendSystemMessage(chat.id, msg);
         } catch (err) {
-          this.logger.warn(`Failed to send password change notification: ${err.message}`);
+          this.logger.warn(
+            `Failed to send password change notification: ${err.message}`,
+          );
         }
         try {
           // Push notification so the user sees it even if the chat-app is closed
           // or they're on the home screen (which doesn't open the chat to see msgs).
-          const pushService = this.moduleRef.get(PushService, { strict: false });
+          const pushService = this.moduleRef.get(PushService, {
+            strict: false,
+          });
           if (pushService?.sendToUser) {
-            const title = dto.success ? '✅ Contraseña cambiada' : '❌ Cambio de contraseña falló';
+            const title = dto.success
+              ? '✅ Contraseña cambiada'
+              : '❌ Cambio de contraseña falló';
             const body = dto.success
               ? 'Ya podés usar la nueva contraseña para ingresar al panel.'
               : `${dto.error || 'Contactá a soporte.'}`;
-            await pushService.sendToUser(job.requestingUserId, title, body, { type: 'password_change' });
+            await pushService.sendToUser(job.requestingUserId, title, body, {
+              type: 'password_change',
+            });
           }
         } catch (err: any) {
           this.logger.warn(`Push for password change failed: ${err.message}`);
@@ -241,14 +327,20 @@ export class BotService implements OnModuleInit {
         // Real-time socket event so the chat-app shows an in-app toast on
         // whichever screen the user happens to be on (home, chat, etc.).
         try {
-          this.eventsGateway.emitToUser(job.requestingUserId, 'password:changed', {
-            success: !!dto.success,
-            error: dto.error || null,
-            jobId,
-            timestamp: new Date().toISOString(),
-          });
+          this.eventsGateway.emitToUser(
+            job.requestingUserId,
+            'password:changed',
+            {
+              success: !!dto.success,
+              error: dto.error || null,
+              jobId,
+              timestamp: new Date().toISOString(),
+            },
+          );
         } catch (err: any) {
-          this.logger.warn(`Socket emit password:changed failed: ${err.message}`);
+          this.logger.warn(
+            `Socket emit password:changed failed: ${err.message}`,
+          );
         }
       }
 
@@ -259,12 +351,18 @@ export class BotService implements OnModuleInit {
       this.persistBotState();
       if (job.panelId) {
         this.botGateway.markPanelIdle(job.panelId);
-        this.updatePanelState(job.panelId, { status: 'online', lastJobId: jobId });
+        this.updatePanelState(job.panelId, {
+          status: 'online',
+          lastJobId: jobId,
+        });
       }
       this.eventsGateway.emitDashboardUpdate();
 
       if (job.panelId) {
-        this.eventEmitter.emit(AppEvent.JOB_COMPLETED, { jobId, panelId: job.panelId });
+        this.eventEmitter.emit(AppEvent.JOB_COMPLETED, {
+          jobId,
+          panelId: job.panelId,
+        });
       }
 
       return { success: true, message: 'Password change job result recorded' };
@@ -272,20 +370,56 @@ export class BotService implements OnModuleInit {
 
     // Handle CREATE_USER jobs
     if (job.type === 'CREATE_USER') {
+      // On success: persist the default panel password ('123casino') for the
+      // matching user so operators can see it in support. On failure: emit a
+      // dedicated event so the operator panel can show a clear toast (instead
+      // of only logging).
+      if (dto.success && job.targetUsername) {
+        try {
+          await this.prisma.user.updateMany({
+            where: {
+              savedTargetUsername: job.targetUsername,
+              panelPassword: null,
+            },
+            data: {
+              panelPassword: '123casino',
+              panelPasswordUpdatedAt: new Date(),
+            },
+          });
+        } catch (err: any) {
+          this.logger.warn(
+            `Failed to persist default panelPassword after CREATE_USER: ${err.message}`,
+          );
+        }
+      } else if (!dto.success) {
+        try {
+          this.eventsGateway.emitToOperators('create_user_failed', {
+            jobId,
+            targetUsername: job.targetUsername,
+            panelId: job.panelId,
+            error: dto.error || 'Error desconocido',
+          });
+        } catch (err: any) {
+          this.logger.warn(`Failed to emit create_user_failed: ${err.message}`);
+        }
+      }
+
       // Clear newPassword from DB immediately (security)
       await this.prisma.job.update({
         where: { id: jobId },
         data: { newPassword: null },
       });
 
-      // Notify operators
+      // Notify operators (log only)
       try {
         const msg = dto.success
           ? `Usuario "${job.targetUsername}" creado en el panel con contraseña 123casino.`
           : `Error al crear usuario "${job.targetUsername}": ${dto.error || 'Error desconocido'}`;
         this.logger.log(msg);
       } catch (err) {
-        this.logger.warn(`Failed to send create user notification: ${err.message}`);
+        this.logger.warn(
+          `Failed to send create user notification: ${err.message}`,
+        );
       }
 
       // Clear progress, update bot state, mark panel idle
@@ -295,12 +429,18 @@ export class BotService implements OnModuleInit {
       this.persistBotState();
       if (job.panelId) {
         this.botGateway.markPanelIdle(job.panelId);
-        this.updatePanelState(job.panelId, { status: 'online', lastJobId: jobId });
+        this.updatePanelState(job.panelId, {
+          status: 'online',
+          lastJobId: jobId,
+        });
       }
       this.eventsGateway.emitDashboardUpdate();
 
       if (job.panelId) {
-        this.eventEmitter.emit(AppEvent.JOB_COMPLETED, { jobId, panelId: job.panelId });
+        this.eventEmitter.emit(AppEvent.JOB_COMPLETED, {
+          jobId,
+          panelId: job.panelId,
+        });
       }
 
       return { success: true, message: 'Create user job result recorded' };
@@ -308,7 +448,9 @@ export class BotService implements OnModuleInit {
 
     // Update request status directly (critical path — must not be lost)
     if (!job.requestId) {
-      this.logger.error(`Job ${jobId} has no requestId — cannot update request status`);
+      this.logger.error(
+        `Job ${jobId} has no requestId — cannot update request status`,
+      );
       return { success: true, message: 'Job result recorded (no request)' };
     }
     const requestStatus: RequestStatus = dto.success ? 'COMPLETED' : 'FAILED';
@@ -324,7 +466,9 @@ export class BotService implements OnModuleInit {
     // audit logs of what we charged / loaded, but they no longer mutate
     // User.balance.
     if (dto.success && !job.request) {
-      this.logger.warn(`Job ${jobId} completed but request is missing — skipping audit log`);
+      this.logger.warn(
+        `Job ${jobId} completed but request is missing — skipping audit log`,
+      );
     }
 
     // Clear progress tracking
@@ -338,7 +482,10 @@ export class BotService implements OnModuleInit {
     // Mark panel as idle (job finished)
     if (job.panelId) {
       this.botGateway.markPanelIdle(job.panelId);
-      this.updatePanelState(job.panelId, { status: 'online', lastJobId: jobId });
+      this.updatePanelState(job.panelId, {
+        status: 'online',
+        lastJobId: jobId,
+      });
     }
 
     this.logger.log(
@@ -363,10 +510,20 @@ export class BotService implements OnModuleInit {
         });
       } else {
         this.eventsGateway.emitJobFailed(job.request.userId, eventData);
-        this.telegramService.alertJobFailed(jobId, dto.error || 'Unknown error', job.request?.targetUsername).catch((e) => this.logger.warn(`Telegram alert failed: ${e.message}`));
+        this.telegramService
+          .alertJobFailed(
+            jobId,
+            dto.error || 'Unknown error',
+            job.request?.targetUsername,
+          )
+          .catch((e) =>
+            this.logger.warn(`Telegram alert failed: ${e.message}`),
+          );
       }
     } else {
-      this.logger.error(`Job ${jobId} completed but request relation is missing — skipping event emission`);
+      this.logger.error(
+        `Job ${jobId} completed but request relation is missing — skipping event emission`,
+      );
     }
 
     this.eventsGateway.emitDashboardUpdate();
@@ -423,23 +580,37 @@ export class BotService implements OnModuleInit {
       // If already PROCESSING, this is the same bot confirming start (dispatcher already set PROCESSING)
       // Only flag alreadyClaimed if job is in a terminal state (COMPLETED/FAILED) — meaning another bot finished it
       if (existingJob.status === 'PROCESSING') {
-        this.logger.log(`Job ${jobId} already PROCESSING (set by dispatcher), confirming start`);
+        this.logger.log(
+          `Job ${jobId} already PROCESSING (set by dispatcher), confirming start`,
+        );
         // Update startedAt if not set
-        await this.prisma.job.update({
-          where: { id: jobId },
-          data: { startedAt: startedAt ? new Date(startedAt) : new Date() },
-        }).catch(() => {});
+        await this.prisma.job
+          .update({
+            where: { id: jobId },
+            data: { startedAt: startedAt ? new Date(startedAt) : new Date() },
+          })
+          .catch(() => {});
         // Fall through to emit events below — do NOT return alreadyClaimed
       } else {
-        this.logger.warn(`Job ${jobId} in terminal state ${existingJob.status}, another bot already handled it`);
-        return { success: true, message: 'Job already completed/failed by another bot', alreadyClaimed: true };
+        this.logger.warn(
+          `Job ${jobId} in terminal state ${existingJob.status}, another bot already handled it`,
+        );
+        return {
+          success: true,
+          message: 'Job already completed/failed by another bot',
+          alreadyClaimed: true,
+        };
       }
     }
 
     // Update request status
     const job = await this.prisma.job.findUnique({
       where: { id: jobId },
-      select: { type: true, panelId: true, request: { select: { id: true, userId: true } } },
+      select: {
+        type: true,
+        panelId: true,
+        request: { select: { id: true, userId: true } },
+      },
     });
 
     if (job?.request) {
@@ -480,7 +651,10 @@ export class BotService implements OnModuleInit {
     });
     if (fullJob?.panelId) {
       this.botGateway.markPanelBusy(fullJob.panelId);
-      this.updatePanelState(fullJob.panelId, { status: 'busy', lastJobId: jobId });
+      this.updatePanelState(fullJob.panelId, {
+        status: 'busy',
+        lastJobId: jobId,
+      });
     }
 
     // Initialize progress tracking
@@ -518,7 +692,9 @@ export class BotService implements OnModuleInit {
       });
       userId = job?.request?.userId;
     } catch (error) {
-      this.logger.warn(`Failed to look up userId for job progress ${jobId}: ${error.message}`);
+      this.logger.warn(
+        `Failed to look up userId for job progress ${jobId}: ${error.message}`,
+      );
     }
 
     // Emit real-time progress update (to operators and user)
@@ -556,7 +732,9 @@ export class BotService implements OnModuleInit {
    * Handle heartbeat from bot — optionally panel-aware
    */
   async handleHeartbeat(dto: HeartbeatDto, panelId?: string) {
-    this.logger.debug(`Bot heartbeat received${panelId ? ` (panel ${panelId})` : ''}`);
+    this.logger.debug(
+      `Bot heartbeat received${panelId ? ` (panel ${panelId})` : ''}`,
+    );
 
     this.botState.lastHeartbeat = new Date();
     this.botState.status = 'online';
@@ -578,7 +756,9 @@ export class BotService implements OnModuleInit {
     const now = Date.now();
     for (const [jobId, progress] of this.jobProgress.entries()) {
       if (now - progress.updatedAt.getTime() > STALE_PROGRESS_MS) {
-        this.logger.warn(`Cleaning stale job progress: ${jobId} (last update: ${progress.updatedAt.toISOString()})`);
+        this.logger.warn(
+          `Cleaning stale job progress: ${jobId} (last update: ${progress.updatedAt.toISOString()})`,
+        );
         this.jobProgress.delete(jobId);
       }
     }
@@ -603,8 +783,14 @@ export class BotService implements OnModuleInit {
 
     // Persist last known balance so /fichas command can show it
     try {
-      await this.settingsService.setSetting(`PANEL_BALANCE_${key.toUpperCase()}`, String(balance));
-      await this.settingsService.setSetting(`PANEL_BALANCE_UPDATED_AT`, new Date().toISOString());
+      await this.settingsService.setSetting(
+        `PANEL_BALANCE_${key.toUpperCase()}`,
+        String(balance),
+      );
+      await this.settingsService.setSetting(
+        `PANEL_BALANCE_UPDATED_AT`,
+        new Date().toISOString(),
+      );
     } catch (err) {
       this.logger.warn(`Failed to persist panel balance: ${err.message}`);
     }
@@ -617,10 +803,14 @@ export class BotService implements OnModuleInit {
     // Get threshold from settings (default 1000)
     let threshold = 1000;
     try {
-      const val = await this.settingsService.getSetting('PANEL_BALANCE_THRESHOLD');
+      const val = await this.settingsService.getSetting(
+        'PANEL_BALANCE_THRESHOLD',
+      );
       if (val) threshold = parseFloat(val);
     } catch (err) {
-      this.logger.warn(`Failed to read balance threshold setting: ${err.message}`);
+      this.logger.warn(
+        `Failed to read balance threshold setting: ${err.message}`,
+      );
     }
 
     if (balance > threshold) {
@@ -648,8 +838,14 @@ export class BotService implements OnModuleInit {
       },
     });
 
-    this.logger.warn(`Low panel balance alert: $${balance} (threshold: $${threshold}, panel: ${key})`);
-    this.telegramService.alertLowPanelBalance(balance, threshold, panelId).catch((e) => this.logger.warn(`Telegram low balance alert failed: ${e.message}`));
+    this.logger.warn(
+      `Low panel balance alert: $${balance} (threshold: $${threshold}, panel: ${key})`,
+    );
+    this.telegramService
+      .alertLowPanelBalance(balance, threshold, panelId)
+      .catch((e) =>
+        this.logger.warn(`Telegram low balance alert failed: ${e.message}`),
+      );
 
     return { success: true, message: 'Alert sent' };
   }
@@ -669,7 +865,9 @@ export class BotService implements OnModuleInit {
    * Handle bot status change
    */
   async handleStatusChange(dto: BotStatusDto, panelId?: string) {
-    this.logger.log(`Bot status changed to: ${dto.status} (panelId=${panelId || 'unknown'})`);
+    this.logger.log(
+      `Bot status changed to: ${dto.status} (panelId=${panelId || 'unknown'})`,
+    );
 
     this.botState.status = dto.status;
     this.botState.lastHeartbeat = new Date();
@@ -692,7 +890,9 @@ export class BotService implements OnModuleInit {
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
-      this.logger.warn(`Failed to emit bot status to operators: ${err.message}`);
+      this.logger.warn(
+        `Failed to emit bot status to operators: ${err.message}`,
+      );
     }
 
     return { success: true, message: 'Status updated' };
@@ -703,12 +903,18 @@ export class BotService implements OnModuleInit {
    * When panelId is provided, only returns jobs for that panel.
    */
   async getPendingJobs(panelId?: string) {
-    this.logger.log(`getPendingJobs called (polling, panelId=${panelId || 'any'})`);
+    this.logger.log(
+      `getPendingJobs called (polling, panelId=${panelId || 'any'})`,
+    );
 
-    const whereClause: any = { status: JobStatus.QUEUED };
-    if (panelId) {
-      whereClause.panelId = panelId;
-    }
+    // A poller that doesn't identify its panel must NEVER receive
+    // panel-assigned jobs: an unconfigured/outdated extension instance would
+    // claim them and (e.g. with its circuit breaker tripped) insta-fail them,
+    // while the properly configured bot for that panel never sees the job.
+    const whereClause: any = {
+      status: JobStatus.QUEUED,
+      panelId: panelId ?? null,
+    };
 
     const jobs = await this.prisma.job.findMany({
       where: whereClause,
@@ -731,9 +937,16 @@ export class BotService implements OnModuleInit {
     }
 
     const job = jobs[0];
-    const targetUsername = job.targetUsername || job.request?.targetUsername || '?';
-    const amount = job.amount ? Number(job.amount) : (job.request ? Number(job.request.amount) : 0);
-    this.logger.log(`getPendingJobs: returning job ${job.id} (${job.type}) for ${targetUsername} ($${amount})`);
+    const targetUsername =
+      job.targetUsername || job.request?.targetUsername || '?';
+    const amount = job.amount
+      ? Number(job.amount)
+      : job.request
+        ? Number(job.request.amount)
+        : 0;
+    this.logger.log(
+      `getPendingJobs: returning job ${job.id} (${job.type}) for ${targetUsername} ($${amount})`,
+    );
     const jobData: any = {
       id: job.id,
       type: job.type,
@@ -754,7 +967,9 @@ export class BotService implements OnModuleInit {
   /**
    * Check if kill switch is active (delegates to SettingsService for consistent format)
    */
-  async checkKillSwitch(panelId?: string): Promise<{ active: boolean; reason?: string }> {
+  async checkKillSwitch(
+    panelId?: string,
+  ): Promise<{ active: boolean; reason?: string }> {
     return this.settingsService.getKillSwitch();
   }
 
@@ -774,7 +989,9 @@ export class BotService implements OnModuleInit {
   /**
    * Check if within allowed activity window (delegates to SettingsService for consistent keys)
    */
-  async checkActivityWindow(panelId?: string): Promise<{ allowed: boolean; reason?: string }> {
+  async checkActivityWindow(
+    panelId?: string,
+  ): Promise<{ allowed: boolean; reason?: string }> {
     return this.settingsService.isWithinActivityWindow();
   }
 
@@ -785,7 +1002,8 @@ export class BotService implements OnModuleInit {
     // Check if bot is online (heartbeat within threshold)
     if (
       this.botState.lastHeartbeat &&
-      Date.now() - this.botState.lastHeartbeat.getTime() > BOT_HEARTBEAT_TIMEOUT_MS
+      Date.now() - this.botState.lastHeartbeat.getTime() >
+        BOT_HEARTBEAT_TIMEOUT_MS
     ) {
       this.botState.status = 'offline';
     }
@@ -805,26 +1023,34 @@ export class BotService implements OnModuleInit {
    * Get full dispatch diagnostic status — shows why jobs may not be dispatching
    */
   async getDispatchStatus() {
-    const cooldownMs = this.configService.get<number>('QUEUE_COOLDOWN_MS', 30000);
+    const cooldownMs = this.configService.get<number>(
+      'QUEUE_COOLDOWN_MS',
+      30000,
+    );
 
-    const [queuedCount, processingJobs, killSwitch, activityWindow, lastCompletedJob] =
-      await Promise.all([
-        this.prisma.job.count({ where: { status: 'QUEUED' } }),
-        this.prisma.job.findMany({
-          where: { status: 'PROCESSING' },
-          select: { id: true, requestId: true, startedAt: true, panelId: true },
-        }),
-        this.checkKillSwitch(),
-        this.checkActivityWindow(),
-        this.prisma.job.findFirst({
-          where: {
-            status: { in: ['COMPLETED', 'FAILED'] },
-            completedAt: { not: null },
-          },
-          orderBy: { completedAt: 'desc' },
-          select: { completedAt: true },
-        }),
-      ]);
+    const [
+      queuedCount,
+      processingJobs,
+      killSwitch,
+      activityWindow,
+      lastCompletedJob,
+    ] = await Promise.all([
+      this.prisma.job.count({ where: { status: 'QUEUED' } }),
+      this.prisma.job.findMany({
+        where: { status: 'PROCESSING' },
+        select: { id: true, requestId: true, startedAt: true, panelId: true },
+      }),
+      this.checkKillSwitch(),
+      this.checkActivityWindow(),
+      this.prisma.job.findFirst({
+        where: {
+          status: { in: ['COMPLETED', 'FAILED'] },
+          completedAt: { not: null },
+        },
+        orderBy: { completedAt: 'desc' },
+        select: { completedAt: true },
+      }),
+    ]);
 
     const elapsed = lastCompletedJob?.completedAt
       ? Date.now() - lastCompletedJob.completedAt.getTime()
@@ -878,18 +1104,19 @@ export class BotService implements OnModuleInit {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const [queued, processing, completed, failed, todayCompleted] = await Promise.all([
-      this.prisma.job.count({ where: { status: JobStatus.QUEUED } }),
-      this.prisma.job.count({ where: { status: JobStatus.PROCESSING } }),
-      this.prisma.job.count({ where: { status: JobStatus.COMPLETED } }),
-      this.prisma.job.count({ where: { status: JobStatus.FAILED } }),
-      this.prisma.job.count({
-        where: {
-          status: JobStatus.COMPLETED,
-          completedAt: { gte: today },
-        },
-      }),
-    ]);
+    const [queued, processing, completed, failed, todayCompleted] =
+      await Promise.all([
+        this.prisma.job.count({ where: { status: JobStatus.QUEUED } }),
+        this.prisma.job.count({ where: { status: JobStatus.PROCESSING } }),
+        this.prisma.job.count({ where: { status: JobStatus.COMPLETED } }),
+        this.prisma.job.count({ where: { status: JobStatus.FAILED } }),
+        this.prisma.job.count({
+          where: {
+            status: JobStatus.COMPLETED,
+            completedAt: { gte: today },
+          },
+        }),
+      ]);
 
     return {
       queued,
@@ -904,7 +1131,12 @@ export class BotService implements OnModuleInit {
    * Handle selector health check result from extension.
    * Stores the result and alerts if selectors are broken.
    */
-  async handleSelectorCheckResult(result: { total: number; matched: number; failed: string[]; checkedAt?: string }) {
+  async handleSelectorCheckResult(result: {
+    total: number;
+    matched: number;
+    failed: string[];
+    checkedAt?: string;
+  }) {
     // Store last check in settings
     await this.prisma.setting.upsert({
       where: { key: 'SELECTOR_CHECK_LAST' },
@@ -915,18 +1147,23 @@ export class BotService implements OnModuleInit {
     // Alert via Telegram if required selectors are broken
     if (result.failed.length > 0) {
       try {
-        const telegram = this.moduleRef.get('TelegramService', { strict: false });
+        const telegram = this.moduleRef.get('TelegramService', {
+          strict: false,
+        });
         if (telegram?.send) {
           await telegram.send(
             `⚠️ <b>SELECTORES ROTOS</b>\n\n` +
-            `${result.matched}/${result.total} selectores OK\n` +
-            `<b>${result.failed.length} fallaron:</b>\n` +
-            result.failed.map(s => `  • <code>${s}</code>`).join('\n') +
-            `\n\n<i>El casino puede haber cambiado su UI. Revisar perfil de selectores.</i>`
+              `${result.matched}/${result.total} selectores OK\n` +
+              `<b>${result.failed.length} fallaron:</b>\n` +
+              result.failed.map((s) => `  • <code>${s}</code>`).join('\n') +
+              `\n\n<i>El casino puede haber cambiado su UI. Revisar perfil de selectores.</i>`,
           );
         }
       } catch (e) {
-        this.logger.warn('Could not send selector alert via Telegram:', e.message);
+        this.logger.warn(
+          'Could not send selector alert via Telegram:',
+          e.message,
+        );
       }
     }
   }

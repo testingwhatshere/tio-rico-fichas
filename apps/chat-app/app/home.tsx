@@ -18,10 +18,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useAuthStore } from '@/stores/auth.store';
-import { settingsApi, chatsApi, messagesApi, requestsApi, authApi, prizeClaimsApi } from '@/services/api';
+import { settingsApi, chatsApi, messagesApi, authApi, requestsApi, prizeClaimsApi } from '@/services/api';
 import { sendMessage as sendSocketMessage, getSocket } from '@/services/socket';
 import { hapticLight } from '@/utils/haptics';
-import { formatAmount } from '@/utils/amount';
 import { crossAlert, crossConfirm } from '@/utils/dialog';
 import colors from '@/constants/colors';
 import PrizeClaimCard from '@/components/cards/PrizeClaimCard';
@@ -36,28 +35,6 @@ interface ChatMessage {
   imageUrl?: string;
 }
 
-const ACTIVE_STATUSES = ['PENDING_PROOF', 'VALIDATING', 'PENDING_MP_VERIFICATION', 'APPROVED', 'PROCESSING', 'VALIDATION_FAILED'];
-
-const STATUS_LABELS: Record<string, { emoji: string; text: string }> = {
-  PENDING_PROOF: { emoji: '📤', text: 'Esperando comprobante' },
-  VALIDATING: { emoji: '⏳', text: 'Verificando pago' },
-  PENDING_MP_VERIFICATION: { emoji: '🏦', text: 'Verificando recepcion' },
-  APPROVED: { emoji: '✅', text: 'Pago verificado' },
-  PROCESSING: { emoji: '🔄', text: 'Cargando fichas' },
-  VALIDATION_FAILED: { emoji: '⚠️', text: 'En revision manual' },
-  CANCELLED: { emoji: '🔙', text: 'Cancelada' },
-};
-
-const PRIZE_STATUS_LABELS: Record<string, { emoji: string; text: string }> = {
-  PENDING_PAYMENT_DETAILS: { emoji: '📝', text: 'Esperando datos de pago' },
-  PENDING_VERIFICATION: { emoji: '⏳', text: 'Verificando premio' },
-  AWAITING_PAYMENT: { emoji: '💰', text: 'Esperando que el operador pague' },
-  PROCESSING_PAYMENT: { emoji: '🔄', text: 'Pagando premio' },
-  COMPLETED: { emoji: '✅', text: 'Premio pagado' },
-  REJECTED: { emoji: '❌', text: 'Premio rechazado' },
-  VERIFICATION_FAILED: { emoji: '⚠️', text: 'En revision manual' },
-  FAILED: { emoji: '⚠️', text: 'En revision manual' },
-};
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -69,15 +46,24 @@ export default function HomeScreen() {
   const [sendingChat, setSendingChat] = useState(false);
   const [loadingChat, setLoadingChat] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeRequest, setActiveRequest] = useState<any>(null);
-  const [activePrizeClaim, setActivePrizeClaim] = useState<any>(null);
   const [usernameCopied, setUsernameCopied] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showPrizeModal, setShowPrizeModal] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
+  const [showNewPwd, setShowNewPwd] = useState(false);
+  const [showConfirmPwd, setShowConfirmPwd] = useState(false);
+  const [showUsernameTakenModal, setShowUsernameTakenModal] = useState(false);
+  const [takenUsernameAttempt, setTakenUsernameAttempt] = useState('');
+  const [newTargetUsername, setNewTargetUsername] = useState('');
+  const [submittingUsername, setSubmittingUsername] = useState(false);
+  const [usernameError, setUsernameError] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
+  // Estado del último request (carga) y del último premio del usuario. El operador pidió que
+  // el usuario vea estos en el home, sin tener que entrar al chat para enterarse.
+  const [currentRequest, setCurrentRequest] = useState<any | null>(null);
+  const [currentClaim, setCurrentClaim] = useState<any | null>(null);
   const chatInputRef = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);
   const successBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,45 +80,35 @@ export default function HomeScreen() {
     };
   }, []);
 
+  const loadActivity = useCallback(async () => {
+    // Cargamos los dos en paralelo, silenciosos: si el backend devuelve null o falla, ocultamos.
+    const [req, claim] = await Promise.all([
+      requestsApi.getMyActive().catch(() => null),
+      prizeClaimsApi.getMyActive().catch(() => null),
+    ]);
+    setCurrentRequest(req || null);
+    setCurrentClaim(claim || null);
+  }, []);
+
   const loadData = useCallback(async () => {
     // Settings
     settingsApi.getPublic().then((s) => {
       if (s.supportPhoneNumber) setSupportPhone(s.supportPhoneNumber);
     }).catch(() => {});
 
-    // Active request
-    requestsApi.getMy().then((requests) => {
-      const active = requests.find((r: any) => ACTIVE_STATUSES.includes(r.status));
-      setActiveRequest(active || null);
-    }).catch(() => {});
-
-    // Active prize claim
-    prizeClaimsApi.getMyActive().then((claim) => {
-      setActivePrizeClaim(claim || null);
-    }).catch(() => {});
-
-    // Recent messages
-    await loadRecentMessages();
-  }, []);
+    // Recent messages + last request/claim activity
+    await Promise.all([loadRecentMessages(), loadActivity()]);
+  }, [loadActivity]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // Real-time refresh of the active prize claim when socket events update it.
+  // In-app banner for password change result. Fires regardless of which screen
+  // the user is on, complementing the chat system message and push notification.
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
-    const refresh = () => {
-      prizeClaimsApi.getMyActive().then((claim) => setActivePrizeClaim(claim || null)).catch(() => {});
-    };
-    socket.on('prize_claim:status_update', refresh);
-    socket.on('prize_claim:payment_sent', refresh);
-    socket.on('prize_claim:rejected', refresh);
-
-    // In-app banner for password change result. Fires regardless of which
-    // screen the user is on, so it complements the system message in the chat
-    // and the native push notification.
     const onPasswordChanged = (data: any) => {
       const msg = data?.success
         ? '✅ Tu contraseña fue cambiada. Ya podés usar la nueva para ingresar al panel.'
@@ -141,13 +117,37 @@ export default function HomeScreen() {
     };
     socket.on('password:changed', onPasswordChanged);
 
-    return () => {
-      socket.off('prize_claim:status_update', refresh);
-      socket.off('prize_claim:payment_sent', refresh);
-      socket.off('prize_claim:rejected', refresh);
-      socket.off('password:changed', onPasswordChanged);
+    // Username-taken: panel rejected auto-creation because the name is in use.
+    // The user has to pick a new one — only path forward without contacting support.
+    const onUsernameTaken = (data: any) => {
+      const current = useAuthStore.getState().user;
+      setTakenUsernameAttempt(data?.attemptedUsername || current?.savedTargetUsername || '');
+      setNewTargetUsername('');
+      setUsernameError(null);
+      setShowUsernameTakenModal(true);
     };
-  }, [showSuccessBanner]);
+    socket.on('user_target_username_taken', onUsernameTaken);
+
+    // Re-fetch the home activity card when the backend emits a status change for either
+    // a load request or a prize claim. We don't trust just one event because chat-app may
+    // be on home or chat depending on user navigation — listening here keeps it fresh.
+    const refreshActivity = () => { loadActivity(); };
+    socket.on('request:created', refreshActivity);
+    socket.on('request:updated', refreshActivity);
+    socket.on('request:completed', refreshActivity);
+    socket.on('request:rejected', refreshActivity);
+    socket.on('prize_claim:status_update', refreshActivity);
+
+    return () => {
+      socket.off('password:changed', onPasswordChanged);
+      socket.off('user_target_username_taken', onUsernameTaken);
+      socket.off('request:created', refreshActivity);
+      socket.off('request:updated', refreshActivity);
+      socket.off('request:completed', refreshActivity);
+      socket.off('request:rejected', refreshActivity);
+      socket.off('prize_claim:status_update', refreshActivity);
+    };
+  }, [showSuccessBanner, loadActivity]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -234,9 +234,48 @@ export default function HomeScreen() {
     }
   };
 
+  const handleSubmitNewTargetUsername = async () => {
+    const trimmed = newTargetUsername.trim().toLowerCase();
+    if (trimmed.length < 3 || trimmed.length > 20) {
+      setUsernameError('El nombre debe tener entre 3 y 20 caracteres');
+      return;
+    }
+    if (!/^[a-z0-9_]+$/.test(trimmed)) {
+      setUsernameError('Solo letras, números y guion bajo');
+      return;
+    }
+    if (trimmed === takenUsernameAttempt.toLowerCase()) {
+      setUsernameError('Tiene que ser distinto al anterior');
+      return;
+    }
+    setSubmittingUsername(true);
+    setUsernameError(null);
+    try {
+      const result = await authApi.changeSavedTargetUsername(trimmed);
+      // Reflect the new username locally so the username chip updates immediately
+      const current = useAuthStore.getState().user;
+      if (current) {
+        useAuthStore.setState({
+          user: { ...current, savedTargetUsername: result.savedTargetUsername },
+        });
+      }
+      setShowUsernameTakenModal(false);
+      setNewTargetUsername('');
+      const msg = result.retriedRequestId
+        ? '✅ Listo, ya estamos cargando tus fichas con el nuevo nombre.'
+        : '✅ Nombre actualizado. Volvé a tocar "Cargar fichas" cuando quieras.';
+      showSuccessBanner(msg);
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'No se pudo cambiar el nombre';
+      setUsernameError(Array.isArray(msg) ? msg.join(', ') : msg);
+    } finally {
+      setSubmittingUsername(false);
+    }
+  };
+
   const handleChangePassword = async () => {
-    if (!newPassword || newPassword.length < 6) {
-      crossAlert('Error', 'La contraseña debe tener al menos 6 caracteres');
+    if (!newPassword || newPassword.length < 8) {
+      crossAlert('Error', 'La contraseña debe tener al menos 8 caracteres');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -343,49 +382,41 @@ export default function HomeScreen() {
           ) : null}
         </View>
 
-        {/* Active Request Banner */}
-        {activeRequest && (
-          <TouchableOpacity
-            style={styles.statusBanner}
-            onPress={() => router.push('/chat')}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.statusBannerEmoji}>
-              {STATUS_LABELS[activeRequest.status]?.emoji || '📋'}
-            </Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.statusBannerText}>
-                {STATUS_LABELS[activeRequest.status]?.text || 'En proceso'}
-              </Text>
-              <Text style={styles.statusBannerAmount}>
-                ${formatAmount(Number(activeRequest.amount))}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-        )}
-
-        {/* Active Prize Claim Banner */}
-        {activePrizeClaim && (
-          <TouchableOpacity
-            style={styles.statusBanner}
-            onPress={() => router.push('/chat')}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.statusBannerEmoji}>
-              {PRIZE_STATUS_LABELS[activePrizeClaim.status]?.emoji || '🏆'}
-            </Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.statusBannerText}>
-                Premio · {PRIZE_STATUS_LABELS[activePrizeClaim.status]?.text || 'En proceso'}
-              </Text>
-              <Text style={styles.statusBannerAmount}>
-                ${formatAmount(Number(activePrizeClaim.amount))}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-        )}
+        {/* Estado de la última carga y el último premio.
+            El operador pidió que el usuario se entere acá del resultado, sin tener que
+            abrir el chat. Mostramos solamente si hay actividad reciente — el backend
+            devuelve null cuando no hay nada relevante en las últimas 6h. */}
+        {(currentRequest || currentClaim) ? (
+          <View style={styles.activityContainer}>
+            {currentRequest ? (
+              <StatusCard
+                kind="request"
+                status={currentRequest.status}
+                amount={currentRequest.amount}
+                onPress={() => router.push(`/request/${currentRequest.id}`)}
+              />
+            ) : null}
+            {currentClaim ? (
+              <StatusCard
+                kind="claim"
+                status={currentClaim.status}
+                amount={currentClaim.amount}
+                // Si el claim sigue activo, abrimos el modal del flujo. Si es terminal
+                // (COMPLETED/REJECTED/FAILED) mostramos el chat para que el usuario vea
+                // el comprobante y los mensajes del operador. Es la UX que el operador pidió.
+                onPress={() => {
+                  const status = currentClaim.status;
+                  const isTerminal = ['COMPLETED','REJECTED','VERIFICATION_FAILED','FAILED'].includes(status);
+                  if (isTerminal && chatId) {
+                    router.push({ pathname: '/chat', params: { chatId } });
+                  } else {
+                    setShowPrizeModal(true);
+                  }
+                }}
+              />
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Action Cards */}
         <View style={styles.cardsContainer}>
@@ -444,25 +475,52 @@ export default function HomeScreen() {
             <Text style={pwStyles.description}>
               Ingresa tu nueva contraseña para el panel de juego.
             </Text>
-            <TextInput
-              style={pwStyles.input}
-              placeholder="Nueva contraseña"
-              placeholderTextColor={colors.textMuted}
-              secureTextEntry
-              value={newPassword}
-              onChangeText={setNewPassword}
-              autoCapitalize="none"
-            />
-            <TextInput
-              style={pwStyles.input}
-              placeholder="Confirmar contraseña"
-              placeholderTextColor={colors.textMuted}
-              secureTextEntry
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              autoCapitalize="none"
-              onSubmitEditing={handleChangePassword}
-            />
+            <View style={pwStyles.inputWrapper}>
+              <TextInput
+                style={pwStyles.inputWithIcon}
+                placeholder="Nueva contraseña"
+                placeholderTextColor={colors.textMuted}
+                secureTextEntry={!showNewPwd}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                autoCapitalize="none"
+              />
+              <TouchableOpacity
+                onPress={() => setShowNewPwd((v) => !v)}
+                style={pwStyles.eyeButton}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons
+                  name={showNewPwd ? 'eye-off-outline' : 'eye-outline'}
+                  size={22}
+                  color={colors.textMuted}
+                />
+              </TouchableOpacity>
+            </View>
+            <Text style={pwStyles.helperText}>Mínimo 8 caracteres</Text>
+            <View style={pwStyles.inputWrapper}>
+              <TextInput
+                style={pwStyles.inputWithIcon}
+                placeholder="Confirmar contraseña"
+                placeholderTextColor={colors.textMuted}
+                secureTextEntry={!showConfirmPwd}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                autoCapitalize="none"
+                onSubmitEditing={handleChangePassword}
+              />
+              <TouchableOpacity
+                onPress={() => setShowConfirmPwd((v) => !v)}
+                style={pwStyles.eyeButton}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons
+                  name={showConfirmPwd ? 'eye-off-outline' : 'eye-outline'}
+                  size={22}
+                  color={colors.textMuted}
+                />
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity
               style={[pwStyles.button, changingPassword && { opacity: 0.6 }]}
               onPress={handleChangePassword}
@@ -473,6 +531,57 @@ export default function HomeScreen() {
                 <ActivityIndicator size="small" color="#000" />
               ) : (
                 <Text style={pwStyles.buttonText}>Cambiar</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Username Taken Overlay (panel rejected creation — user must pick another name) */}
+      {showUsernameTakenModal && (
+        <View style={pwStyles.overlay} pointerEvents="box-none">
+          <View style={pwStyles.card}>
+            <View style={pwStyles.header}>
+              <Ionicons name="alert-circle" size={24} color={colors.accent} />
+              <Text style={pwStyles.title}>Elegí otro nombre</Text>
+            </View>
+            <Text style={pwStyles.description}>
+              El nombre{takenUsernameAttempt ? ` "${takenUsernameAttempt}"` : ''} ya está
+              usado por otro jugador en el panel. Elegí otro para tu cuenta.
+            </Text>
+            <View style={pwStyles.inputWrapper}>
+              <TextInput
+                style={pwStyles.inputWithIcon}
+                placeholder="Nuevo nombre"
+                placeholderTextColor={colors.textMuted}
+                value={newTargetUsername}
+                onChangeText={(t) => {
+                  setNewTargetUsername(t);
+                  if (usernameError) setUsernameError(null);
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={20}
+                onSubmitEditing={handleSubmitNewTargetUsername}
+              />
+            </View>
+            <Text style={pwStyles.helperText}>3-20 caracteres · letras, números, guion bajo</Text>
+            {usernameError && (
+              <View style={pwStyles.inlineError}>
+                <Ionicons name="alert-circle" size={16} color={colors.error} />
+                <Text style={pwStyles.inlineErrorText}>{usernameError}</Text>
+              </View>
+            )}
+            <TouchableOpacity
+              style={[pwStyles.button, submittingUsername && { opacity: 0.6 }]}
+              onPress={handleSubmitNewTargetUsername}
+              disabled={submittingUsername}
+              activeOpacity={0.8}
+            >
+              {submittingUsername ? (
+                <ActivityIndicator size="small" color="#000" />
+              ) : (
+                <Text style={pwStyles.buttonText}>Guardar</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -523,6 +632,82 @@ const prizeModalStyles = StyleSheet.create({
   },
 });
 
+// ============================================
+//  StatusCard — banner compacto que muestra el estado de la última carga o premio.
+//  El operador pidió tener visibilidad sin entrar al chat. Sólo se muestra cuando hay
+//  algo relevante (carga/premio activos o terminado hace menos de 6h).
+// ============================================
+
+const REQUEST_STATUS_INFO: Record<string, { label: string; tone: 'info'|'success'|'warn'|'error'; icon: any }> = {
+  PENDING_PROOF:           { label: 'Esperando que subas el comprobante', tone: 'info',  icon: 'cloud-upload-outline' },
+  VALIDATING:              { label: 'Validando el comprobante…',           tone: 'info',  icon: 'sync-outline' },
+  PENDING_MP_VERIFICATION: { label: 'Verificando el pago…',                  tone: 'info',  icon: 'sync-outline' },
+  APPROVED:                { label: 'Aprobada — vamos a cargar las fichas', tone: 'success', icon: 'checkmark-circle-outline' },
+  PROCESSING:              { label: 'Cargando fichas en el panel…',         tone: 'info',  icon: 'sync-outline' },
+  COMPLETED:               { label: '¡Fichas cargadas!',                    tone: 'success', icon: 'checkmark-circle' },
+  REJECTED:                { label: 'Carga rechazada',                       tone: 'error', icon: 'close-circle' },
+  VALIDATION_FAILED:       { label: 'Tu comprobante no pasó la validación',  tone: 'error', icon: 'alert-circle' },
+  FAILED:                  { label: 'No pudimos cargar las fichas',          tone: 'error', icon: 'alert-circle' },
+};
+
+const CLAIM_STATUS_INFO: Record<string, { label: string; tone: 'info'|'success'|'warn'|'error'; icon: any }> = {
+  PENDING_PAYMENT_DETAILS: { label: 'Premio iniciado — falta dato de pago', tone: 'info', icon: 'cash-outline' },
+  PENDING_VERIFICATION:    { label: 'Verificando tus fichas…',               tone: 'info', icon: 'sync-outline' },
+  VERIFYING_CHIPS:         { label: 'Verificando tus fichas…',               tone: 'info', icon: 'sync-outline' },
+  VERIFIED:                { label: 'Fichas verificadas — armando pago',     tone: 'info', icon: 'checkmark-circle-outline' },
+  PROCESSING:              { label: 'Retirando fichas del panel…',           tone: 'info', icon: 'sync-outline' },
+  CHIPS_WITHDRAWN:         { label: 'Fichas retiradas — armando tu pago',    tone: 'info', icon: 'sync-outline' },
+  COMPLETED:               { label: '¡Premio pagado!',                       tone: 'success', icon: 'trophy' },
+  REJECTED:                { label: 'Premio rechazado',                       tone: 'error', icon: 'close-circle' },
+  VERIFICATION_FAILED:     { label: 'No pudimos verificar las fichas',        tone: 'error', icon: 'alert-circle' },
+  FAILED:                  { label: 'No pudimos pagarte el premio',           tone: 'error', icon: 'alert-circle' },
+};
+
+function StatusCard({ kind, status, amount, onPress }: { kind: 'request'|'claim'; status: string; amount: any; onPress?: () => void }) {
+  const info = kind === 'request'
+    ? (REQUEST_STATUS_INFO[status] || { label: status, tone: 'info', icon: 'information-circle-outline' })
+    : (CLAIM_STATUS_INFO[status]    || { label: status, tone: 'info', icon: 'information-circle-outline' });
+  const toneColor =
+    info.tone === 'success' ? colors.success
+    : info.tone === 'error' ? colors.error
+    : info.tone === 'warn' ? colors.warning
+    : colors.accent;
+  const heading = kind === 'request' ? 'Última carga' : 'Último premio';
+  const amountNum = Number(amount) || 0;
+  const monto = amountNum > 0 ? `$${amountNum.toLocaleString('es-AR')}` : '';
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={[statusCardStyles.card, { borderColor: toneColor + '55' }]}>
+      <View style={[statusCardStyles.iconCircle, { backgroundColor: toneColor + '22' }]}>
+        <Ionicons name={info.icon} size={22} color={toneColor} />
+      </View>
+      <View style={statusCardStyles.text}>
+        <Text style={statusCardStyles.heading}>{heading}{monto ? ` · ${monto}` : ''}</Text>
+        <Text style={[statusCardStyles.label, { color: toneColor }]} numberOfLines={2}>{info.label}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+    </TouchableOpacity>
+  );
+}
+
+const statusCardStyles = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.cardBackground,
+    borderRadius: 14,
+    padding: 12,
+    gap: 10,
+    borderWidth: 1,
+  },
+  iconCircle: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  text: { flex: 1 },
+  heading: { color: colors.textPrimary, fontSize: 12, fontWeight: '600', marginBottom: 2, letterSpacing: 0.2 },
+  label: { fontSize: 14, fontWeight: '700' },
+});
+
 const pwStyles = StyleSheet.create({
   overlay: {
     position: 'absolute',
@@ -570,6 +755,48 @@ const pwStyles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 4,
+  },
+  inputWithIcon: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingLeft: 14,
+    paddingRight: 8,
+    fontSize: 15,
+    color: colors.textPrimary,
+  },
+  eyeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  helperText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginLeft: 4,
+    marginBottom: 12,
+  },
+  inlineError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(220, 53, 69, 0.12)',
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+  inlineErrorText: {
+    color: colors.error,
+    fontSize: 13,
+    flex: 1,
   },
   button: {
     backgroundColor: colors.accent,
@@ -722,30 +949,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.accentLight,
   },
-  statusBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(18, 26, 20, 0.92)',
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: colors.chipBorder,
-    gap: 10,
-  },
-  statusBannerEmoji: {
-    fontSize: 20,
-  },
-  statusBannerText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  statusBannerAmount: {
-    fontSize: 12,
-    color: colors.accent,
-    fontWeight: '700',
-    marginTop: 1,
+  activityContainer: {
+    paddingHorizontal: 16,
+    gap: 8,
+    marginBottom: 8,
   },
   cardsContainer: {
     marginTop: 12,

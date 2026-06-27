@@ -168,3 +168,86 @@ export async function uploadChatImage(
     return { error: error.message || 'Upload failed' };
   }
 }
+
+/**
+ * Sube el comprobante de la transferencia que el operador le hizo al usuario al cobrar un
+ * premio. El URL devuelto se pasa después al socket `operator:complete_prize_claim` para
+ * marcar el premio como pagado y disparar el envío del comprobante al chat del usuario.
+ */
+// ============================================
+// Preloaded users (bulk CSV import)
+// ============================================
+
+export interface PreloadedEntry {
+  username: string;
+  phone: string;
+  panelId?: string;
+}
+
+export interface BulkImportResult {
+  created: number;
+  updated: number;
+  errors?: { row: number; username?: string; error: string }[];
+}
+
+export async function bulkImportPreloaded(
+  entries: PreloadedEntry[],
+): Promise<BulkImportResult> {
+  const api = getApi();
+  const { data } = await api.post('/users/preloaded/bulk', { entries });
+  return data?.data || data;
+}
+
+export interface PreloadedUser {
+  id: string;
+  username: string;
+  phone: string;
+  panelId?: string | null;
+  createdAt?: string;
+}
+
+export async function listPreloadedUsers(): Promise<PreloadedUser[]> {
+  const api = getApi();
+  const { data } = await api.get('/users/preloaded');
+  const arr = data?.data || data || [];
+  return Array.isArray(arr) ? arr : [];
+}
+
+export async function unflagPreloadedUser(userId: string): Promise<void> {
+  const api = getApi();
+  await api.delete(`/users/preloaded/${encodeURIComponent(userId)}`);
+}
+
+export async function uploadPayoutProof(
+  uri: string,
+  filename: string,
+  mimeType: string,
+): Promise<{ url?: string; type?: 'image' | 'pdf'; error?: string }> {
+  if (!currentConfig || !apiInstance) {
+    return { error: 'API not configured' };
+  }
+
+  try {
+    const formData = new FormData();
+    formData.append('file', {
+      uri,
+      name: filename,
+      type: mimeType,
+    } as any);
+
+    const response = await apiInstance.post(
+      '/uploads/operator/payout-proof',
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: 60000,
+      },
+    );
+
+    return { url: response.data?.url, type: response.data?.type };
+  } catch (error: any) {
+    return { error: error.message || 'Upload failed' };
+  }
+}

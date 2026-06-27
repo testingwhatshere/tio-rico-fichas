@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, Alert, ActivityIndicator, Text, StyleSheet } from 'react-native';
+import { View, Alert, ActivityIndicator, Text, StyleSheet, AppState } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { useOperatorStore } from '@/stores/operator.store';
 import { connectSocket, getSocket } from '@/services/socket';
@@ -211,6 +211,29 @@ export default function RootLayout() {
               requestInitialData(2); // Start at attempt 2 (slightly longer delay)
             }
           });
+
+          // Android mata el socket cuando la app queda en background un rato.
+          // Al volver a primer plano: reconectar si hace falta y refrescar datos.
+          const appStateSub = AppState.addEventListener('change', (nextState) => {
+            if (nextState !== 'active') return;
+            const s = getSocket();
+            if (!s) return;
+            if (!s.connected) {
+              console.log('[App] Foreground: socket disconnected, reconnecting...');
+              s.connect();
+            } else {
+              s.emit('get_initial_data', {}, (response: any) => {
+                if (response?.success && response?.data) {
+                  useOperatorStore.getState().setInitialData(response.data);
+                }
+              });
+            }
+          });
+          const prevCleanup = cleanupRef.current;
+          cleanupRef.current = () => {
+            prevCleanup?.();
+            appStateSub.remove();
+          };
         }
       } catch (err) {
         console.error('[App] Init error:', err);
@@ -240,6 +263,7 @@ export default function RootLayout() {
       <ConnectionBar />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="wizard" options={{ presentation: 'fullScreenModal' }} />
         <Stack.Screen name="chat/[id]" options={{ presentation: 'card' }} />
         <Stack.Screen name="failure/[id]" options={{ presentation: 'card' }} />
         <Stack.Screen name="prize/[id]" options={{ presentation: 'card' }} />

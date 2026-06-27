@@ -8,7 +8,13 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
-import { Logger, Inject, forwardRef, UsePipes, ValidationPipe } from '@nestjs/common';
+import {
+  Logger,
+  Inject,
+  forwardRef,
+  UsePipes,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -32,8 +38,10 @@ export class EventsGateway
   server: Server;
 
   private readonly logger = new Logger(EventsGateway.name);
-  private connectedClients: Map<string, { socket: Socket; userId?: string; role?: string }> =
-    new Map();
+  private connectedClients: Map<
+    string,
+    { socket: Socket; userId?: string; role?: string }
+  > = new Map();
 
   constructor(
     private readonly jwtService: JwtService,
@@ -70,7 +78,9 @@ export class EventsGateway
           role: payload.role,
         });
 
-        this.logger.log(`Client connected: ${client.id} (user: ${payload.sub})`);
+        this.logger.log(
+          `Client connected: ${client.id} (user: ${payload.sub})`,
+        );
       } else {
         // Fix 23: Reject unauthenticated clients instead of tracking them
         this.logger.warn(`Unauthenticated client rejected: ${client.id}`);
@@ -95,7 +105,10 @@ export class EventsGateway
     if (authHeader?.startsWith('Bearer ')) {
       return authHeader.substring(7);
     }
-    return (client.handshake.auth?.token || client.handshake.query?.token) as string || null;
+    return (
+      ((client.handshake.auth?.token ||
+        client.handshake.query?.token) as string) || null
+    );
   }
 
   // ==========================================
@@ -113,14 +126,18 @@ export class EventsGateway
     }
 
     // Operators can join any chat; clients must own the chat
-    const isOperator = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(user.role);
+    const isOperator = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(
+      user.role,
+    );
     if (!isOperator) {
       const chat = await this.prisma.chat.findUnique({
         where: { id: data.chatId },
         select: { userId: true },
       });
       if (!chat || chat.userId !== user.sub) {
-        this.logger.warn(`Client ${client.id} (user: ${user.sub}) denied join to chat:${data.chatId}`);
+        this.logger.warn(
+          `Client ${client.id} (user: ${user.sub}) denied join to chat:${data.chatId}`,
+        );
         return { success: false, error: 'Access denied' };
       }
     }
@@ -168,13 +185,21 @@ export class EventsGateway
   // Request events
   emitRequestCreated(userId: string, data: any) {
     this.server.to(`user:${userId}`).emit('request:created', data);
-    this.server.to('role:OPERATOR').to('role:SENIOR_OPERATOR').to('role:ADMIN').emit('request:created', data);
+    this.server
+      .to('role:OPERATOR')
+      .to('role:SENIOR_OPERATOR')
+      .to('role:ADMIN')
+      .emit('request:created', data);
     this.chatsGateway.emitToUser(userId, 'request:created', data);
   }
 
   emitRequestUpdated(userId: string, data: any) {
     this.server.to(`user:${userId}`).emit('request:updated', data);
-    this.server.to('role:OPERATOR').to('role:SENIOR_OPERATOR').to('role:ADMIN').emit('request:updated', data);
+    this.server
+      .to('role:OPERATOR')
+      .to('role:SENIOR_OPERATOR')
+      .to('role:ADMIN')
+      .emit('request:updated', data);
     this.chatsGateway.emitToUser(userId, 'request:updated', data);
   }
 
@@ -185,17 +210,29 @@ export class EventsGateway
 
   emitRequestRejected(userId: string, data: any) {
     this.server.to(`user:${userId}`).emit('request:rejected', data);
-    this.server.to('role:OPERATOR').to('role:SENIOR_OPERATOR').to('role:ADMIN').emit('request:rejected', data);
+    this.server
+      .to('role:OPERATOR')
+      .to('role:SENIOR_OPERATOR')
+      .to('role:ADMIN')
+      .emit('request:rejected', data);
     this.chatsGateway.emitToUser(userId, 'request:rejected', data);
   }
 
   // Job events
   emitJobQueued(data: any) {
-    this.server.to('role:OPERATOR').to('role:SENIOR_OPERATOR').to('role:ADMIN').emit('job:queued', data);
+    this.server
+      .to('role:OPERATOR')
+      .to('role:SENIOR_OPERATOR')
+      .to('role:ADMIN')
+      .emit('job:queued', data);
   }
 
   emitJobStarted(data: any, userId?: string) {
-    this.server.to('role:OPERATOR').to('role:SENIOR_OPERATOR').to('role:ADMIN').emit('job:started', data);
+    this.server
+      .to('role:OPERATOR')
+      .to('role:SENIOR_OPERATOR')
+      .to('role:ADMIN')
+      .emit('job:started', data);
     if (userId) {
       this.server.to(`user:${userId}`).emit('job:started', data);
       this.chatsGateway.emitToUser(userId, 'job:started', data);
@@ -203,7 +240,11 @@ export class EventsGateway
   }
 
   emitJobProgress(data: any, userId?: string) {
-    this.server.to('role:OPERATOR').to('role:SENIOR_OPERATOR').to('role:ADMIN').emit('job:progress', data);
+    this.server
+      .to('role:OPERATOR')
+      .to('role:SENIOR_OPERATOR')
+      .to('role:ADMIN')
+      .emit('job:progress', data);
     if (userId) {
       this.server.to(`user:${userId}`).emit('job:progress', data);
       this.chatsGateway.emitToUser(userId, 'job:progress', data);
@@ -212,14 +253,25 @@ export class EventsGateway
 
   emitJobCompleted(userId: string, data: any) {
     this.server.to(`user:${userId}`).emit('job:completed', data);
-    this.server.to('role:OPERATOR').to('role:SENIOR_OPERATOR').to('role:ADMIN').emit('job:completed', data);
+    this.server
+      .to('role:OPERATOR')
+      .to('role:SENIOR_OPERATOR')
+      .to('role:ADMIN')
+      .emit('job:completed', data);
     this.chatsGateway.emitToUser(userId, 'job:completed', data);
   }
 
-  emitJobFailed(userId: string, data: any) {
-    this.server.to(`user:${userId}`).emit('job:failed', data);
-    this.server.to('role:OPERATOR').to('role:SENIOR_OPERATOR').to('role:ADMIN').emit('job:failed', data);
-    this.chatsGateway.emitToUser(userId, 'job:failed', data);
+  // Seamless UX: job failures are an OPERATOR concern. Never emit job:failed
+  // to the user — they keep seeing "Preparando la carga..." until an operator
+  // resolves it (retry → job:completed, reject → request:rejected). Emitting
+  // to the chat made users see "Error al cargar fichas" right after their
+  // proof was approved.
+  emitJobFailed(_userId: string, data: any) {
+    this.server
+      .to('role:OPERATOR')
+      .to('role:SENIOR_OPERATOR')
+      .to('role:ADMIN')
+      .emit('job:failed', data);
   }
 
   // Chat events
@@ -237,15 +289,23 @@ export class EventsGateway
 
   // Bot events
   emitBotStatus(data: any) {
-    this.server.to('role:OPERATOR').to('role:SENIOR_OPERATOR').to('role:ADMIN').emit('bot:status', data);
+    this.server
+      .to('role:OPERATOR')
+      .to('role:SENIOR_OPERATOR')
+      .to('role:ADMIN')
+      .emit('bot:status', data);
     this.operatorGateway.emitToAll('bot_status', data);
   }
 
   // Dashboard refresh
   emitDashboardUpdate() {
-    this.server.to('role:OPERATOR').to('role:SENIOR_OPERATOR').to('role:ADMIN').emit('dashboard:update', {
-      timestamp: new Date().toISOString(),
-    });
+    this.server
+      .to('role:OPERATOR')
+      .to('role:SENIOR_OPERATOR')
+      .to('role:ADMIN')
+      .emit('dashboard:update', {
+        timestamp: new Date().toISOString(),
+      });
   }
 
   // ==========================================
@@ -297,7 +357,12 @@ export class EventsGateway
     this.chatsGateway.emitToUser(userId, 'validation:failed', data);
     // Bridge to /operator namespace so operator panel receives it in real-time
     this.operatorGateway.emitValidationFailed(data);
-    this.telegramService.alertValidationFailed(data.requestId || data.id, data.reason || data.validationError).catch(() => {});
+    this.telegramService
+      .alertValidationFailed(
+        data.requestId || data.id,
+        data.reason || data.validationError,
+      )
+      .catch(() => {});
   }
 
   // Dispatch blocked (job queued but not dispatched)
@@ -308,7 +373,13 @@ export class EventsGateway
   }
 
   // System alerts (stuck jobs, queue overflow, service outages)
-  emitSystemAlert(data: { type: string; message: string; severity: 'info' | 'warning' | 'critical'; details?: any; [key: string]: any }) {
+  emitSystemAlert(data: {
+    type: string;
+    message: string;
+    severity: 'info' | 'warning' | 'critical';
+    details?: any;
+    [key: string]: any;
+  }) {
     this.emitToOperators('system_alert', data);
     this.operatorGateway.emitSystemAlert(data);
     // Forward critical/warning alerts to Telegram

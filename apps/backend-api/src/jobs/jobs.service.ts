@@ -22,7 +22,11 @@ import {
   STUCK_JOB_TIMEOUT_MS,
   PERIODIC_DISPATCH_RETRY_MS,
 } from '../common/constants/timeouts';
-import { AppEvent, ValidationCompletedEvent } from '../common/events/app-events';
+import {
+  AppEvent,
+  ValidationCompletedEvent,
+} from '../common/events/app-events';
+import { REDISCOVERY_PENDING_MARKER } from '../discovery/discovery.service';
 
 interface JobData {
   id: string;
@@ -38,7 +42,8 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(JobsService.name);
   private readonly cooldownMs: number;
   private stuckJobCheckInterval: ReturnType<typeof setInterval> | null = null;
-  private periodicDispatchInterval: ReturnType<typeof setInterval> | null = null;
+  private periodicDispatchInterval: ReturnType<typeof setInterval> | null =
+    null;
   private nextDispatchTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -54,7 +59,10 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     private readonly requestsService: RequestsService,
     private readonly moduleRef: ModuleRef,
   ) {
-    this.cooldownMs = this.configService.get<number>('QUEUE_COOLDOWN_MS', 30000);
+    this.cooldownMs = this.configService.get<number>(
+      'QUEUE_COOLDOWN_MS',
+      30000,
+    );
     this.logger.log('JobsService initialized (Postgres-based queue)');
   }
 
@@ -65,10 +73,15 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       try {
         // Recover stuck PROCESSING jobs from before restart
         await this.checkForStuckJobs();
+        await this.reconcileOrphanedPrizeClaims();
 
-        const queuedCount = await this.prisma.job.count({ where: { status: 'QUEUED' } });
+        const queuedCount = await this.prisma.job.count({
+          where: { status: 'QUEUED' },
+        });
         if (queuedCount > 0) {
-          this.logger.log(`Found ${queuedCount} queued jobs on startup, attempting dispatch...`);
+          this.logger.log(
+            `Found ${queuedCount} queued jobs on startup, attempting dispatch...`,
+          );
           await this.tryDispatchNextJob();
         }
       } catch (error) {
@@ -83,9 +96,25 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       } catch (error) {
         this.logger.error(`Stuck job check failed: ${error.message}`);
       }
+      try {
+        await this.reconcileOrphanedPrizeClaims();
+      } catch (error) {
+        this.logger.error(
+          `Orphaned prize claim reconciliation failed: ${error.message}`,
+        );
+      }
+      try {
+        await this.recoverApprovedRequestsWithoutJob();
+      } catch (error) {
+        this.logger.error(
+          `Approved-without-job recovery failed: ${error.message}`,
+        );
+      }
     }, STUCK_JOB_CHECK_INTERVAL_MS);
 
-    this.logger.log(`Stuck job checker started (every ${STUCK_JOB_CHECK_INTERVAL_MS / 1000}s)`);
+    this.logger.log(
+      `Stuck job checker started (every ${STUCK_JOB_CHECK_INTERVAL_MS / 1000}s)`,
+    );
 
     // Start periodic dispatch retry (catches jobs that were never dispatched)
     this.startPeriodicDispatchRetry();
@@ -128,7 +157,12 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       },
       include: {
         request: {
-          select: { id: true, targetUsername: true, amount: true, userId: true },
+          select: {
+            id: true,
+            targetUsername: true,
+            amount: true,
+            userId: true,
+          },
         },
       },
       // Need panelId for per-panel dispatch after cleanup
@@ -136,7 +170,9 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
 
     if (stuckJobs.length === 0) return;
 
-    this.logger.warn(`Found ${stuckJobs.length} stuck PROCESSING job(s), cleaning up...`);
+    this.logger.warn(
+      `Found ${stuckJobs.length} stuck PROCESSING job(s), cleaning up...`,
+    );
 
     for (const job of stuckJobs) {
       try {
@@ -153,13 +189,20 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
         // Update request status to FAILED (only for LOAD_CREDITS jobs)
         if (job.requestId && job.request) {
           try {
-            await this.requestsService.updateRequestStatus(job.requestId, 'FAILED', 'system-stuck-job-cleanup', {
-              reason: 'job_timed_out',
-              jobId: job.id,
-              startedAt: job.startedAt,
-            });
+            await this.requestsService.updateRequestStatus(
+              job.requestId,
+              'FAILED',
+              'system-stuck-job-cleanup',
+              {
+                reason: 'job_timed_out',
+                jobId: job.id,
+                startedAt: job.startedAt,
+              },
+            );
           } catch (reqError) {
-            this.logger.error(`Failed to update request ${job.requestId} for stuck job ${job.id}: ${reqError.message}`);
+            this.logger.error(
+              `Failed to update request ${job.requestId} for stuck job ${job.id}: ${reqError.message}`,
+            );
           }
 
           // Emit events for operators and user
@@ -170,8 +213,13 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
           });
         }
 
-        const targetUsername = job.targetUsername || job.request?.targetUsername || '?';
-        const amount = job.amount ? Number(job.amount) : (job.request ? Number(job.request.amount) : 0);
+        const targetUsername =
+          job.targetUsername || job.request?.targetUsername || '?';
+        const amount = job.amount
+          ? Number(job.amount)
+          : job.request
+            ? Number(job.request.amount)
+            : 0;
 
         this.events.emitSystemAlert({
           type: 'STUCK_JOB_CLEANED',
@@ -190,29 +238,163 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
           `Stuck job ${job.id} cleaned up (request=${job.requestId || 'none'}, user=${targetUsername})`,
         );
       } catch (error) {
-        this.logger.error(`Failed to clean up stuck job ${job.id}: ${error.message}`);
+        this.logger.error(
+          `Failed to clean up stuck job ${job.id}: ${error.message}`,
+        );
       }
     }
 
     this.events.emitDashboardUpdate();
 
-    // Try to dispatch next job for each panel that had stuck jobs
-    const affectedPanels = new Set(stuckJobs.map(j => j.panelId).filter(Boolean));
+    // Try to dispatch next job for each panel that had stuck jobs.
+    // Also clear the in-memory busy flag: it was set when the bot ACKed this
+    // job, and with the job dead no result will ever arrive to clear it.
+    const affectedPanels = new Set(
+      stuckJobs.map((j) => j.panelId).filter(Boolean),
+    );
     for (const pId of affectedPanels) {
+      try {
+        this.botGateway.markPanelIdle(pId!);
+        // Panel just became idle — give pending discoveries a chance too
+        const { DiscoveryService } = require('../discovery/discovery.service');
+        const discoveryService = this.moduleRef.get(DiscoveryService, {
+          strict: false,
+        });
+        await discoveryService?.retryPendingDiscoveries(pId!);
+      } catch (error: any) {
+        this.logger.error(
+          `Failed to mark panel ${pId} idle after stuck job cleanup: ${error.message}`,
+        );
+      }
       try {
         const result = await this.tryDispatchNextJob(pId!);
         if (result.dispatched) {
-          this.logger.log(`Dispatched next job for panel ${pId} after stuck job cleanup`);
+          this.logger.log(
+            `Dispatched next job for panel ${pId} after stuck job cleanup`,
+          );
         }
       } catch (error: any) {
-        this.logger.error(`Failed to dispatch for panel ${pId} after stuck job cleanup: ${error.message}`);
+        this.logger.error(
+          `Failed to dispatch for panel ${pId} after stuck job cleanup: ${error.message}`,
+        );
       }
     }
     // Also try unassigned
     try {
       await this.tryDispatchNextJob();
     } catch (error: any) {
-      this.logger.error(`Failed to dispatch after stuck job cleanup: ${error.message}`);
+      this.logger.error(
+        `Failed to dispatch after stuck job cleanup: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Recover requests stuck in APPROVED with no job. Happens when job creation
+   * failed post-validation, or when a discovery was in-flight (in-memory) and
+   * the server restarted. createJobForRequest re-runs discovery if the user
+   * still has no panel, and is idempotent (P2002 → returns existing job).
+   */
+  private async recoverApprovedRequestsWithoutJob(): Promise<void> {
+    const cutoff = new Date(Date.now() - 10 * 60 * 1000);
+    const stuckRequests = await this.prisma.request.findMany({
+      where: {
+        status: 'APPROVED',
+        job: null,
+        updatedAt: { lt: cutoff },
+      },
+      select: { id: true, targetUsername: true },
+      take: 10,
+    });
+
+    for (const req of stuckRequests) {
+      this.logger.warn(
+        `Request ${req.id} (${req.targetUsername}) stuck in APPROVED without job — recreating job`,
+      );
+      try {
+        await this.createJobForRequest(req.id);
+      } catch (error: any) {
+        this.logger.error(
+          `Failed to recover request ${req.id}: ${error.message}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Heal prize claims left in PROCESSING when their WITHDRAW_CHIPS job already
+   * reached a final state without the claim being updated (e.g. job auto-failed
+   * by the stuck checker, or the result handler crashed mid-way). Without this,
+   * the claim is a dead end: process() requires VERIFIED/FAILED and the
+   * operator can't retry.
+   */
+  private async reconcileOrphanedPrizeClaims(): Promise<void> {
+    let orphanedClaims: Array<{
+      id: string;
+      job: { status: JobStatus; error: string | null } | null;
+    }> = [];
+    try {
+      orphanedClaims = await this.prisma.prizeClaim.findMany({
+        where: {
+          status: 'PROCESSING',
+          OR: [
+            { job: { status: { in: ['FAILED', 'COMPLETED'] } } },
+            // Job deleted out from under the claim (legacy retry-from-failures bug)
+            { jobId: null },
+          ],
+        },
+        select: {
+          id: true,
+          job: { select: { status: true, error: true } },
+        },
+      });
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to query orphaned prize claims: ${error.message}`,
+      );
+      return;
+    }
+
+    if (orphanedClaims.length === 0) return;
+
+    this.logger.warn(
+      `Found ${orphanedClaims.length} orphaned PROCESSING prize claim(s), reconciling...`,
+    );
+
+    let prizeClaimsService: any;
+    try {
+      const {
+        PrizeClaimsService,
+      } = require('../prize-claims/prize-claims.service');
+      prizeClaimsService = this.moduleRef.get(PrizeClaimsService, {
+        strict: false,
+      });
+    } catch (error: any) {
+      this.logger.error(
+        `PrizeClaimsService not available for reconciliation: ${error.message}`,
+      );
+      return;
+    }
+    if (!prizeClaimsService) return;
+
+    for (const claim of orphanedClaims) {
+      try {
+        const success = claim.job?.status === 'COMPLETED';
+        await prizeClaimsService.handleWithdrawalResult(
+          claim.id,
+          success,
+          success
+            ? undefined
+            : claim.job?.error || 'Job timed out without reporting a result',
+        );
+        this.logger.warn(
+          `Orphaned prize claim ${claim.id} reconciled (job was ${claim.job?.status})`,
+        );
+      } catch (error: any) {
+        this.logger.error(
+          `Failed to reconcile prize claim ${claim.id}: ${error.message}`,
+        );
+      }
     }
   }
 
@@ -240,12 +422,18 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
           });
           if (hasProcessing) continue;
 
-          this.logger.log(`[PeriodicRetry] Queued jobs for panel ${panelId || 'unassigned'}, attempting dispatch...`);
+          this.logger.log(
+            `[PeriodicRetry] Queued jobs for panel ${panelId || 'unassigned'}, attempting dispatch...`,
+          );
           const result = await this.tryDispatchNextJob(panelId || undefined);
           if (result.dispatched) {
-            this.logger.log(`[PeriodicRetry] Successfully dispatched for panel ${panelId || 'unassigned'}`);
+            this.logger.log(
+              `[PeriodicRetry] Successfully dispatched for panel ${panelId || 'unassigned'}`,
+            );
           } else {
-            this.logger.debug(`[PeriodicRetry] Not dispatched for panel ${panelId || 'unassigned'}: ${result.reason}`);
+            this.logger.debug(
+              `[PeriodicRetry] Not dispatched for panel ${panelId || 'unassigned'}: ${result.reason}`,
+            );
           }
         }
       } catch (e: any) {
@@ -264,7 +452,9 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
    * Check if we're within the cooldown period after the last completed job.
    * When panelId is provided, checks cooldown for that specific panel only.
    */
-  async isCooldownActive(panelId?: string): Promise<{ active: boolean; remainingMs: number }> {
+  async isCooldownActive(
+    panelId?: string,
+  ): Promise<{ active: boolean; remainingMs: number }> {
     const whereClause: any = {
       status: { in: ['COMPLETED', 'FAILED'] },
       completedAt: { not: null },
@@ -336,7 +526,11 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       type: job.type,
       requestId: job.requestId,
       targetUsername: job.targetUsername || job.request?.targetUsername || '',
-      amount: job.amount ? Number(job.amount) : (job.request ? Number(job.request.amount) : 0),
+      amount: job.amount
+        ? Number(job.amount)
+        : job.request
+          ? Number(job.request.amount)
+          : 0,
       panelId: job.panelId || undefined,
     };
   }
@@ -346,18 +540,30 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
    * When panelId is provided, only dispatches jobs for that panel.
    * When panelId is omitted, iterates all panels with connected bots.
    */
-  async tryDispatchNextJob(panelId?: string): Promise<{ dispatched: boolean; reason?: string }> {
+  async tryDispatchNextJob(
+    panelId?: string,
+  ): Promise<{ dispatched: boolean; reason?: string }> {
     // Pre-flight checks (global — not per-panel)
     const killSwitch = await this.botService.checkKillSwitch();
     if (killSwitch.active) {
-      this.logger.warn(`Dispatch blocked: Kill switch active — ${killSwitch.reason}`);
-      return { dispatched: false, reason: `Kill switch active: ${killSwitch.reason}` };
+      this.logger.warn(
+        `Dispatch blocked: Kill switch active — ${killSwitch.reason}`,
+      );
+      return {
+        dispatched: false,
+        reason: `Kill switch active: ${killSwitch.reason}`,
+      };
     }
 
     const activityWindow = await this.botService.checkActivityWindow();
     if (!activityWindow.allowed) {
-      this.logger.warn(`Dispatch blocked: Outside activity window — ${activityWindow.reason}`);
-      return { dispatched: false, reason: `Outside activity window: ${activityWindow.reason}` };
+      this.logger.warn(
+        `Dispatch blocked: Outside activity window — ${activityWindow.reason}`,
+      );
+      return {
+        dispatched: false,
+        reason: `Outside activity window: ${activityWindow.reason}`,
+      };
     }
 
     if (panelId) {
@@ -383,13 +589,17 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
    * Try to dispatch next job for a specific panel.
    * Enforces one-at-a-time PER PANEL (not global).
    */
-  private async tryDispatchForPanel(panelId?: string): Promise<{ dispatched: boolean; reason?: string }> {
+  private async tryDispatchForPanel(
+    panelId?: string,
+  ): Promise<{ dispatched: boolean; reason?: string }> {
     const label = panelId || 'unassigned';
 
     // Per-panel cooldown
     const cooldown = await this.isCooldownActive(panelId);
     if (cooldown.active) {
-      this.logger.debug(`Dispatch blocked for panel ${label}: Cooldown, ${Math.ceil(cooldown.remainingMs / 1000)}s remaining`);
+      this.logger.debug(
+        `Dispatch blocked for panel ${label}: Cooldown, ${Math.ceil(cooldown.remainingMs / 1000)}s remaining`,
+      );
       return {
         dispatched: false,
         reason: `Cooldown active for panel ${label}, ${Math.ceil(cooldown.remainingMs / 1000)}s remaining`,
@@ -435,8 +645,13 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
             id: nextJob.id,
             type: nextJob.type,
             requestId: nextJob.requestId,
-            targetUsername: nextJob.targetUsername || nextJob.request?.targetUsername || '',
-            amount: nextJob.amount ? Number(nextJob.amount) : (nextJob.request ? Number(nextJob.request.amount) : 0),
+            targetUsername:
+              nextJob.targetUsername || nextJob.request?.targetUsername || '',
+            amount: nextJob.amount
+              ? Number(nextJob.amount)
+              : nextJob.request
+                ? Number(nextJob.request.amount)
+                : 0,
             panelId: nextJob.panelId || undefined,
             newPassword: nextJob.newPassword || undefined,
           };
@@ -445,14 +660,22 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       );
     } catch (error: any) {
       if (error.code === 'P2034') {
-        this.logger.log(`Dispatch serialization conflict for panel ${label}, skipping`);
-        return { dispatched: false, reason: 'Concurrent dispatch resolved by another caller' };
+        this.logger.log(
+          `Dispatch serialization conflict for panel ${label}, skipping`,
+        );
+        return {
+          dispatched: false,
+          reason: 'Concurrent dispatch resolved by another caller',
+        };
       }
       throw error;
     }
 
     if (!claimedJob) {
-      return { dispatched: false, reason: `No dispatchable jobs for panel ${label}` };
+      return {
+        dispatched: false,
+        reason: `No dispatchable jobs for panel ${label}`,
+      };
     }
 
     return this.dispatchClaimedJob(claimedJob);
@@ -462,8 +685,12 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
    * Dispatch a job that has already been atomically claimed (status = PROCESSING).
    * Routes to the correct panel's bot. If no bot connected, reverts to QUEUED.
    */
-  private async dispatchClaimedJob(job: JobData): Promise<{ dispatched: boolean; reason?: string }> {
-    this.logger.log(`Dispatching claimed job ${job.id} for ${job.targetUsername} (panel ${job.panelId || 'any'})`);
+  private async dispatchClaimedJob(
+    job: JobData,
+  ): Promise<{ dispatched: boolean; reason?: string }> {
+    this.logger.log(
+      `Dispatching claimed job ${job.id} for ${job.targetUsername} (panel ${job.panelId || 'any'})`,
+    );
 
     let pushed = false;
     if (job.panelId) {
@@ -483,23 +710,32 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       return { dispatched: true };
     }
 
-    // No bot connected — revert to QUEUED
+    // Bot unavailable (not connected, no ACK, or rejected: busy/cooldown) — revert to QUEUED
     try {
       await this.prisma.job.update({
         where: { id: job.id },
-        data: { status: 'QUEUED' },
+        data: { status: 'QUEUED', startedAt: null },
       });
-      this.logger.log(`No bot connected for panel ${job.panelId || 'any'}, job ${job.id} reverted to QUEUED`);
-      // Schedule quick retry — bot may reconnect or switch to polling shortly
+      this.logger.log(
+        `Bot unavailable for panel ${job.panelId || 'any'}, job ${job.id} reverted to QUEUED`,
+      );
+      // Schedule quick retry — bot may reconnect, free up, or switch to polling shortly
       setTimeout(() => {
         this.tryDispatchNextJob(job.panelId).catch((e) =>
-          this.logger.warn(`Quick retry dispatch for job ${job.id} failed: ${e.message}`),
+          this.logger.warn(
+            `Quick retry dispatch for job ${job.id} failed: ${e.message}`,
+          ),
         );
       }, 5000);
     } catch (revertError: any) {
-      this.logger.error(`Failed to revert job ${job.id} to QUEUED: ${revertError.message}`);
+      this.logger.error(
+        `Failed to revert job ${job.id} to QUEUED: ${revertError.message}`,
+      );
     }
-    return { dispatched: false, reason: `No bot connected for panel ${job.panelId || 'any'} - reverted to QUEUED` };
+    return {
+      dispatched: false,
+      reason: `Bot unavailable for panel ${job.panelId || 'any'} - reverted to QUEUED`,
+    };
   }
 
   // ==========================================
@@ -507,12 +743,19 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
   // ==========================================
 
   @OnEvent(AppEvent.VALIDATION_COMPLETED)
-  async handleValidationCompleted(event: { requestId: string; score: number }): Promise<void> {
-    this.logger.log(`Received VALIDATION_COMPLETED event for request ${event.requestId} (score=${event.score})`);
+  async handleValidationCompleted(event: {
+    requestId: string;
+    score: number;
+  }): Promise<void> {
+    this.logger.log(
+      `Received VALIDATION_COMPLETED event for request ${event.requestId} (score=${event.score})`,
+    );
     try {
       await this.createJobForRequest(event.requestId);
     } catch (error: any) {
-      this.logger.error(`Failed to create job for request ${event.requestId}: ${error.message}`);
+      this.logger.error(
+        `Failed to create job for request ${event.requestId}: ${error.message}`,
+      );
 
       // Emit failure to operators so they can intervene manually
       this.events.emitToOperators('system:alert', {
@@ -552,53 +795,110 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       if (freshUser?.panelId) {
         panelId = freshUser.panelId;
         // Update request too so future lookups are fast
-        await this.prisma.request.update({ where: { id: requestId }, data: { panelId } }).catch(() => {});
-        this.logger.log(`Request ${requestId} panelId updated to ${panelId} (from fresh user lookup)`);
+        await this.prisma.request
+          .update({ where: { id: requestId }, data: { panelId } })
+          .catch(() => {});
+        this.logger.log(
+          `Request ${requestId} panelId updated to ${panelId} (from fresh user lookup)`,
+        );
       }
     }
 
     // If still no panelId, trigger discovery instead of creating job
     if (!panelId) {
-      this.logger.log(`Request ${requestId} has no panelId — triggering discovery for "${request.targetUsername}"`);
+      this.logger.log(
+        `Request ${requestId} has no panelId — triggering discovery for "${request.targetUsername}"`,
+      );
       try {
         // Lazy-load DiscoveryService to avoid circular DI
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
+
         const { DiscoveryService } = require('../discovery/discovery.service');
-        const discoveryService = this.moduleRef.get(DiscoveryService, { strict: false });
-        await discoveryService.startDiscovery(requestId, request.targetUsername, request.userId);
-        return { discovery: true, requestId, message: 'Discovery started — job will be created when panel is found' };
+        const discoveryService = this.moduleRef.get(DiscoveryService, {
+          strict: false,
+        });
+        await discoveryService.startDiscovery(
+          requestId,
+          request.targetUsername,
+          request.userId,
+        );
+        return {
+          discovery: true,
+          requestId,
+          message:
+            'Discovery started — job will be created when panel is found',
+        };
       } catch (error: any) {
-        this.logger.error(`Discovery failed for request ${requestId}: ${error.message}`);
+        this.logger.error(
+          `Discovery failed for request ${requestId}: ${error.message}`,
+        );
         // Fallback: create job without panelId (will fail at dispatch but operator can intervene)
       }
     }
 
-    // Create job with panelId
+    // Create job with panelId. If a previous job for this request was failed by
+    // re-discovery (user wasn't on the stale panel), revive it on the new panel
+    // instead of creating a duplicate (Job.requestId is unique).
     let job: any;
-    try {
-      job = await this.prisma.job.create({
-        data: {
-          requestId,
-          status: 'QUEUED',
-          panelId,
-          targetUsername: request.targetUsername,
-          amount: request.amount,
-        },
-      });
-    } catch (error: any) {
-      if (error.code === 'P2002') {
-        this.logger.warn(`Job already exists for request ${requestId} (concurrent creation), returning existing`);
-        const existingJob = await this.prisma.job.findUnique({
-          where: { requestId },
+    const priorJob = await this.prisma.job.findUnique({
+      where: { requestId },
+    });
+    if (priorJob) {
+      if (
+        priorJob.status === 'FAILED' &&
+        priorJob.error === REDISCOVERY_PENDING_MARKER
+      ) {
+        job = await this.prisma.job.update({
+          where: { id: priorJob.id },
+          data: {
+            status: 'QUEUED',
+            panelId,
+            error: null,
+            result: undefined,
+            startedAt: null,
+            completedAt: null,
+            targetUsername: request.targetUsername,
+            amount: request.amount,
+          },
         });
-        if (existingJob) {
-          return existingJob;
-        }
+        this.logger.log(
+          `Revived job ${priorJob.id} for request ${requestId} on panel ${panelId || 'none'} after re-discovery`,
+        );
+      } else {
+        this.logger.warn(
+          `Job already exists for request ${requestId} (status=${priorJob.status}), returning existing`,
+        );
+        return priorJob;
       }
-      throw error;
+    } else {
+      try {
+        job = await this.prisma.job.create({
+          data: {
+            requestId,
+            status: 'QUEUED',
+            panelId,
+            targetUsername: request.targetUsername,
+            amount: request.amount,
+          },
+        });
+      } catch (error: any) {
+        if (error.code === 'P2002') {
+          this.logger.warn(
+            `Job already exists for request ${requestId} (concurrent creation), returning existing`,
+          );
+          const existingJob = await this.prisma.job.findUnique({
+            where: { requestId },
+          });
+          if (existingJob) {
+            return existingJob;
+          }
+        }
+        throw error;
+      }
     }
 
-    this.logger.log(`Job ${job.id} created for request ${requestId} (panel ${panelId || 'none'})`);
+    this.logger.log(
+      `Job ${job.id} created for request ${requestId} (panel ${panelId || 'none'})`,
+    );
 
     // Emit events
     this.events.emitJobQueued({
@@ -613,14 +913,23 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     if (result.dispatched) {
       this.logger.log(`Job ${job.id} dispatched immediately`);
     } else {
-      this.logger.warn(`Job ${job.id} queued but NOT dispatched: ${result.reason}`);
-      this.events.emitDispatchBlocked({ jobId: job.id, reason: result.reason || 'Unknown' });
+      this.logger.warn(
+        `Job ${job.id} queued but NOT dispatched: ${result.reason}`,
+      );
+      this.events.emitDispatchBlocked({
+        jobId: job.id,
+        reason: result.reason || 'Unknown',
+      });
     }
 
     return job;
   }
 
-  async findAll(options?: { status?: JobStatus; limit?: number; offset?: number }) {
+  async findAll(options?: {
+    status?: JobStatus;
+    limit?: number;
+    offset?: number;
+  }) {
     return this.prisma.job.findMany({
       where: options?.status ? { status: options.status } : undefined,
       orderBy: { createdAt: 'desc' },
@@ -704,10 +1013,12 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     // Atomic: delete job + revert request
     const txOps: any[] = [this.prisma.job.delete({ where: { id: jobId } })];
     if (job.requestId) {
-      txOps.push(this.prisma.request.update({
-        where: { id: job.requestId },
-        data: { status: 'APPROVED' },
-      }));
+      txOps.push(
+        this.prisma.request.update({
+          where: { id: job.requestId },
+          data: { status: 'APPROVED' },
+        }),
+      );
     }
     await this.prisma.$transaction(txOps);
 
@@ -717,18 +1028,19 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getStats() {
-    const [queued, processing, completed, failed, todayCompleted] = await Promise.all([
-      this.prisma.job.count({ where: { status: 'QUEUED' } }),
-      this.prisma.job.count({ where: { status: 'PROCESSING' } }),
-      this.prisma.job.count({ where: { status: 'COMPLETED' } }),
-      this.prisma.job.count({ where: { status: 'FAILED' } }),
-      this.prisma.job.count({
-        where: {
-          status: 'COMPLETED',
-          completedAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
-        },
-      }),
-    ]);
+    const [queued, processing, completed, failed, todayCompleted] =
+      await Promise.all([
+        this.prisma.job.count({ where: { status: 'QUEUED' } }),
+        this.prisma.job.count({ where: { status: 'PROCESSING' } }),
+        this.prisma.job.count({ where: { status: 'COMPLETED' } }),
+        this.prisma.job.count({ where: { status: 'FAILED' } }),
+        this.prisma.job.count({
+          where: {
+            status: 'COMPLETED',
+            completedAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+          },
+        }),
+      ]);
 
     // Calculate average completion time
     const recentJobs = await this.prisma.job.findMany({
@@ -936,19 +1248,22 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Only failed jobs can be retried');
     }
 
+    // Validate BEFORE mutating: deleting first and then throwing left the
+    // claim's job erased (next retry → "Job not found") with nothing recreated.
+    if (!job.requestId) {
+      throw new BadRequestException(
+        'Este job es de un premio (retiro de fichas). Reintentalo desde la vista de Premios.',
+      );
+    }
+
     // Atomic: delete old job + revert request status
-    const retryTxOps: any[] = [this.prisma.job.delete({ where: { id: jobId } })];
-    if (job.requestId) {
-      retryTxOps.push(this.prisma.request.update({
+    await this.prisma.$transaction([
+      this.prisma.job.delete({ where: { id: jobId } }),
+      this.prisma.request.update({
         where: { id: job.requestId },
         data: { status: 'APPROVED' },
-      }));
-    }
-    await this.prisma.$transaction(retryTxOps);
-
-    if (!job.requestId) {
-      throw new BadRequestException('Cannot retry WITHDRAW_CHIPS jobs via this method');
-    }
+      }),
+    ]);
 
     // Create new job (outside transaction — has its own idempotency)
     const newJob = await this.createJobForRequest(job.requestId);
@@ -976,7 +1291,15 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
   /**
    * Called when a job completes - try to dispatch next job for the SAME panel after cooldown.
    * Also checks for pending discoveries that may need this now-idle panel.
+   *
+   * BotService emite AppEvent.JOB_COMPLETED en cada terminación de job: el listener acá garantiza
+   * que después del cooldown el dispatcher pasa al siguiente, sin depender del periodic retry de 60s.
    */
+  @OnEvent(AppEvent.JOB_COMPLETED)
+  async onJobCompletedEvent(event: { jobId: string; panelId?: string }) {
+    return this.onJobCompleted(event?.jobId);
+  }
+
   async onJobCompleted(jobId: string) {
     // Look up panelId from the completed job
     const completedJob = await this.prisma.job.findUnique({
@@ -985,7 +1308,9 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     });
     const panelId = completedJob?.panelId;
 
-    this.logger.log(`Job ${jobId} completed (panel ${panelId || 'unknown'}), scheduling next dispatch after cooldown`);
+    this.logger.log(
+      `Job ${jobId} completed (panel ${panelId || 'unknown'}), scheduling next dispatch after cooldown`,
+    );
 
     // Clear any existing timer to prevent pileup (Fix 52)
     if (this.nextDispatchTimer) {
@@ -999,17 +1324,24 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
         // Dispatch next job for the same panel
         const result = await this.tryDispatchNextJob(panelId || undefined);
         if (result.dispatched) {
-          this.logger.log(`Dispatched next job for panel ${panelId || 'any'} after cooldown`);
+          this.logger.log(
+            `Dispatched next job for panel ${panelId || 'any'} after cooldown`,
+          );
         } else {
-          this.logger.log(`No job dispatched for panel ${panelId || 'any'}: ${result.reason}`);
+          this.logger.log(
+            `No job dispatched for panel ${panelId || 'any'}: ${result.reason}`,
+          );
         }
 
         // Check for pending discoveries now that this panel is idle
         if (panelId) {
           try {
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
-            const { DiscoveryService } = require('../discovery/discovery.service');
-            const discoveryService = this.moduleRef.get(DiscoveryService, { strict: false });
+            const {
+              DiscoveryService,
+            } = require('../discovery/discovery.service');
+            const discoveryService = this.moduleRef.get(DiscoveryService, {
+              strict: false,
+            });
             await discoveryService.retryPendingDiscoveries(panelId);
           } catch {
             // Discovery service not available — not critical

@@ -140,7 +140,10 @@ export class LoggingController {
     }
 
     res.setHeader('Content-Type', screenshot.mimeType);
-    res.setHeader('Content-Disposition', `inline; filename="${screenshot.filename}"`);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${screenshot.filename}"`,
+    );
     fs.createReadStream(screenshot.path).pipe(res);
   }
 

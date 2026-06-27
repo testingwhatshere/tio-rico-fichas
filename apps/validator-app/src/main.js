@@ -52,49 +52,101 @@ process.on('unhandledRejection', (reason) => {
 // PDF CONVERSION (stays here — uses temp paths)
 // ==========================================
 
+// pdfjs-based renderer (cross-platform, pure JS via @napi-rs/canvas).
+// Primary path on Windows: pdf-poppler 0.51 (2016) renderiza mal PDFs MP modernos
+// con fuentes Unicode/SVG y produce comprobantes "inválidos" aguas abajo.
+let pdfToPng = null;
+try { ({ pdfToPng } = require('pdf-to-png-converter')); } catch (_) {}
+
+// Legacy poppler binary path — sigue siendo primario en macOS (donde renderiza bien
+// con 0.66) y queda como fallback en Windows si pdfjs no cargara por algún motivo.
 let pdfPoppler = null;
 try { pdfPoppler = require('pdf-poppler'); } catch (_) {}
 
-async function convertPdfToImage(base64Pdf) {
-  if (!pdfPoppler) throw new Error('pdf-poppler not available');
+async function renderWithPdfJs(pdfBuffer) {
+  if (!pdfToPng) throw new Error('pdf-to-png-converter not available');
+  const t0 = Date.now();
+  // viewportScale 2.0 → A4 (595×842pt) renderiza a ~1190×1684px, mucho mejor para OCR
+  // que el scale=1024 de poppler. Comprobantes MP móviles típicos quedan en ~900-1200px.
+  const pages = await pdfToPng(pdfBuffer, {
+    pagesToProcess: [1],
+    viewportScale: 2.0,
+    disableFontFace: true,
+    useSystemFonts: false,
+    verbosityLevel: 0,
+  });
+  if (!pages || !pages[0] || !pages[0].content) {
+    throw new Error('pdf-to-png-converter returned no page content');
+  }
+  const base64 = pages[0].content.toString('base64');
+  const elapsed = Date.now() - t0;
+  console.log(`[validator] PDF→PNG via pdfjs in ${elapsed}ms (${pages[0].width}×${pages[0].height}, ${base64.length} chars)`);
+  return base64;
+}
 
+async function renderWithPoppler(pdfBuffer) {
+  if (!pdfPoppler) throw new Error('pdf-poppler not available');
   const configMod = require('./config');
   const tempDir = path.join(configMod.state.userDataPath || app.getPath('userData'), 'temp');
   if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
   const timestamp = Date.now();
   const tempPdfPath = path.join(tempDir, `proof_${timestamp}.pdf`);
-  const outputPrefix = path.join(tempDir, `proof_${timestamp}`);
 
+  const t0 = Date.now();
   try {
-    fs.writeFileSync(tempPdfPath, Buffer.from(base64Pdf, 'base64'));
+    fs.writeFileSync(tempPdfPath, pdfBuffer);
 
     await pdfPoppler.convert(tempPdfPath, {
       format: 'png',
       out_dir: tempDir,
       out_prefix: `proof_${timestamp}`,
       page: 1,
-      scale: 2048,
+      // 2048 producía PNGs de 30-60s en comprobantes MP normales; 1024 sigue siendo
+      // más que suficiente para OCR/Ollama y baja el tiempo de conversión 3-4x.
+      scale: 1024,
     });
 
-    // Find the generated PNG
     const pngFiles = fs.readdirSync(tempDir).filter(f =>
       f.startsWith(`proof_${timestamp}`) && f.endsWith('.png')
     );
-
     if (pngFiles.length === 0) throw new Error('No PNG output from pdf-poppler');
 
     const pngPath = path.join(tempDir, pngFiles[0]);
     const imageBase64 = fs.readFileSync(pngPath).toString('base64');
 
-    // Cleanup temp files
     try { fs.unlinkSync(tempPdfPath); } catch (_) {}
     try { fs.unlinkSync(pngPath); } catch (_) {}
 
+    const elapsed = Date.now() - t0;
+    console.log(`[validator] PDF→PNG via poppler in ${elapsed}ms (${imageBase64.length} chars)`);
     return imageBase64;
   } catch (error) {
     try { fs.unlinkSync(tempPdfPath); } catch (_) {}
     throw error;
+  }
+}
+
+async function convertPdfToImage(base64Pdf) {
+  const pdfBuffer = Buffer.from(base64Pdf, 'base64');
+
+  // En Windows el pdftocairo 0.51 empaquetado por pdf-poppler (binario de 2016)
+  // renderiza mal PDFs MP modernos → el OCR/Ollama no encuentra datos y marca el
+  // comprobante como inválido. Por eso priorizamos pdfjs ahí. En macOS (poppler 0.66)
+  // dejamos poppler primario para no cambiar el comportamiento que viene andando.
+  const tryPdfJsFirst = process.platform === 'win32';
+  const primary = tryPdfJsFirst ? renderWithPdfJs : renderWithPoppler;
+  const fallback = tryPdfJsFirst ? renderWithPoppler : renderWithPdfJs;
+
+  try {
+    return await primary(pdfBuffer);
+  } catch (primaryErr) {
+    console.warn(`[validator] primary PDF renderer failed (${primaryErr.message}), trying fallback`);
+    try {
+      return await fallback(pdfBuffer);
+    } catch (fallbackErr) {
+      throw new Error(`PDF render failed — primary: ${primaryErr.message}; fallback: ${fallbackErr.message}`);
+    }
   }
 }
 

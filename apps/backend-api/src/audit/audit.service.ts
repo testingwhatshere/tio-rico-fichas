@@ -223,7 +223,10 @@ export class AuditService {
   /**
    * Get action statistics
    */
-  async getActionStats(from?: Date, to?: Date): Promise<Record<string, number>> {
+  async getActionStats(
+    from?: Date,
+    to?: Date,
+  ): Promise<Record<string, number>> {
     const where: any = {};
     if (from || to) {
       where.timestamp = {};

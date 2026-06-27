@@ -49,7 +49,9 @@ export class OperatorsService {
     });
 
     if (existing) {
-      throw new ConflictException('Operator profile already exists for this user');
+      throw new ConflictException(
+        'Operator profile already exists for this user',
+      );
     }
 
     const operator = await this.prisma.operator.create({
@@ -131,7 +133,7 @@ export class OperatorsService {
 
     return availableOperators
       .filter((op) => op !== null)
-      .map((op) => this.formatOperator(op!));
+      .map((op) => this.formatOperator(op));
   }
 
   /**

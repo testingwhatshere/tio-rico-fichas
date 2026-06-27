@@ -96,6 +96,8 @@ model User {
   balance   Decimal  @default(0) @db.Decimal(10, 2) // User balance for credits
   pushToken           String?  // Expo push notification token
   savedTargetUsername String?  // Remembered gaming panel username for bot auto-fill
+  panelPassword       String?  // Last-known password of the gaming-panel account (plaintext, visible to operators for support). Default 123casino if unset.
+  panelPasswordUpdatedAt DateTime? // Updated when bot confirms CHANGE_PASSWORD/CREATE_USER success
   telegramId          String?  @unique // Telegram user ID for bot integration
 
   // Preloaded users: operator-imported via CSV. Phone must match exactly at login.
@@ -313,6 +315,11 @@ model PrizeClaim {
   completedBy     String?
   rejectedBy      String?
   rejectionReason String?
+
+  // Comprobante de transferencia que el operador subió al marcar el premio como pagado.
+  // Obligatorio para completar el claim — sin él no se puede pasar a COMPLETED.
+  payoutProofUrl     String?
+  payoutProofType    String? // "image" | "pdf"
 
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt

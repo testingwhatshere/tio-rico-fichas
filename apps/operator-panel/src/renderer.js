@@ -43,6 +43,8 @@ import {
   renderChatsList, selectChat, loadChatMessages, loadMoreChatMessages, renderChatMain,
   sendChatMessage, handleImageSelected, clearPendingImage,
   closeCurrentChat, handleOperatorTyping, showUserTyping,
+  togglePanelInfoPwd, copyPanelInfoValue, invalidatePanelInfo, changePanelUsernameFor,
+  loadPendingSummary, refreshPendingSummaryForUser,
 } from './renderer/views/chats.js';
 import { renderActivityList } from './renderer/views/activity.js';
 import { renderWalletsList, updateSelectedWalletDisplay, selectWallet, deleteWallet, emptyWallet, toggleWalletVerification } from './renderer/views/wallets.js';
@@ -844,6 +846,8 @@ function setupIpcListeners() {
       }
       updatePrizesBadge();
       if (getCurrentView() === 'prizes') renderPrizesView();
+      // If this prize belongs to the currently open chat's user, refresh sidebar
+      if (data?.userId) refreshPendingSummaryForUser(data.userId);
     }));
   }
 
@@ -999,6 +1003,10 @@ window.editPanel = editPanel;
 window.deactivatePanel = deactivatePanel;
 window.activatePanel = activatePanel;
 window.cancelTextInputModal = cancelTextInputModal;
+window.togglePanelInfoPwd = togglePanelInfoPwd;
+window.copyPanelInfoValue = copyPanelInfoValue;
+window.invalidatePanelInfo = invalidatePanelInfo;
+window.changePanelUsernameFor = changePanelUsernameFor;
 
 // Extension log panel globals
 window.showExtensionLogs = (extensionId) => {

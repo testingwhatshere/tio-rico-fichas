@@ -30,7 +30,10 @@ export class SettingsController {
     @Query('app') app?: string,
     @Query('currentVersion') currentVersion?: string,
   ) {
-    return this.settingsService.checkAppUpdate(app || 'chat', currentVersion || '0.0.0');
+    return this.settingsService.checkAppUpdate(
+      app || 'chat',
+      currentVersion || '0.0.0',
+    );
   }
 
   /**

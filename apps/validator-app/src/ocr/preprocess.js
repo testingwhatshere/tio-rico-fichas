@@ -185,6 +185,40 @@ async function generateOCRVariants(imageBuffer) {
     logger.warn('OCR', `Top-half-zoom variant failed: ${err.message}`);
   }
 
+  // Variant 6b: Native-resolution negate + high threshold.
+  // Caso: texto blanco bold sobre header coloreado (MP modern, Itaú, MODO, etc.).
+  // El grid-search del 2026-06-27 mostró que las únicas variants que extraen
+  // el monto del header son las que NO redimensionan + threshold ≥160 post-negate.
+  // El LSTM de Tesseract se degrada con fuentes >100px, así que cualquier resize
+  // que agrande el monto bold lo hace ilegible. La imagen nativa (~420px) lo
+  // mantiene en un tamaño cómodo para el modelo.
+  try {
+    const nativeNegate = await sharp(imageBuffer)
+      .grayscale()
+      .negate()
+      .threshold(180)
+      .png()
+      .toBuffer();
+    variants.push({ name: 'native-negate', buffer: nativeNegate, psm: 6 });
+  } catch (err) {
+    logger.warn('OCR', `Native-negate variant failed: ${err.message}`);
+  }
+
+  // Variant 6c: idem pero threshold más bajo, en caso que el gradient sea
+  // más oscuro (Itaú top naranja, MODO azul institucional) y necesite cortar
+  // antes para no fundir fondo+texto.
+  try {
+    const nativeNegateSoft = await sharp(imageBuffer)
+      .grayscale()
+      .negate()
+      .threshold(160)
+      .png()
+      .toBuffer();
+    variants.push({ name: 'native-negate-soft', buffer: nativeNegateSoft, psm: 6 });
+  } catch (err) {
+    logger.warn('OCR', `Native-negate-soft variant failed: ${err.message}`);
+  }
+
   // Variant 7: digits-only PSM 7 (single line treated as one text line).
   // Aggressive zoom + strict whitelist (applied in worker.js when name starts with
   // 'digits-only'). Designed for the case where the amount is rendered alone on

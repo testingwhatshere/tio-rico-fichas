@@ -1,4 +1,11 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { OperatorGateway } from '../events/operator.gateway';
@@ -31,7 +38,10 @@ export class ChatsService {
    * `context` is "chat" or "prize" — lets the operator see at a glance what the
    * user was doing when they asked for help.
    */
-  async requestHelp(userId: string, context: 'chat' | 'prize' = 'chat'): Promise<{ chatId: string }> {
+  async requestHelp(
+    userId: string,
+    context: 'chat' | 'prize' = 'chat',
+  ): Promise<{ chatId: string }> {
     const chat = await this.getOrCreateChat(userId);
 
     const now = new Date();
@@ -98,9 +108,13 @@ export class ChatsService {
     // 3) Telegram ping for operators who aren't watching the panel.
     this.telegramService
       .alertHelpRequested(helpPayload.username, context)
-      .catch((err) => this.logger.warn(`Telegram help alert failed: ${err.message}`));
+      .catch((err) =>
+        this.logger.warn(`Telegram help alert failed: ${err.message}`),
+      );
 
-    this.logger.log(`Help requested by ${userId} in chat ${chat.id} (context: ${context})`);
+    this.logger.log(
+      `Help requested by ${userId} in chat ${chat.id} (context: ${context})`,
+    );
 
     return { chatId: chat.id };
   }
@@ -136,7 +150,15 @@ export class ChatsService {
         status: { in: ['OPEN', 'ASSIGNED'] },
       },
       include: {
-        user: { select: { id: true, email: true, username: true } },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            phone: true,
+            savedTargetUsername: true,
+          },
+        },
         operator: { select: { id: true, email: true } },
         messages: {
           orderBy: { createdAt: 'desc' },
@@ -160,7 +182,15 @@ export class ChatsService {
           status: 'OPEN',
         },
         include: {
-          user: { select: { id: true, email: true, username: true } },
+          user: {
+            select: {
+              id: true,
+              email: true,
+              username: true,
+              phone: true,
+              savedTargetUsername: true,
+            },
+          },
           operator: { select: { id: true, email: true } },
           messages: {
             orderBy: { createdAt: 'desc' },
@@ -200,16 +230,21 @@ export class ChatsService {
 
     // If userId provided, ensure user owns the chat or is assigned operator
     if (userId) {
-      where.OR = [
-        { userId },
-        { operatorId: userId },
-      ];
+      where.OR = [{ userId }, { operatorId: userId }];
     }
 
     const chat = await this.prisma.chat.findFirst({
       where,
       include: {
-        user: { select: { id: true, email: true, username: true } },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            phone: true,
+            savedTargetUsername: true,
+          },
+        },
         operator: { select: { id: true, email: true } },
         messages: {
           orderBy: { createdAt: 'desc' },
@@ -251,7 +286,15 @@ export class ChatsService {
     const chats = await this.prisma.chat.findMany({
       where,
       include: {
-        user: { select: { id: true, email: true, username: true } },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            phone: true,
+            savedTargetUsername: true,
+          },
+        },
         operator: { select: { id: true, email: true } },
         messages: {
           orderBy: { createdAt: 'desc' },
@@ -278,7 +321,15 @@ export class ChatsService {
     const chats = await this.prisma.chat.findMany({
       where: { status: 'OPEN' },
       include: {
-        user: { select: { id: true, email: true, username: true } },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            phone: true,
+            savedTargetUsername: true,
+          },
+        },
         operator: { select: { id: true, email: true } },
         messages: {
           orderBy: { createdAt: 'desc' },
@@ -301,7 +352,10 @@ export class ChatsService {
   /**
    * Assign chat to operator
    */
-  async assignChat(chatId: string, operatorId: string): Promise<ChatResponseDto> {
+  async assignChat(
+    chatId: string,
+    operatorId: string,
+  ): Promise<ChatResponseDto> {
     const chat = await this.prisma.chat.findUnique({
       where: { id: chatId },
     });
@@ -334,14 +388,24 @@ export class ChatsService {
           });
 
           if (activeChats >= operator.maxChats) {
-            throw new BadRequestException('Operator has reached maximum chat limit');
+            throw new BadRequestException(
+              'Operator has reached maximum chat limit',
+            );
           }
 
           return tx.chat.update({
             where: { id: chatId },
             data: { operatorId, status: 'ASSIGNED' },
             include: {
-              user: { select: { id: true, email: true, username: true } },
+              user: {
+                select: {
+                  id: true,
+                  email: true,
+                  username: true,
+                  phone: true,
+                  savedTargetUsername: true,
+                },
+              },
               operator: { select: { id: true, email: true } },
               messages: { orderBy: { createdAt: 'desc' }, take: 1 },
               _count: {
@@ -358,7 +422,9 @@ export class ChatsService {
       );
     } catch (error: any) {
       if (error?.code === 'P2034') {
-        throw new BadRequestException('Chat assignment conflict, please try again');
+        throw new BadRequestException(
+          'Chat assignment conflict, please try again',
+        );
       }
       throw error;
     }
@@ -384,7 +450,11 @@ export class ChatsService {
   /**
    * Close chat
    */
-  async closeChat(chatId: string, closedById: string, reason?: string): Promise<ChatResponseDto> {
+  async closeChat(
+    chatId: string,
+    closedById: string,
+    reason?: string,
+  ): Promise<ChatResponseDto> {
     const chat = await this.prisma.chat.findUnique({
       where: { id: chatId },
     });
@@ -417,7 +487,15 @@ export class ChatsService {
     const updatedChat = await this.prisma.chat.findUnique({
       where: { id: chatId },
       include: {
-        user: { select: { id: true, email: true, username: true } },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            phone: true,
+            savedTargetUsername: true,
+          },
+        },
         operator: { select: { id: true, email: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1 },
         _count: {
@@ -434,7 +512,9 @@ export class ChatsService {
       throw new NotFoundException('Chat not found after closing');
     }
 
-    this.logger.log(`Chat ${chatId} closed by ${closedById}${reason ? `: ${reason}` : ''}`);
+    this.logger.log(
+      `Chat ${chatId} closed by ${closedById}${reason ? `: ${reason}` : ''}`,
+    );
 
     // Notify user
     this.eventsGateway.emitToUser(chat.userId, 'chat:closed', {
@@ -474,7 +554,15 @@ export class ChatsService {
         operatorId: null,
       },
       include: {
-        user: { select: { id: true, email: true, username: true } },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            phone: true,
+            savedTargetUsername: true,
+          },
+        },
         operator: { select: { id: true, email: true } },
         messages: {
           orderBy: { createdAt: 'desc' },
@@ -508,7 +596,15 @@ export class ChatsService {
     const chats = await this.prisma.chat.findMany({
       where: { userId },
       include: {
-        user: { select: { id: true, email: true, username: true } },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            phone: true,
+            savedTargetUsername: true,
+          },
+        },
         operator: { select: { id: true, email: true } },
         messages: {
           orderBy: { createdAt: 'desc' },
@@ -538,7 +634,15 @@ export class ChatsService {
         status: 'ASSIGNED',
       },
       include: {
-        user: { select: { id: true, email: true, username: true } },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            phone: true,
+            savedTargetUsername: true,
+          },
+        },
         operator: { select: { id: true, email: true } },
         messages: {
           orderBy: { createdAt: 'desc' },
@@ -556,6 +660,98 @@ export class ChatsService {
     });
 
     return chats.map((chat) => this.formatChatResponse(chat));
+  }
+
+  /**
+   * Pending summary for the chat's user: open Requests (cargas) and open PrizeClaims (premios)
+   * that the operator should see at a glance when opening the chat. Used by the chat sidebar
+   * in operator-panel.
+   */
+  async getPendingSummary(chatId: string): Promise<{
+    requests: Array<{
+      id: string;
+      amount: string;
+      status: string;
+      targetUsername: string;
+      proofUrl: string | null;
+      createdAt: Date;
+    }>;
+    prizeClaims: Array<{
+      id: string;
+      amount: string;
+      status: string;
+      targetUsername: string;
+      createdAt: Date;
+    }>;
+  }> {
+    const chat = await this.prisma.chat.findUnique({
+      where: { id: chatId },
+      select: { userId: true },
+    });
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
+    }
+
+    const OPEN_REQUEST_STATUSES = [
+      'VALIDATING',
+      'VALIDATION_FAILED',
+      'PENDING_MP_VERIFICATION',
+      'APPROVED',
+      'PROCESSING',
+    ];
+    const OPEN_PRIZE_STATUSES = [
+      'PENDING_PAYMENT_DETAILS',
+      'PENDING_VERIFICATION',
+      'VERIFYING_CHIPS',
+      'VERIFIED',
+      'PROCESSING',
+      'CHIPS_WITHDRAWN',
+    ];
+
+    const [requests, prizeClaims] = await Promise.all([
+      this.prisma.request.findMany({
+        where: {
+          userId: chat.userId,
+          status: { in: OPEN_REQUEST_STATUSES as any },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          id: true,
+          amount: true,
+          status: true,
+          targetUsername: true,
+          proofUrl: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.prizeClaim.findMany({
+        where: {
+          userId: chat.userId,
+          status: { in: OPEN_PRIZE_STATUSES as any },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          id: true,
+          amount: true,
+          status: true,
+          targetUsername: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    return {
+      requests: requests.map((r) => ({
+        ...r,
+        amount: r.amount.toString(),
+      })),
+      prizeClaims: prizeClaims.map((p) => ({
+        ...p,
+        amount: p.amount.toString(),
+      })),
+    };
   }
 
   /**

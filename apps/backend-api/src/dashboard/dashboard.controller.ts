@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Put, Delete, Query, Param, Body, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Query,
+  Param,
+  Body,
+  UseGuards,
+} from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { Public } from '../common/decorators/public.decorator';
 import { BotApiKeyGuard } from '../bot/guards/bot-api-key.guard';
@@ -26,7 +36,9 @@ export class DashboardController {
 
   @Get('trends')
   async getRequestTrends(@Query('days') days?: string) {
-    return this.dashboardService.getRequestTrends(days ? parseInt(days, 10) : 7);
+    return this.dashboardService.getRequestTrends(
+      days ? parseInt(days, 10) : 7,
+    );
   }
 
   @Get('revenue')
@@ -85,7 +97,16 @@ export class DashboardController {
   }
 
   @Post('expenses')
-  async createExpense(@Body() body: { category: string; description: string; amount: number; date: string; recurring?: boolean }) {
+  async createExpense(
+    @Body()
+    body: {
+      category: string;
+      description: string;
+      amount: number;
+      date: string;
+      recurring?: boolean;
+    },
+  ) {
     return this.dashboardService.createExpense(body);
   }
 
@@ -104,7 +125,17 @@ export class DashboardController {
   }
 
   @Post('vault')
-  async createVaultEntry(@Body() body: { category: string; label: string; username?: string; password: string; url?: string; notes?: string }) {
+  async createVaultEntry(
+    @Body()
+    body: {
+      category: string;
+      label: string;
+      username?: string;
+      password: string;
+      url?: string;
+      notes?: string;
+    },
+  ) {
     return this.dashboardService.createVaultEntry(body);
   }
 

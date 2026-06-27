@@ -21,17 +21,17 @@ export const DEFAULT_QUICK_REPLIES = [
 ];
 
 export const VIEW_TITLES = {
-  dashboard: 'Dashboard',
-  failures: 'Fallos Pendientes',
+  dashboard: 'Inicio',
+  failures: 'Fallos',
   jobs: 'Trabajos',
   requests: 'Solicitudes',
-  chats: 'Chats de Soporte',
-  activity: 'Registro de Actividad',
-  wallets: 'Gesti\u00f3n de Billeteras',
+  chats: 'Chats',
+  activity: 'Actividad',
+  wallets: 'Billeteras',
   prizes: 'Premios',
-  payments: 'Pagos Salientes',
+  payments: 'Pagos',
   users: 'Usuarios',
-  'preload-users': 'Usuarios Pre-cargados',
+  'preload-users': 'Pre-cargados',
   panels: 'Paneles',
   extensions: 'Extensiones',
   settings: 'Configuraci\u00f3n'

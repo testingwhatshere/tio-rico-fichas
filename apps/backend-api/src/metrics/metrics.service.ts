@@ -23,7 +23,10 @@ export class MetricsService implements OnModuleInit {
     this.current = this.emptyBucket();
 
     // Rotate hourly bucket every hour
-    this.rotateInterval = setInterval(() => this.rotateBucket(), 60 * 60 * 1000);
+    this.rotateInterval = setInterval(
+      () => this.rotateBucket(),
+      60 * 60 * 1000,
+    );
   }
 
   onModuleDestroy() {
@@ -82,10 +85,12 @@ export class MetricsService implements OnModuleInit {
     );
 
     const totalJobs = totals.jobsCompleted + totals.jobsFailed;
-    const successRate = totalJobs > 0 ? Math.round((totals.jobsCompleted / totalJobs) * 100) : 0;
-    const avgProcessingMs = totals.jobsProcessed > 0
-      ? Math.round(totals.totalProcessingMs / totals.jobsProcessed)
-      : 0;
+    const successRate =
+      totalJobs > 0 ? Math.round((totals.jobsCompleted / totalJobs) * 100) : 0;
+    const avgProcessingMs =
+      totals.jobsProcessed > 0
+        ? Math.round(totals.totalProcessingMs / totals.jobsProcessed)
+        : 0;
 
     return {
       uptime: {

@@ -112,10 +112,25 @@ export class AuthService {
    */
   // Fix 20: Reserved usernames that cannot be registered by clients
   private static readonly RESERVED_USERNAMES = [
-    'admin', 'administrator', 'system', 'bot', 'operator',
-    'support', 'soporte', 'root', 'moderator', 'mod',
-    'staff', 'help', 'info', 'null', 'undefined',
-    'api', 'test', 'demo', 'guest',
+    'admin',
+    'administrator',
+    'system',
+    'bot',
+    'operator',
+    'support',
+    'soporte',
+    'root',
+    'moderator',
+    'mod',
+    'staff',
+    'help',
+    'info',
+    'null',
+    'undefined',
+    'api',
+    'test',
+    'demo',
+    'guest',
   ];
 
   // Mar del Plata — area code blocked from registration
@@ -177,6 +192,7 @@ export class AuthService {
       select: {
         id: true,
         username: true,
+        savedTargetUsername: true,
         role: true,
         isActive: true,
         isPreloaded: true,
@@ -222,8 +238,10 @@ export class AuthService {
 
       // Trigger discovery for existing users without panel (fire-and-forget)
       this.triggerPanelDiscovery(user.id, normalizedUsername).catch((err) =>
-      this.logger.warn(`Discovery failed for ${normalizedUsername}: ${err.message}`),
-    );
+        this.logger.warn(
+          `Discovery failed for ${normalizedUsername}: ${err.message}`,
+        ),
+      );
 
       const token = this.generateToken({
         id: user.id,
@@ -236,6 +254,8 @@ export class AuthService {
         user: {
           id: user.id,
           email: user.username || '',
+          username: user.username || '',
+          savedTargetUsername: user.savedTargetUsername || user.username || '',
           role: user.role,
         },
       };
@@ -247,11 +267,13 @@ export class AuthService {
     const normalizedPhone = AuthService.canonicalArPhone(dto.phone);
 
     // Block Mar del Plata + zona costera area codes (canonical form starts with 549<area>)
-    const isBlockedRegion = AuthService.BLOCKED_AREA_CODES.some(code =>
+    const isBlockedRegion = AuthService.BLOCKED_AREA_CODES.some((code) =>
       normalizedPhone.startsWith('549' + code),
     );
     if (isBlockedRegion) {
-      throw new BadRequestException('El sistema no está disponible en tu región');
+      throw new BadRequestException(
+        'El sistema no está disponible en tu región',
+      );
     }
 
     // Check if phone is already used by another user
@@ -270,6 +292,7 @@ export class AuthService {
     type UserShape = {
       id: string;
       username: string | null;
+      savedTargetUsername: string | null;
       phone: string | null;
       role: 'CLIENT' | 'OPERATOR' | 'SENIOR_OPERATOR' | 'ADMIN';
       isActive: boolean;
@@ -278,6 +301,7 @@ export class AuthService {
     const userSelect = {
       id: true,
       username: true,
+      savedTargetUsername: true,
       role: true,
       isActive: true,
       isPreloaded: true,
@@ -300,11 +324,15 @@ export class AuthService {
         // Concurrent creation — could be username or phone unique constraint
         // Re-fetch case-insensitively to find any variant of the username.
         createdOrFound = (await this.prisma.user.findFirst({
-          where: { username: { equals: normalizedUsername, mode: 'insensitive' } },
+          where: {
+            username: { equals: normalizedUsername, mode: 'insensitive' },
+          },
           select: userSelect,
         })) as UserShape | null;
         if (!createdOrFound) {
-          throw new BadRequestException('Error al crear usuario, intentá de nuevo');
+          throw new BadRequestException(
+            'Error al crear usuario, intentá de nuevo',
+          );
         }
       } else {
         throw error;
@@ -322,7 +350,9 @@ export class AuthService {
 
     // Trigger panel discovery for new users (fire-and-forget, don't block login)
     this.triggerPanelDiscovery(user.id, normalizedUsername).catch((err) =>
-      this.logger.warn(`Discovery failed for ${normalizedUsername}: ${err.message}`),
+      this.logger.warn(
+        `Discovery failed for ${normalizedUsername}: ${err.message}`,
+      ),
     );
 
     // Generate token using username as identifier
@@ -337,6 +367,8 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.username || '', // Return username as email for frontend compatibility
+        username: user.username || '',
+        savedTargetUsername: user.savedTargetUsername || user.username || '',
         role: user.role,
       },
     };
@@ -346,7 +378,10 @@ export class AuthService {
    * Trigger panel discovery for a user — search all panels, create if not found.
    * Fire-and-forget: runs in background, doesn't block auth response.
    */
-  private async triggerPanelDiscovery(userId: string, targetUsername: string): Promise<void> {
+  private async triggerPanelDiscovery(
+    userId: string,
+    targetUsername: string,
+  ): Promise<void> {
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
@@ -355,11 +390,17 @@ export class AuthService {
       if (user?.panelId) return; // Already assigned to a panel
 
       const { DiscoveryService } = require('../discovery/discovery.service');
-      const discoveryService = this.moduleRef.get(DiscoveryService, { strict: false });
+      const discoveryService = this.moduleRef.get(DiscoveryService, {
+        strict: false,
+      });
       await discoveryService.discoverUser(userId, targetUsername);
-      this.logger.log(`Panel discovery triggered for new user ${userId} (${targetUsername})`);
+      this.logger.log(
+        `Panel discovery triggered for new user ${userId} (${targetUsername})`,
+      );
     } catch (error: any) {
-      this.logger.warn(`Panel discovery failed for ${targetUsername}: ${error.message}`);
+      this.logger.warn(
+        `Panel discovery failed for ${targetUsername}: ${error.message}`,
+      );
     }
   }
 
@@ -383,7 +424,12 @@ export class AuthService {
     return user;
   }
 
-  private generateToken(user: { id: string; email?: string; username?: string; role: string }) {
+  private generateToken(user: {
+    id: string;
+    email?: string;
+    username?: string;
+    role: string;
+  }) {
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,

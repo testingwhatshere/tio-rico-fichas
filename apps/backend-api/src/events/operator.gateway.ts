@@ -8,7 +8,13 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
-import { Logger, Inject, forwardRef, UsePipes, ValidationPipe } from '@nestjs/common';
+import {
+  Logger,
+  Inject,
+  forwardRef,
+  UsePipes,
+  ValidationPipe,
+} from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
@@ -85,7 +91,9 @@ export class OperatorGateway
   ) {
     const key = this.configService.get<string>('OPERATOR_API_KEY');
     if (!key) {
-      throw new Error('OPERATOR_API_KEY environment variable is required but not set.');
+      throw new Error(
+        'OPERATOR_API_KEY environment variable is required but not set.',
+      );
     }
     this.apiKey = key;
   }
@@ -95,11 +103,17 @@ export class OperatorGateway
   }
 
   async handleConnection(client: Socket) {
-    const providedKey = client.handshake.auth?.apiKey || client.handshake.query?.apiKey;
-    const operatorName = client.handshake.auth?.operatorName || client.handshake.query?.operatorName || 'unknown';
+    const providedKey =
+      client.handshake.auth?.apiKey || client.handshake.query?.apiKey;
+    const operatorName =
+      client.handshake.auth?.operatorName ||
+      client.handshake.query?.operatorName ||
+      'unknown';
 
     if (providedKey !== this.apiKey) {
-      this.logger.warn(`Operator connection rejected: invalid API key from ${client.id}`);
+      this.logger.warn(
+        `Operator connection rejected: invalid API key from ${client.id}`,
+      );
       client.emit('error', { message: 'Invalid API key' });
       client.disconnect();
       return;
@@ -114,7 +128,9 @@ export class OperatorGateway
       client.data.userId = user.id;
       this.logger.log(`Resolved operator "${operatorName}" to user ${user.id}`);
     } catch (err) {
-      this.logger.error(`Failed to resolve/create operator user: ${err.message}`);
+      this.logger.error(
+        `Failed to resolve/create operator user: ${err.message}`,
+      );
       client.emit('auth_warning', {
         message: `No se pudo crear el usuario operador. Algunas acciones pueden fallar.`,
         operatorName,
@@ -122,7 +138,9 @@ export class OperatorGateway
     }
 
     this.connectedOperators.set(client.id, client);
-    this.logger.log(`Operator panel connected: ${client.id} (operator: ${operatorName})`);
+    this.logger.log(
+      `Operator panel connected: ${client.id} (operator: ${operatorName})`,
+    );
 
     // Send initial data
     try {
@@ -141,14 +159,21 @@ export class OperatorGateway
 
   private getOperatorId(client: Socket): string {
     // Prefer resolved User ID (set during handleConnection) for FK compatibility
-    return client.data.userId || client.data.operatorName || `operator-${client.id.substring(0, 8)}`;
+    return (
+      client.data.userId ||
+      client.data.operatorName ||
+      `operator-${client.id.substring(0, 8)}`
+    );
   }
 
   /**
    * Check if operator has required role (ADMIN or SENIOR_OPERATOR).
    * Returns the user role or null if not authorized.
    */
-  private async checkOperatorRole(client: Socket, requiredRoles: string[]): Promise<string | null> {
+  private async checkOperatorRole(
+    client: Socket,
+    requiredRoles: string[],
+  ): Promise<string | null> {
     const userId = client.data.userId;
     if (!userId) return null;
     try {
@@ -168,7 +193,9 @@ export class OperatorGateway
    */
   private requireOperatorId(client: Socket): string {
     if (!client.data.userId) {
-      const err: any = new Error('Sesión expirada o sin autenticar — volvé a iniciar sesión');
+      const err: any = new Error(
+        'Sesión expirada o sin autenticar — volvé a iniciar sesión',
+      );
       err.code = 'OPERATOR_SESSION_REQUIRED';
       throw err;
     }
@@ -186,16 +213,31 @@ export class OperatorGateway
     let prizeClaims: any[] = [];
     let prizeClaimsError: string | null = null;
     try {
-      const { PrizeClaimsService } = require('../prize-claims/prize-claims.service');
-      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, { strict: false });
+      const {
+        PrizeClaimsService,
+      } = require('../prize-claims/prize-claims.service');
+      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, {
+        strict: false,
+      });
       prizeClaims = await prizeClaimsService.findPending();
     } catch (err: any) {
       prizeClaimsError = err?.message || String(err);
-      this.logger.warn(`Failed to load prize claims for initial data: ${prizeClaimsError}`);
+      this.logger.warn(
+        `Failed to load prize claims for initial data: ${prizeClaimsError}`,
+      );
     }
 
     // Use allSettled so one failing service doesn't crash everything
-    const labels = ['stats', 'failures', 'jobs', 'chats', 'settings', 'killSwitch', 'wallets', 'trends'];
+    const labels = [
+      'stats',
+      'failures',
+      'jobs',
+      'chats',
+      'settings',
+      'killSwitch',
+      'wallets',
+      'trends',
+    ];
     const results = await Promise.allSettled([
       this.dashboardService.getDashboardStats(),
       this.dashboardService.getFailureQueue(),
@@ -210,17 +252,30 @@ export class OperatorGateway
     // Extract values, logging any failures
     const values: any[] = results.map((r, i) => {
       if (r.status === 'fulfilled') return r.value;
-      this.logger.error(`getInitialData: "${labels[i]}" failed: ${r.reason?.message || r.reason}`);
+      this.logger.error(
+        `getInitialData: "${labels[i]}" failed: ${r.reason?.message || r.reason}`,
+      );
       return null;
     });
 
-    const [stats, failures, jobs, chats, settings, killSwitch, wallets, trends] = values;
+    const [
+      stats,
+      failures,
+      jobs,
+      chats,
+      settings,
+      killSwitch,
+      wallets,
+      trends,
+    ] = values;
 
     // Fetch panels with bot status
     let panels: any[] = [];
     try {
       const { PanelsService } = require('../panels/panels.service');
-      const panelsService = this.moduleRef.get(PanelsService, { strict: false });
+      const panelsService = this.moduleRef.get(PanelsService, {
+        strict: false,
+      });
       const allPanels = await panelsService.findAll();
       const connectedPanelIds = this.botGateway.getConnectedPanelIds();
       panels = allPanels.map((p: any) => ({
@@ -228,22 +283,32 @@ export class OperatorGateway
         botConnected: connectedPanelIds.includes(p.id),
       }));
     } catch (err) {
-      this.logger.warn(`Failed to load panels for initial data: ${err?.message || err}`);
+      this.logger.warn(
+        `Failed to load panels for initial data: ${err?.message || err}`,
+      );
     }
 
     // Fetch outbound payments
     let outboundPayments: any[] = [];
     try {
-      const { OutboundPaymentsService } = require('../outbound-payments/outbound-payments.service');
-      const outboundService = this.moduleRef.get(OutboundPaymentsService, { strict: false });
+      const {
+        OutboundPaymentsService,
+      } = require('../outbound-payments/outbound-payments.service');
+      const outboundService = this.moduleRef.get(OutboundPaymentsService, {
+        strict: false,
+      });
       outboundPayments = await outboundService.findPending();
     } catch (err) {
-      this.logger.warn(`Failed to load outbound payments: ${err?.message || err}`);
+      this.logger.warn(
+        `Failed to load outbound payments: ${err?.message || err}`,
+      );
     }
 
     return {
       stats: stats || {},
-      failures: failures ? failures.validationFailures.concat(failures.jobFailures as any) : [],
+      failures: failures
+        ? failures.validationFailures.concat(failures.jobFailures)
+        : [],
       jobs: jobs || [],
       chats: chats || [],
       settings: settings || {},
@@ -262,7 +327,9 @@ export class OperatorGateway
         connectedPerPanel: this.botGateway.getConnectedCountPerPanel(),
       },
       timestamp: new Date().toISOString(),
-      loadErrors: prizeClaimsError ? { prizeClaims: prizeClaimsError } : undefined,
+      loadErrors: prizeClaimsError
+        ? { prizeClaims: prizeClaimsError }
+        : undefined,
     };
   }
 
@@ -290,7 +357,8 @@ export class OperatorGateway
   @SubscribeMessage('approve_failure')
   async handleApproveFailure(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { failureId: string; note?: string; approvedAmount?: number },
+    @MessageBody()
+    data: { failureId: string; note?: string; approvedAmount?: number },
   ) {
     try {
       if (!data.failureId || typeof data.failureId !== 'string') {
@@ -343,7 +411,9 @@ export class OperatorGateway
       // Fix 10: Require authenticated operator for rejection actions
       const operatorId = this.requireOperatorId(client);
 
-      await this.requestsService.reject(data.failureId, operatorId, { reason: data.reason });
+      await this.requestsService.reject(data.failureId, operatorId, {
+        reason: data.reason,
+      });
 
       this.emitToAll('failure_resolved', {
         failureId: data.failureId,
@@ -370,9 +440,31 @@ export class OperatorGateway
   @SubscribeMessage('get_chats')
   async handleGetChats(@ConnectedSocket() client: Socket) {
     try {
-      const openChats = await this.chatsService.listChats({ status: 'OPEN' as any });
-      const assignedChats = await this.chatsService.listChats({ status: 'ASSIGNED' as any });
-      return { success: true, data: { open: openChats, assigned: assignedChats } };
+      const openChats = await this.chatsService.listChats({
+        status: 'OPEN' as any,
+      });
+      const assignedChats = await this.chatsService.listChats({
+        status: 'ASSIGNED' as any,
+      });
+      return {
+        success: true,
+        data: { open: openChats, assigned: assignedChats },
+      };
+    } catch (error) {
+      return { success: false, error: sanitizeError(error) };
+    }
+  }
+
+  @SubscribeMessage('get_pending_summary')
+  async handleGetPendingSummary(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { chatId: string },
+  ) {
+    try {
+      this.requireOperatorId(client);
+      if (!data?.chatId) return { success: false, error: 'chatId requerido' };
+      const summary = await this.chatsService.getPendingSummary(data.chatId);
+      return { success: true, data: summary };
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
     }
@@ -406,7 +498,11 @@ export class OperatorGateway
       const operatorId = this.requireOperatorId(client);
       const message = await this.messagesService.sendMessage(
         operatorId,
-        { chatId: data.chatId, content: data.content, ...(data.imageUrl && { imageUrl: data.imageUrl }) },
+        {
+          chatId: data.chatId,
+          content: data.content,
+          ...(data.imageUrl && { imageUrl: data.imageUrl }),
+        },
         'OPERATOR',
       );
 
@@ -423,7 +519,10 @@ export class OperatorGateway
     @MessageBody() data: { chatId: string },
   ) {
     try {
-      await this.messagesService.markAsRead(data.chatId, this.getOperatorId(client));
+      await this.messagesService.markAsRead(
+        data.chatId,
+        this.getOperatorId(client),
+      );
       return { success: true };
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
@@ -436,7 +535,11 @@ export class OperatorGateway
     @MessageBody() data: { chatId: string; reason?: string },
   ) {
     try {
-      await this.chatsService.closeChat(data.chatId, this.getOperatorId(client), data.reason);
+      await this.chatsService.closeChat(
+        data.chatId,
+        this.getOperatorId(client),
+        data.reason,
+      );
 
       this.emitToAll('chat_closed', {
         chatId: data.chatId,
@@ -462,10 +565,19 @@ export class OperatorGateway
       const operatorId = this.getOperatorId(client);
 
       // Kill switch requires ADMIN or SENIOR_OPERATOR role
-      const role = await this.checkOperatorRole(client, ['ADMIN', 'SENIOR_OPERATOR']);
+      const role = await this.checkOperatorRole(client, [
+        'ADMIN',
+        'SENIOR_OPERATOR',
+      ]);
       if (!role) {
-        this.logger.warn(`Operator ${operatorId} attempted kill switch without required role`);
-        return { success: false, error: 'Insufficient permissions. Only ADMIN or SENIOR_OPERATOR can toggle kill switch.' };
+        this.logger.warn(
+          `Operator ${operatorId} attempted kill switch without required role`,
+        );
+        return {
+          success: false,
+          error:
+            'Insufficient permissions. Only ADMIN or SENIOR_OPERATOR can toggle kill switch.',
+        };
       }
       if (data.active) {
         await this.settingsService.activateKillSwitch(operatorId, data.reason);
@@ -482,9 +594,13 @@ export class OperatorGateway
       // Broadcast kill switch to bots
       if (data.active) {
         try {
-          this.botGateway.broadcastKillSwitch(data.reason || 'Kill switch activated by operator');
+          this.botGateway.broadcastKillSwitch(
+            data.reason || 'Kill switch activated by operator',
+          );
         } catch (err) {
-          this.logger.error(`Failed to broadcast kill switch to bots: ${err.message}`);
+          this.logger.error(
+            `Failed to broadcast kill switch to bots: ${err.message}`,
+          );
         }
       }
 
@@ -510,11 +626,18 @@ export class OperatorGateway
         return { success: false, error: 'extensionId is required' };
       }
 
-      this.logger.log(`Operator ${operatorId} resetting circuit breaker for ${data.extensionId}`);
+      this.logger.log(
+        `Operator ${operatorId} resetting circuit breaker for ${data.extensionId}`,
+      );
 
-      const sent = this.botGateway.resetCircuitBreakerForPanel(data.extensionId);
+      const sent = this.botGateway.resetCircuitBreakerForPanel(
+        data.extensionId,
+      );
       if (!sent) {
-        return { success: false, error: `No bot connected for panel ${data.extensionId}` };
+        return {
+          success: false,
+          error: `No bot connected for panel ${data.extensionId}`,
+        };
       }
 
       // Notify all operators
@@ -545,9 +668,15 @@ export class OperatorGateway
       const operatorId = this.getOperatorId(client);
 
       // Only ADMIN or SENIOR_OPERATOR can broadcast
-      const role = await this.checkOperatorRole(client, ['ADMIN', 'SENIOR_OPERATOR']);
+      const role = await this.checkOperatorRole(client, [
+        'ADMIN',
+        'SENIOR_OPERATOR',
+      ]);
       if (!role) {
-        return { success: false, error: 'Permisos insuficientes para enviar promos.' };
+        return {
+          success: false,
+          error: 'Permisos insuficientes para enviar promos.',
+        };
       }
 
       if (!data.title?.trim() || !data.message?.trim()) {
@@ -559,7 +688,9 @@ export class OperatorGateway
         data.message.trim(),
       );
 
-      this.logger.log(`Promo broadcast by ${operatorId}: "${data.title}" → ${count} push recipients`);
+      this.logger.log(
+        `Promo broadcast by ${operatorId}: "${data.title}" → ${count} push recipients`,
+      );
 
       return { success: true, pushRecipients: count };
     } catch (error) {
@@ -575,23 +706,39 @@ export class OperatorGateway
   @SubscribeMessage('publish_app_update')
   async handlePublishAppUpdate(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { version: string; apkUrl: string; changelog?: string },
+    @MessageBody()
+    data: { version: string; apkUrl: string; changelog?: string },
   ) {
     try {
       const role = await this.checkOperatorRole(client, ['ADMIN']);
       if (!role) {
-        return { success: false, error: 'Solo ADMIN puede publicar actualizaciones.' };
+        return {
+          success: false,
+          error: 'Solo ADMIN puede publicar actualizaciones.',
+        };
       }
 
       if (!data.version?.trim() || !data.apkUrl?.trim()) {
-        return { success: false, error: 'Version y URL del APK son requeridos.' };
+        return {
+          success: false,
+          error: 'Version y URL del APK son requeridos.',
+        };
       }
 
       // Save version info to settings
-      await this.settingsService.setSetting('APP_VERSION_CHAT', data.version.trim());
-      await this.settingsService.setSetting('APP_APK_URL_CHAT', data.apkUrl.trim());
+      await this.settingsService.setSetting(
+        'APP_VERSION_CHAT',
+        data.version.trim(),
+      );
+      await this.settingsService.setSetting(
+        'APP_APK_URL_CHAT',
+        data.apkUrl.trim(),
+      );
       if (data.changelog) {
-        await this.settingsService.setSetting('APP_CHANGELOG_CHAT', data.changelog.trim());
+        await this.settingsService.setSetting(
+          'APP_CHANGELOG_CHAT',
+          data.changelog.trim(),
+        );
       }
 
       // Notify all users via push that a new version is available
@@ -601,7 +748,9 @@ export class OperatorGateway
         { type: 'APP_UPDATE', version: data.version },
       );
 
-      this.logger.log(`App update published: v${data.version} by ${this.getOperatorId(client)}, ${count} users notified`);
+      this.logger.log(
+        `App update published: v${data.version} by ${this.getOperatorId(client)}, ${count} users notified`,
+      );
 
       return { success: true, notifiedUsers: count };
     } catch (error) {
@@ -616,11 +765,22 @@ export class OperatorGateway
     @MessageBody() data: any,
   ) {
     try {
-      const role = await this.checkOperatorRole(client, ['ADMIN', 'SENIOR_OPERATOR']);
-      if (!role) return { success: false, error: 'No tienes permisos para modificar la configuración del sistema' };
+      const role = await this.checkOperatorRole(client, [
+        'ADMIN',
+        'SENIOR_OPERATOR',
+      ]);
+      if (!role)
+        return {
+          success: false,
+          error:
+            'No tienes permisos para modificar la configuración del sistema',
+        };
 
       const operatorId = this.requireOperatorId(client);
-      const updated = await this.settingsService.updateSystemSettings(data, operatorId);
+      const updated = await this.settingsService.updateSystemSettings(
+        data,
+        operatorId,
+      );
 
       this.emitToAll('settings_updated', {
         settings: updated,
@@ -644,14 +804,26 @@ export class OperatorGateway
     @MessageBody() data: { requestId: string },
   ) {
     try {
-      const role = await this.checkOperatorRole(client, ['ADMIN', 'SENIOR_OPERATOR']);
-      if (!role) return { success: false, error: 'No tienes permisos para reintentar solicitudes' };
+      const role = await this.checkOperatorRole(client, [
+        'ADMIN',
+        'SENIOR_OPERATOR',
+      ]);
+      if (!role)
+        return {
+          success: false,
+          error: 'No tienes permisos para reintentar solicitudes',
+        };
 
-      if (!data?.requestId) return { success: false, error: 'requestId requerido' };
+      if (!data?.requestId)
+        return { success: false, error: 'requestId requerido' };
 
       const { DiscoveryService } = require('../discovery/discovery.service');
-      const discoveryService = this.moduleRef.get(DiscoveryService, { strict: false });
-      const result = await discoveryService.retryDiscoveryForRequest(data.requestId);
+      const discoveryService = this.moduleRef.get(DiscoveryService, {
+        strict: false,
+      });
+      const result = await discoveryService.retryDiscoveryForRequest(
+        data.requestId,
+      );
       return result;
     } catch (error) {
       this.logger.error(`Failed to retry failed request: ${error.message}`);
@@ -667,7 +839,9 @@ export class OperatorGateway
   async handleGetPanels(@ConnectedSocket() client: Socket) {
     try {
       const { PanelsService } = require('../panels/panels.service');
-      const panelsService = this.moduleRef.get(PanelsService, { strict: false });
+      const panelsService = this.moduleRef.get(PanelsService, {
+        strict: false,
+      });
       const allPanels = await panelsService.findAll();
       const connectedPanelIds = this.botGateway.getConnectedPanelIds();
       const panels = allPanels.map((p: any) => ({
@@ -688,7 +862,9 @@ export class OperatorGateway
     try {
       this.requireOperatorId(client);
       const { PanelsService } = require('../panels/panels.service');
-      const panelsService = this.moduleRef.get(PanelsService, { strict: false });
+      const panelsService = this.moduleRef.get(PanelsService, {
+        strict: false,
+      });
       const panel = await panelsService.create({ name: data.name });
       this.emitToAll('panel_created', panel);
       return { success: true, panel };
@@ -705,8 +881,13 @@ export class OperatorGateway
     try {
       this.requireOperatorId(client);
       const { PanelsService } = require('../panels/panels.service');
-      const panelsService = this.moduleRef.get(PanelsService, { strict: false });
-      const panel = await panelsService.update(data.id, { name: data.name, isActive: data.isActive });
+      const panelsService = this.moduleRef.get(PanelsService, {
+        strict: false,
+      });
+      const panel = await panelsService.update(data.id, {
+        name: data.name,
+        isActive: data.isActive,
+      });
       this.emitToAll('panel_updated', panel);
       return { success: true, panel };
     } catch (error: any) {
@@ -722,7 +903,9 @@ export class OperatorGateway
     try {
       this.requireOperatorId(client);
       const { PanelsService } = require('../panels/panels.service');
-      const panelsService = this.moduleRef.get(PanelsService, { strict: false });
+      const panelsService = this.moduleRef.get(PanelsService, {
+        strict: false,
+      });
       const panel = await panelsService.remove(data.id);
       this.emitToAll('panel_deleted', { id: data.id });
       return { success: true, panel };
@@ -785,7 +968,8 @@ export class OperatorGateway
   @SubscribeMessage('create_wallet')
   async handleCreateWallet(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: {
+    @MessageBody()
+    data: {
       type: 'MERCADOPAGO' | 'CBU' | 'CVU';
       label: string;
       holderName: string;
@@ -811,7 +995,8 @@ export class OperatorGateway
   @SubscribeMessage('update_wallet')
   async handleUpdateWallet(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: {
+    @MessageBody()
+    data: {
       id: string;
       label?: string;
       holderName?: string;
@@ -936,7 +1121,10 @@ export class OperatorGateway
     @MessageBody() data: { userId: string; username: string },
   ) {
     try {
-      const result = await this.usersService.updateUsername(data.userId, data.username);
+      const result = await this.usersService.updateUsername(
+        data.userId,
+        data.username,
+      );
 
       // Broadcast to all operators (use user_updated which operator panel already listens for)
       this.emitToAll('user_updated', result.user);
@@ -954,7 +1142,9 @@ export class OperatorGateway
     @MessageBody() data: { limit?: number },
   ) {
     try {
-      const activity = await this.dashboardService.getRecentActivity(data?.limit || 50);
+      const activity = await this.dashboardService.getRecentActivity(
+        data?.limit || 50,
+      );
       return { success: true, data: activity };
     } catch (error) {
       this.logger.error(`Failed to get activity log: ${error.message}`);
@@ -984,9 +1174,7 @@ export class OperatorGateway
   }
 
   @SubscribeMessage('get_clients')
-  async handleGetClients(
-    @ConnectedSocket() client: Socket,
-  ) {
+  async handleGetClients(@ConnectedSocket() client: Socket) {
     try {
       const userId = this.getOperatorId(client);
       if (!userId) return { success: false, error: 'Not authenticated' };
@@ -1008,7 +1196,11 @@ export class OperatorGateway
       const operatorId = this.getOperatorId(client);
       if (!operatorId) return { success: false, error: 'Not authenticated' };
 
-      const user = await this.usersService.toggleUserActive(data.userId, data.isActive, operatorId);
+      const user = await this.usersService.toggleUserActive(
+        data.userId,
+        data.isActive,
+        operatorId,
+      );
 
       this.emitToAll('user_updated', user);
 
@@ -1028,7 +1220,9 @@ export class OperatorGateway
       const operatorId = this.getOperatorId(client);
       if (!operatorId) return { success: false, error: 'Not authenticated' };
 
-      const result = await this.usersService.requestCreateUser(data.targetUsername);
+      const result = await this.usersService.requestCreateUser(
+        data.targetUsername,
+      );
       return result;
     } catch (error) {
       this.logger.error(`Failed to create panel user: ${error.message}`);
@@ -1055,9 +1249,17 @@ export class OperatorGateway
       operatorName,
       isTyping: true,
     };
-    this.chatsGateway.emitToChatRoom(data.chatId, 'operator_typing', typingData);
+    this.chatsGateway.emitToChatRoom(
+      data.chatId,
+      'operator_typing',
+      typingData,
+    );
     // Also emit to user room in case chat app hasn't joined the chat room
-    this.eventsGateway.emitToChatRoom(data.chatId, 'operator_typing', typingData);
+    this.eventsGateway.emitToChatRoom(
+      data.chatId,
+      'operator_typing',
+      typingData,
+    );
 
     return { success: true };
   }
@@ -1073,7 +1275,6 @@ export class OperatorGateway
   // any of these patterns, restore from git history rather than reusing a
   // half-removed copy.
 
-
   /**
    * Operator processes a prize claim (VERIFIED → PROCESSING, triggers chip withdrawal)
    */
@@ -1087,12 +1288,18 @@ export class OperatorGateway
         return { success: false, error: 'claimId is required' };
       }
       const operatorId = this.requireOperatorId(client);
-      const { PrizeClaimsService } = require('../prize-claims/prize-claims.service');
-      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, { strict: false });
+      const {
+        PrizeClaimsService,
+      } = require('../prize-claims/prize-claims.service');
+      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, {
+        strict: false,
+      });
       const result = await prizeClaimsService.process(data.claimId, operatorId);
       return { success: true, data: result };
     } catch (error) {
-      this.logger.error(`operator:process_prize_claim failed: ${error.message}`);
+      this.logger.error(
+        `operator:process_prize_claim failed: ${error.message}`,
+      );
       return { success: false, error: sanitizeError(error) };
     }
   }
@@ -1103,19 +1310,100 @@ export class OperatorGateway
   @SubscribeMessage('operator:complete_prize_claim')
   async handleCompletePrizeClaim(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { claimId: string },
+    @MessageBody()
+    data: { claimId: string; proofUrl: string; proofType?: 'image' | 'pdf' },
   ) {
     try {
       if (!data.claimId) {
         return { success: false, error: 'claimId is required' };
       }
+      if (!data.proofUrl) {
+        return {
+          success: false,
+          error:
+            'Adjuntá el comprobante de la transferencia (imagen o PDF) antes de marcar como pagado.',
+        };
+      }
       const operatorId = this.requireOperatorId(client);
-      const { PrizeClaimsService } = require('../prize-claims/prize-claims.service');
-      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, { strict: false });
-      const result = await prizeClaimsService.complete(data.claimId, operatorId);
+      const {
+        PrizeClaimsService,
+      } = require('../prize-claims/prize-claims.service');
+      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, {
+        strict: false,
+      });
+      const result = await prizeClaimsService.complete(
+        data.claimId,
+        operatorId,
+        { proofUrl: data.proofUrl, proofType: data.proofType },
+      );
       return { success: true, data: result };
     } catch (error) {
-      this.logger.error(`operator:complete_prize_claim failed: ${error.message}`);
+      this.logger.error(
+        `operator:complete_prize_claim failed: ${error.message}`,
+      );
+      return { success: false, error: sanitizeError(error) };
+    }
+  }
+
+  /**
+   * Operator changes a user's saved panel-game username (support flow: when
+   * auto-creation failed because the chosen name was already taken on the panel).
+   * Backend resets the user's panelId binding and auto-retries the latest FAILED
+   * request via DiscoveryService.
+   */
+  @SubscribeMessage('operator:set_user_target_username')
+  async handleSetUserTargetUsername(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { userId: string; savedTargetUsername: string },
+  ) {
+    try {
+      if (!data?.userId || !data?.savedTargetUsername) {
+        return {
+          success: false,
+          error: 'userId y savedTargetUsername son requeridos',
+        };
+      }
+      this.requireOperatorId(client);
+      const { UsersService } = require('../users/users.service');
+      const usersService = this.moduleRef.get(UsersService, { strict: false });
+      const result = await usersService.changeSavedTargetUsernameWithRetry(
+        data.userId,
+        data.savedTargetUsername,
+      );
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error(
+        `operator:set_user_target_username failed: ${error.message}`,
+      );
+      return { success: false, error: sanitizeError(error) };
+    }
+  }
+
+  /**
+   * Operator fetches panel-game credentials for a user (for support).
+   * Every read is audited inside UsersService.getPanelInfoForOperator.
+   */
+  @SubscribeMessage('operator:get_user_panel_info')
+  async handleGetUserPanelInfo(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { userId: string },
+  ) {
+    try {
+      if (!data?.userId) {
+        return { success: false, error: 'userId is required' };
+      }
+      const operatorId = this.requireOperatorId(client);
+      const { UsersService } = require('../users/users.service');
+      const usersService = this.moduleRef.get(UsersService, { strict: false });
+      const result = await usersService.getPanelInfoForOperator(
+        data.userId,
+        operatorId,
+      );
+      return { success: true, data: result };
+    } catch (error) {
+      this.logger.error(
+        `operator:get_user_panel_info failed: ${error.message}`,
+      );
       return { success: false, error: sanitizeError(error) };
     }
   }
@@ -1133,9 +1421,15 @@ export class OperatorGateway
         return { success: false, error: 'claimId is required' };
       }
       const operatorId = this.requireOperatorId(client);
-      const { PrizeClaimsService } = require('../prize-claims/prize-claims.service');
-      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, { strict: false });
-      const result = await prizeClaimsService.reject(data.claimId, operatorId, { reason: data.reason || 'Rechazado por operador' });
+      const {
+        PrizeClaimsService,
+      } = require('../prize-claims/prize-claims.service');
+      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, {
+        strict: false,
+      });
+      const result = await prizeClaimsService.reject(data.claimId, operatorId, {
+        reason: data.reason || 'Rechazado por operador',
+      });
       return { success: true, data: result };
     } catch (error) {
       this.logger.error(`operator:reject_prize_claim failed: ${error.message}`);
@@ -1149,8 +1443,12 @@ export class OperatorGateway
   @SubscribeMessage('get_prize_claims')
   async handleGetPrizeClaims(@ConnectedSocket() client: Socket) {
     try {
-      const { PrizeClaimsService } = require('../prize-claims/prize-claims.service');
-      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, { strict: false });
+      const {
+        PrizeClaimsService,
+      } = require('../prize-claims/prize-claims.service');
+      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, {
+        strict: false,
+      });
       const claims = await prizeClaimsService.findPending();
       return { success: true, data: claims };
     } catch (error) {
@@ -1170,8 +1468,12 @@ export class OperatorGateway
     const userId = client.data?.userId;
     if (!userId) return { success: false, error: 'Auth required' };
     try {
-      const { OutboundPaymentsService } = require('../outbound-payments/outbound-payments.service');
-      const service = this.moduleRef.get(OutboundPaymentsService, { strict: false });
+      const {
+        OutboundPaymentsService,
+      } = require('../outbound-payments/outbound-payments.service');
+      const service = this.moduleRef.get(OutboundPaymentsService, {
+        strict: false,
+      });
       const result = await service.confirm(data.paymentId, userId);
       return { success: true, data: result };
     } catch (err: any) {
@@ -1187,9 +1489,17 @@ export class OperatorGateway
     const userId = client.data?.userId;
     if (!userId) return { success: false, error: 'Auth required' };
     try {
-      const { OutboundPaymentsService } = require('../outbound-payments/outbound-payments.service');
-      const service = this.moduleRef.get(OutboundPaymentsService, { strict: false });
-      const result = await service.cancel(data.paymentId, userId, data.reason || 'Cancelled by operator');
+      const {
+        OutboundPaymentsService,
+      } = require('../outbound-payments/outbound-payments.service');
+      const service = this.moduleRef.get(OutboundPaymentsService, {
+        strict: false,
+      });
+      const result = await service.cancel(
+        data.paymentId,
+        userId,
+        data.reason || 'Cancelled by operator',
+      );
       return { success: true, data: result };
     } catch (err: any) {
       return { success: false, error: err.message };
@@ -1204,8 +1514,12 @@ export class OperatorGateway
     const userId = client.data?.userId;
     if (!userId) return { success: false, error: 'Auth required' };
     try {
-      const { OutboundPaymentsService } = require('../outbound-payments/outbound-payments.service');
-      const service = this.moduleRef.get(OutboundPaymentsService, { strict: false });
+      const {
+        OutboundPaymentsService,
+      } = require('../outbound-payments/outbound-payments.service');
+      const service = this.moduleRef.get(OutboundPaymentsService, {
+        strict: false,
+      });
       const result = await service.retry(data.paymentId, userId);
       return { success: true, data: result };
     } catch (err: any) {
@@ -1221,8 +1535,12 @@ export class OperatorGateway
     const userId = client.data?.userId;
     if (!userId) return { success: false, error: 'Auth required' };
     try {
-      const { OutboundPaymentsService } = require('../outbound-payments/outbound-payments.service');
-      const service = this.moduleRef.get(OutboundPaymentsService, { strict: false });
+      const {
+        OutboundPaymentsService,
+      } = require('../outbound-payments/outbound-payments.service');
+      const service = this.moduleRef.get(OutboundPaymentsService, {
+        strict: false,
+      });
       const result = await service.buyCrypto(data, userId);
       return { success: true, data: result };
     } catch (err: any) {
@@ -1305,7 +1623,14 @@ export class OperatorGateway
     });
   }
 
-  emitHelpRequested(data: { chatId: string; userId: string; context: string; message: string; requestedAt: string; username: string }) {
+  emitHelpRequested(data: {
+    chatId: string;
+    userId: string;
+    context: string;
+    message: string;
+    requestedAt: string;
+    username: string;
+  }) {
     this.emitToAll('chat:help_requested', {
       ...data,
       timestamp: new Date().toISOString(),
@@ -1330,11 +1655,20 @@ export class OperatorGateway
     });
   }
 
-  emitDispatchBlocked(data: { jobId: string; reason: string; timestamp: string }) {
+  emitDispatchBlocked(data: {
+    jobId: string;
+    reason: string;
+    timestamp: string;
+  }) {
     this.emitToAll('dispatch_blocked', data);
   }
 
-  emitSystemAlert(data: { type: string; message: string; severity: 'info' | 'warning' | 'critical'; details?: any }) {
+  emitSystemAlert(data: {
+    type: string;
+    message: string;
+    severity: 'info' | 'warning' | 'critical';
+    details?: any;
+  }) {
     this.emitToAll('system_alert', {
       ...data,
       timestamp: new Date().toISOString(),

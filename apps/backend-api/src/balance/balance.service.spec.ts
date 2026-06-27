@@ -19,10 +19,7 @@ describe('BalanceService', () => {
     };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        BalanceService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [BalanceService, { provide: PrismaService, useValue: prisma }],
     }).compile();
 
     service = module.get<BalanceService>(BalanceService);
@@ -180,7 +177,14 @@ describe('BalanceService', () => {
         orderBy: { createdAt: 'desc' },
         take: 50,
         include: {
-          request: { select: { id: true, status: true, targetUsername: true, amount: true } },
+          request: {
+            select: {
+              id: true,
+              status: true,
+              targetUsername: true,
+              amount: true,
+            },
+          },
         },
       });
     });

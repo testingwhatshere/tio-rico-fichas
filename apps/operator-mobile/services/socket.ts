@@ -49,7 +49,9 @@ export function connectSocket(config: SocketConfig, autoStart = true): Socket {
     // never connects even though HTTP works fine.
     transports: ['websocket', 'polling'],
     reconnection: true,
-    reconnectionAttempts: 15,
+    // Infinity: si el teléfono pierde red un rato largo, el socket tiene que
+    // volver solo — con un límite, la app quedaba muda hasta reiniciarla.
+    reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 30000,
     randomizationFactor: 0.5,

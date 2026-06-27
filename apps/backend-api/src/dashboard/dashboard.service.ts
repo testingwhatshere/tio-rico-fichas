@@ -21,12 +21,13 @@ export class DashboardService {
   /**
    * Get comprehensive dashboard statistics
    */
-  async getDashboardStats(
-    from?: Date,
-    to?: Date,
-  ): Promise<DashboardStatsDto> {
+  async getDashboardStats(from?: Date, to?: Date): Promise<DashboardStatsDto> {
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
     const fromDate = from || startOfDay;
     const toDate = to || now;
 
@@ -52,45 +53,58 @@ export class DashboardService {
       cancelledRequests,
     ] = await Promise.all([
       this.prisma.request.count({ where: dateFilter }),
-      this.prisma.request.count({ where: { ...dateFilter, status: 'PENDING_PROOF' } }),
-      this.prisma.request.count({ where: { ...dateFilter, status: 'VALIDATING' } }),
-      this.prisma.request.count({ where: { ...dateFilter, status: 'VALIDATION_FAILED' } }),
-      this.prisma.request.count({ where: { ...dateFilter, status: 'PENDING_MP_VERIFICATION' } }),
-      this.prisma.request.count({ where: { ...dateFilter, status: 'APPROVED' } }),
-      this.prisma.request.count({ where: { ...dateFilter, status: 'PROCESSING' } }),
-      this.prisma.request.count({ where: { ...dateFilter, status: 'COMPLETED' } }),
+      this.prisma.request.count({
+        where: { ...dateFilter, status: 'PENDING_PROOF' },
+      }),
+      this.prisma.request.count({
+        where: { ...dateFilter, status: 'VALIDATING' },
+      }),
+      this.prisma.request.count({
+        where: { ...dateFilter, status: 'VALIDATION_FAILED' },
+      }),
+      this.prisma.request.count({
+        where: { ...dateFilter, status: 'PENDING_MP_VERIFICATION' },
+      }),
+      this.prisma.request.count({
+        where: { ...dateFilter, status: 'APPROVED' },
+      }),
+      this.prisma.request.count({
+        where: { ...dateFilter, status: 'PROCESSING' },
+      }),
+      this.prisma.request.count({
+        where: { ...dateFilter, status: 'COMPLETED' },
+      }),
       this.prisma.request.count({ where: { ...dateFilter, status: 'FAILED' } }),
-      this.prisma.request.count({ where: { ...dateFilter, status: 'REJECTED' } }),
-      this.prisma.request.count({ where: { ...dateFilter, status: 'CANCELLED' } }),
+      this.prisma.request.count({
+        where: { ...dateFilter, status: 'REJECTED' },
+      }),
+      this.prisma.request.count({
+        where: { ...dateFilter, status: 'CANCELLED' },
+      }),
     ]);
 
     // Job statistics
-    const [
-      totalJobs,
-      queuedJobs,
-      processingJobs,
-      completedJobs,
-      failedJobs,
-    ] = await Promise.all([
-      this.prisma.job.count({ where: dateFilter }),
-      this.prisma.job.count({ where: { ...dateFilter, status: 'QUEUED' } }),
-      this.prisma.job.count({ where: { ...dateFilter, status: 'PROCESSING' } }),
-      this.prisma.job.count({ where: { ...dateFilter, status: 'COMPLETED' } }),
-      this.prisma.job.count({ where: { ...dateFilter, status: 'FAILED' } }),
-    ]);
+    const [totalJobs, queuedJobs, processingJobs, completedJobs, failedJobs] =
+      await Promise.all([
+        this.prisma.job.count({ where: dateFilter }),
+        this.prisma.job.count({ where: { ...dateFilter, status: 'QUEUED' } }),
+        this.prisma.job.count({
+          where: { ...dateFilter, status: 'PROCESSING' },
+        }),
+        this.prisma.job.count({
+          where: { ...dateFilter, status: 'COMPLETED' },
+        }),
+        this.prisma.job.count({ where: { ...dateFilter, status: 'FAILED' } }),
+      ]);
 
     // Chat statistics
-    const [
-      totalChats,
-      openChats,
-      assignedChats,
-      closedChats,
-    ] = await Promise.all([
-      this.prisma.chat.count(),
-      this.prisma.chat.count({ where: { status: 'OPEN' } }),
-      this.prisma.chat.count({ where: { status: 'ASSIGNED' } }),
-      this.prisma.chat.count({ where: { status: 'CLOSED' } }),
-    ]);
+    const [totalChats, openChats, assignedChats, closedChats] =
+      await Promise.all([
+        this.prisma.chat.count(),
+        this.prisma.chat.count({ where: { status: 'OPEN' } }),
+        this.prisma.chat.count({ where: { status: 'ASSIGNED' } }),
+        this.prisma.chat.count({ where: { status: 'CLOSED' } }),
+      ]);
 
     const unreadMessages = await this.prisma.message.count({
       where: { isRead: false },
@@ -105,7 +119,9 @@ export class DashboardService {
     // Prize claim statistics
     const [pendingPrizeClaims, todayPrizeClaims] = await Promise.all([
       this.prisma.prizeClaim.count({
-        where: { status: { in: ['VERIFIED', 'CHIPS_WITHDRAWN', 'PROCESSING'] } },
+        where: {
+          status: { in: ['VERIFIED', 'CHIPS_WITHDRAWN', 'PROCESSING'] },
+        },
       }),
       this.prisma.prizeClaim.count({ where: dateFilter }),
     ]);
@@ -174,9 +190,7 @@ export class DashboardService {
   /**
    * Get request trends over time
    */
-  async getRequestTrends(
-    days: number = 7,
-  ): Promise<RequestTrendDto[]> {
+  async getRequestTrends(days: number = 7): Promise<RequestTrendDto[]> {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - (days - 1));
     startDate.setHours(0, 0, 0, 0);
@@ -195,7 +209,10 @@ export class DashboardService {
     `;
 
     // Build a map for quick lookup
-    const resultMap = new Map<string, { created: number; completed: number; failed: number }>();
+    const resultMap = new Map<
+      string,
+      { created: number; completed: number; failed: number }
+    >();
     for (const row of results) {
       const dateStr = new Date(row.date).toISOString().split('T')[0];
       resultMap.set(dateStr, {
@@ -211,7 +228,11 @@ export class DashboardService {
     for (let i = days - 1; i >= 0; i--) {
       const date = new Date(now);
       date.setDate(date.getDate() - i);
-      const dateStr = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+      const dateStr = new Date(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate(),
+      )
         .toISOString()
         .split('T')[0];
 
@@ -256,7 +277,9 @@ export class DashboardService {
       this.prisma.request.aggregate({
         where: {
           ...dateFilter,
-          status: { in: ['PENDING_PROOF', 'VALIDATING', 'APPROVED', 'PROCESSING'] },
+          status: {
+            in: ['PENDING_PROOF', 'VALIDATING', 'APPROVED', 'PROCESSING'],
+          },
         },
         _sum: { amount: true },
       }),
@@ -363,18 +386,20 @@ export class DashboardService {
         validationDetails: r.validationDetails,
         createdAt: r.createdAt,
       })),
-      jobFailures: jobFailures.filter(j => j.request).map((j) => ({
-        id: j.id,
-        type: 'job_failed',
-        requestId: j.requestId,
-        userId: j.request!.userId,
-        userEmail: j.request!.user.email,
-        targetUsername: j.request!.targetUsername,
-        amount: Number(j.request!.amount),
-        error: j.error,
-        screenshot: j.screenshot,
-        createdAt: j.createdAt,
-      })),
+      jobFailures: jobFailures
+        .filter((j) => j.request)
+        .map((j) => ({
+          id: j.id,
+          type: 'job_failed',
+          requestId: j.requestId,
+          userId: j.request!.userId,
+          userEmail: j.request!.user.email,
+          targetUsername: j.request!.targetUsername,
+          amount: Number(j.request!.amount),
+          error: j.error,
+          screenshot: j.screenshot,
+          createdAt: j.createdAt,
+        })),
       total: validationFailures.length + jobFailures.length,
     };
   }
@@ -425,14 +450,16 @@ export class DashboardService {
         user: r.user.email,
         timestamp: r.updatedAt,
       })),
-      ...recentJobs.filter(j => j.request).map((j) => ({
-        type: 'job' as const,
-        id: j.id,
-        action: j.status,
-        description: `Job ${j.status.toLowerCase()} for ${j.request!.targetUsername}`,
-        amount: Number(j.request!.amount),
-        timestamp: j.completedAt || j.createdAt,
-      })),
+      ...recentJobs
+        .filter((j) => j.request)
+        .map((j) => ({
+          type: 'job' as const,
+          id: j.id,
+          action: j.status,
+          description: `Job ${j.status.toLowerCase()} for ${j.request!.targetUsername}`,
+          amount: Number(j.request!.amount),
+          timestamp: j.completedAt || j.createdAt,
+        })),
       ...recentChats.map((c) => ({
         type: 'chat' as const,
         id: c.id,
@@ -444,7 +471,10 @@ export class DashboardService {
     ];
 
     return activities
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      )
       .slice(0, limit);
   }
 
@@ -453,7 +483,11 @@ export class DashboardService {
    */
   async getAnalytics() {
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
     const thirtyDaysAgo = new Date(now);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     thirtyDaysAgo.setHours(0, 0, 0, 0);
@@ -487,7 +521,11 @@ export class DashboardService {
     `;
 
     // Fill in missing days
-    const revenueByDayFilled: { date: string; revenue: number; count: number }[] = [];
+    const revenueByDayFilled: {
+      date: string;
+      revenue: number;
+      count: number;
+    }[] = [];
     for (let i = 29; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
@@ -505,7 +543,8 @@ export class DashboardService {
     }
 
     // --- Revenue by week (last 4 weeks) ---
-    const revenueByWeek: { week: string; revenue: number; count: number }[] = [];
+    const revenueByWeek: { week: string; revenue: number; count: number }[] =
+      [];
     for (let w = 3; w >= 0; w--) {
       const weekEnd = new Date(now);
       weekEnd.setDate(weekEnd.getDate() - w * 7);
@@ -536,9 +575,10 @@ export class DashboardService {
       this.prisma.request.count({ where: { status: 'FAILED' } }),
     ]);
     const totalFinished = completedCount + failedCount;
-    const successRate = totalFinished > 0
-      ? Math.round((completedCount / totalFinished) * 10000) / 100
-      : 0;
+    const successRate =
+      totalFinished > 0
+        ? Math.round((completedCount / totalFinished) * 10000) / 100
+        : 0;
 
     // --- Average processing time (APPROVED -> COMPLETED) ---
     const avgProcessingResult: any[] = await this.prisma.$queryRaw`
@@ -594,24 +634,25 @@ export class DashboardService {
     }));
 
     // --- Validation success rate ---
-    const [autoApproved, manuallyApproved, rejected, validationFailed] = await Promise.all([
-      this.prisma.request.count({
-        where: {
-          status: { in: ['APPROVED', 'PROCESSING', 'COMPLETED'] },
-          manuallyApproved: false,
-          validationScore: { not: null },
-        },
-      }),
-      this.prisma.request.count({
-        where: { manuallyApproved: true },
-      }),
-      this.prisma.request.count({
-        where: { status: 'REJECTED' },
-      }),
-      this.prisma.request.count({
-        where: { status: 'VALIDATION_FAILED' },
-      }),
-    ]);
+    const [autoApproved, manuallyApproved, rejected, validationFailed] =
+      await Promise.all([
+        this.prisma.request.count({
+          where: {
+            status: { in: ['APPROVED', 'PROCESSING', 'COMPLETED'] },
+            manuallyApproved: false,
+            validationScore: { not: null },
+          },
+        }),
+        this.prisma.request.count({
+          where: { manuallyApproved: true },
+        }),
+        this.prisma.request.count({
+          where: { status: 'REJECTED' },
+        }),
+        this.prisma.request.count({
+          where: { status: 'VALIDATION_FAILED' },
+        }),
+      ]);
 
     const validationBreakdown = {
       autoApproved,
@@ -647,7 +688,10 @@ export class DashboardService {
     const totalPrizesPaid = Number(totalPrizesPaidResult._sum.amount || 0);
     const totalRevenueNum = Number(totalRevenue._sum.amount || 0);
     const profitAmount = totalRevenueNum - totalPrizesPaid;
-    const profitPercentage = totalRevenueNum > 0 ? Math.round((profitAmount / totalRevenueNum) * 10000) / 100 : 0;
+    const profitPercentage =
+      totalRevenueNum > 0
+        ? Math.round((profitAmount / totalRevenueNum) * 10000) / 100
+        : 0;
 
     // --- Recent prize claims ---
     const recentPrizes = await this.prisma.prizeClaim.findMany({
@@ -661,23 +705,39 @@ export class DashboardService {
     const monthlyStats: any[] = [];
     for (let m = 11; m >= 0; m--) {
       const monthStart = new Date(now.getFullYear(), now.getMonth() - m, 1);
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() - m + 1, 0, 23, 59, 59, 999);
+      const monthEnd = new Date(
+        now.getFullYear(),
+        now.getMonth() - m + 1,
+        0,
+        23,
+        59,
+        59,
+        999,
+      );
 
       const [monthRevenue, monthPrizes, monthExpenses] = await Promise.all([
         this.prisma.request.aggregate({
-          where: { status: 'COMPLETED', createdAt: { gte: monthStart, lte: monthEnd } },
+          where: {
+            status: 'COMPLETED',
+            createdAt: { gte: monthStart, lte: monthEnd },
+          },
           _sum: { amount: true },
           _count: true,
         }),
         this.prisma.prizeClaim.aggregate({
-          where: { status: 'COMPLETED', updatedAt: { gte: monthStart, lte: monthEnd } },
+          where: {
+            status: 'COMPLETED',
+            updatedAt: { gte: monthStart, lte: monthEnd },
+          },
           _sum: { amount: true },
           _count: true,
         }),
-        this.prisma.expense.aggregate({
-          where: { date: { gte: monthStart, lte: monthEnd } },
-          _sum: { amount: true },
-        }).catch(() => ({ _sum: { amount: null } })),
+        this.prisma.expense
+          .aggregate({
+            where: { date: { gte: monthStart, lte: monthEnd } },
+            _sum: { amount: true },
+          })
+          .catch(() => ({ _sum: { amount: null } })),
       ]);
 
       const rev = Number(monthRevenue._sum.amount || 0);
@@ -719,7 +779,7 @@ export class DashboardService {
       prizeClaimCount,
       profitAmount,
       profitPercentage,
-      recentPrizes: recentPrizes.map(p => ({
+      recentPrizes: recentPrizes.map((p) => ({
         id: p.id,
         amount: Number(p.amount),
         user: p.user?.username || p.user?.email || 'Unknown',
@@ -759,7 +819,9 @@ export class DashboardService {
 
     return {
       status: (setting?.value as any) || 'offline',
-      lastHeartbeat: lastHeartbeat?.value ? new Date(lastHeartbeat.value) : undefined,
+      lastHeartbeat: lastHeartbeat?.value
+        ? new Date(lastHeartbeat.value)
+        : undefined,
       currentJob: currentJob?.id,
     };
   }
@@ -780,8 +842,12 @@ export class DashboardService {
   // ==========================================
 
   async getKillSwitchInfo() {
-    const setting = await this.prisma.setting.findUnique({ where: { key: 'KILL_SWITCH' } });
-    const reason = await this.prisma.setting.findUnique({ where: { key: 'KILL_SWITCH_REASON' } });
+    const setting = await this.prisma.setting.findUnique({
+      where: { key: 'KILL_SWITCH' },
+    });
+    const reason = await this.prisma.setting.findUnique({
+      where: { key: 'KILL_SWITCH_REASON' },
+    });
     return {
       active: setting?.value === 'true',
       reason: reason?.value || null,
@@ -833,7 +899,13 @@ export class DashboardService {
     return { expenses, total };
   }
 
-  async createExpense(data: { category: string; description: string; amount: number; date: string; recurring?: boolean }) {
+  async createExpense(data: {
+    category: string;
+    description: string;
+    amount: number;
+    date: string;
+    recurring?: boolean;
+  }) {
     return this.prisma.expense.create({
       data: {
         category: data.category,
@@ -861,7 +933,14 @@ export class DashboardService {
     return entries;
   }
 
-  async createVaultEntry(data: { category: string; label: string; username?: string; password: string; url?: string; notes?: string }) {
+  async createVaultEntry(data: {
+    category: string;
+    label: string;
+    username?: string;
+    password: string;
+    url?: string;
+    notes?: string;
+  }) {
     return this.prisma.vaultEntry.create({ data });
   }
 
@@ -884,7 +963,11 @@ export class DashboardService {
    */
   async getMonitoringData() {
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
     const weekStart = new Date(todayStart);
     weekStart.setDate(weekStart.getDate() - 7);
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -913,27 +996,65 @@ export class DashboardService {
       activeJobs,
     ] = await Promise.all([
       // Revenue (sum of completed request amounts)
-      this.prisma.request.aggregate({ where: { status: 'COMPLETED', updatedAt: { gte: todayStart } }, _sum: { amount: true } }),
-      this.prisma.request.aggregate({ where: { status: 'COMPLETED', updatedAt: { gte: weekStart } }, _sum: { amount: true } }),
-      this.prisma.request.aggregate({ where: { status: 'COMPLETED', updatedAt: { gte: monthStart } }, _sum: { amount: true } }),
-      this.prisma.request.aggregate({ where: { status: 'COMPLETED' }, _sum: { amount: true } }),
+      this.prisma.request.aggregate({
+        where: { status: 'COMPLETED', updatedAt: { gte: todayStart } },
+        _sum: { amount: true },
+      }),
+      this.prisma.request.aggregate({
+        where: { status: 'COMPLETED', updatedAt: { gte: weekStart } },
+        _sum: { amount: true },
+      }),
+      this.prisma.request.aggregate({
+        where: { status: 'COMPLETED', updatedAt: { gte: monthStart } },
+        _sum: { amount: true },
+      }),
+      this.prisma.request.aggregate({
+        where: { status: 'COMPLETED' },
+        _sum: { amount: true },
+      }),
       // Volume (count of completed requests)
-      this.prisma.request.count({ where: { status: 'COMPLETED', updatedAt: { gte: todayStart } } }),
-      this.prisma.request.count({ where: { status: 'COMPLETED', updatedAt: { gte: weekStart } } }),
-      this.prisma.request.count({ where: { status: 'COMPLETED', updatedAt: { gte: monthStart } } }),
+      this.prisma.request.count({
+        where: { status: 'COMPLETED', updatedAt: { gte: todayStart } },
+      }),
+      this.prisma.request.count({
+        where: { status: 'COMPLETED', updatedAt: { gte: weekStart } },
+      }),
+      this.prisma.request.count({
+        where: { status: 'COMPLETED', updatedAt: { gte: monthStart } },
+      }),
       this.prisma.request.count({ where: { status: 'COMPLETED' } }),
       // Failures
-      this.prisma.request.count({ where: { status: { in: ['VALIDATION_FAILED', 'FAILED'] } } }),
-      this.prisma.request.count({ where: { status: { in: ['VALIDATION_FAILED', 'FAILED'] }, updatedAt: { gte: todayStart } } }),
+      this.prisma.request.count({
+        where: { status: { in: ['VALIDATION_FAILED', 'FAILED'] } },
+      }),
+      this.prisma.request.count({
+        where: {
+          status: { in: ['VALIDATION_FAILED', 'FAILED'] },
+          updatedAt: { gte: todayStart },
+        },
+      }),
       // Operators
       this.prisma.operator.count(),
       this.prisma.operator.count({ where: { isAvailable: true } }),
       // Panel balances
-      this.prisma.panel.findMany({ where: { isActive: true }, select: { name: true } }),
+      this.prisma.panel.findMany({
+        where: { isActive: true },
+        select: { name: true },
+      }),
       // Recent 24h
-      this.prisma.request.count({ where: { status: 'COMPLETED', updatedAt: { gte: yesterday } } }),
-      this.prisma.request.count({ where: { status: 'FAILED', updatedAt: { gte: yesterday } } }),
-      this.prisma.request.count({ where: { status: { in: ['PENDING_PROOF', 'VALIDATING', 'APPROVED', 'PROCESSING'] } } }),
+      this.prisma.request.count({
+        where: { status: 'COMPLETED', updatedAt: { gte: yesterday } },
+      }),
+      this.prisma.request.count({
+        where: { status: 'FAILED', updatedAt: { gte: yesterday } },
+      }),
+      this.prisma.request.count({
+        where: {
+          status: {
+            in: ['PENDING_PROOF', 'VALIDATING', 'APPROVED', 'PROCESSING'],
+          },
+        },
+      }),
       // Queue
       this.prisma.job.count({ where: { status: 'QUEUED' } }),
       this.prisma.job.count({ where: { status: 'PROCESSING' } }),
@@ -943,8 +1064,12 @@ export class DashboardService {
     let botStatus = 'offline';
     let killSwitch = false;
     try {
-      const botStatusSetting = await this.prisma.setting.findUnique({ where: { key: 'BOT_STATUS' } });
-      const killSwitchSetting = await this.prisma.setting.findUnique({ where: { key: 'KILL_SWITCH' } });
+      const botStatusSetting = await this.prisma.setting.findUnique({
+        where: { key: 'BOT_STATUS' },
+      });
+      const killSwitchSetting = await this.prisma.setting.findUnique({
+        where: { key: 'KILL_SWITCH' },
+      });
       botStatus = botStatusSetting?.value || 'offline';
       killSwitch = killSwitchSetting?.value === 'true';
     } catch {}
@@ -984,7 +1109,7 @@ export class DashboardService {
         total: operatorsTotal,
         online: operatorsOnline,
       },
-      panelBalance: panelBalances.map(p => ({
+      panelBalance: panelBalances.map((p) => ({
         panelName: p.name,
         amount: 0,
       })),

@@ -1,7 +1,7 @@
 // renderer/views/payments.js — Outbound payments management view
 
 import { store } from '../state.js';
-import { escapeHtml, showToast, showConfirmModal } from '../utils.js';
+import { escapeHtml, showToast, showConfirmModal, showTextInputModal } from '../utils.js';
 import { OUTBOUND_PAYMENT_STATUS_CONFIG, WALLET_TYPE_LABELS } from '../constants.js';
 
 // ============================================
@@ -100,7 +100,7 @@ export async function confirmPayment(paymentId) {
 }
 
 export async function cancelPayment(paymentId) {
-  const reason = await window.api.showTextInputModal('Cancelar Pago', 'Motivo de cancelacion:');
+  const reason = await showTextInputModal('Cancelar Pago', 'Motivo de cancelacion:');
   if (!reason) return;
 
   try {

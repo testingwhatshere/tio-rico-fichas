@@ -20,10 +20,6 @@ import { SettingsModule } from '../settings/settings.module';
     forwardRef(() => SettingsModule),
   ],
   controllers: [HealthController],
-  providers: [
-    PrismaHealthIndicator,
-    BotHealthIndicator,
-    SelfMonitorService,
-  ],
+  providers: [PrismaHealthIndicator, BotHealthIndicator, SelfMonitorService],
 })
 export class HealthModule {}

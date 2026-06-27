@@ -18,5 +18,6 @@ export interface CurrentUserPayload {
   id: string; // User ID (duplicate)
   email?: string; // For OPERATOR/ADMIN
   username?: string; // For CLIENT
+  savedTargetUsername?: string; // CLIENT's gaming-panel username
   role: string;
 }

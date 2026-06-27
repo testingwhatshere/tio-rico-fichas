@@ -1,4 +1,11 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Cron } from '@nestjs/schedule';
@@ -77,7 +84,9 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     @Inject(forwardRef(() => MessagesService))
     private readonly messagesService: MessagesService,
   ) {
-    this.webhookSecret = this.configService.get<string>('TELEGRAM_WEBHOOK_SECRET') || 'tg-webhook-secret';
+    this.webhookSecret =
+      this.configService.get<string>('TELEGRAM_WEBHOOK_SECRET') ||
+      'tg-webhook-secret';
   }
 
   // ==========================================
@@ -87,7 +96,9 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit() {
     const token = this.configService.get<string>('TELEGRAM_USER_BOT_TOKEN');
     if (!token) {
-      this.logger.warn('Telegram user bot disabled (TELEGRAM_USER_BOT_TOKEN missing)');
+      this.logger.warn(
+        'Telegram user bot disabled (TELEGRAM_USER_BOT_TOKEN missing)',
+      );
       return;
     }
 
@@ -107,7 +118,9 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
         });
         this.logger.log(`Telegram bot webhook set: ${fullUrl}`);
       } catch (err: any) {
-        this.logger.error(`Failed to set webhook: ${err.message}. Falling back to polling.`);
+        this.logger.error(
+          `Failed to set webhook: ${err.message}. Falling back to polling.`,
+        );
         this.startPolling();
       }
     } else {
@@ -115,7 +128,10 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Conversation timeout checker every 5 min
-    this.timeoutInterval = setInterval(() => this.cleanupStaleConversations(), 5 * 60 * 1000);
+    this.timeoutInterval = setInterval(
+      () => this.cleanupStaleConversations(),
+      5 * 60 * 1000,
+    );
 
     this.logger.log('Telegram user bot initialized');
   }
@@ -141,7 +157,9 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   /** Get webhook handler for the controller */
   getWebhookHandler() {
     if (!this.bot) return null;
-    return webhookCallback(this.bot, 'express', { secretToken: this.webhookSecret });
+    return webhookCallback(this.bot, 'express', {
+      secretToken: this.webhookSecret,
+    });
   }
 
   // ==========================================
@@ -163,13 +181,18 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private async setState(telegramId: string, updates: Partial<ConversationState>) {
+  private async setState(
+    telegramId: string,
+    updates: Partial<ConversationState>,
+  ) {
     const dbData: any = { lastActivity: new Date() };
     if (updates.step !== undefined) dbData.step = updates.step;
     if (updates.requestId !== undefined) dbData.requestId = updates.requestId;
     if (updates.amount !== undefined) dbData.amount = updates.amount;
-    if (updates.prizeData !== undefined) dbData.prizeData = updates.prizeData || null;
-    if (updates.supportChatId !== undefined) dbData.supportChatId = updates.supportChatId;
+    if (updates.prizeData !== undefined)
+      dbData.prizeData = updates.prizeData || null;
+    if (updates.supportChatId !== undefined)
+      dbData.supportChatId = updates.supportChatId;
 
     await this.prisma.telegramConversation.upsert({
       where: { telegramId },
@@ -206,13 +229,23 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     // Callback queries (inline keyboard buttons)
     this.bot.callbackQuery(/^action:/, (ctx) => this.handleAction(ctx));
     this.bot.callbackQuery(/^amount:/, (ctx) => this.handleAmount(ctx));
-    this.bot.callbackQuery(/^prize_amount:/, (ctx) => this.handlePrizeAmount(ctx));
-    this.bot.callbackQuery(/^payment_method:/, (ctx) => this.handlePaymentMethod(ctx));
-    this.bot.callbackQuery('confirm_prize', (ctx) => this.handleConfirmPrize(ctx));
-    this.bot.callbackQuery('auto_load_confirm', (ctx) => this.handleAutoLoadConfirm(ctx));
+    this.bot.callbackQuery(/^prize_amount:/, (ctx) =>
+      this.handlePrizeAmount(ctx),
+    );
+    this.bot.callbackQuery(/^payment_method:/, (ctx) =>
+      this.handlePaymentMethod(ctx),
+    );
+    this.bot.callbackQuery('confirm_prize', (ctx) =>
+      this.handleConfirmPrize(ctx),
+    );
+    this.bot.callbackQuery('auto_load_confirm', (ctx) =>
+      this.handleAutoLoadConfirm(ctx),
+    );
     this.bot.callbackQuery('cancel', (ctx) => this.handleCancel(ctx));
     this.bot.callbackQuery('link_account', (ctx) => this.handleLinkStart(ctx));
-    this.bot.callbackQuery('new_account', (ctx) => this.handleNewAccountStart(ctx));
+    this.bot.callbackQuery('new_account', (ctx) =>
+      this.handleNewAccountStart(ctx),
+    );
     this.bot.callbackQuery('end_support', (ctx) => this.handleEndSupport(ctx));
 
     // Photo/document handler (proof upload + forwarded receipts)
@@ -232,7 +265,11 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   // USER MANAGEMENT
   // ==========================================
 
-  private async findOrCreateUser(telegramId: string, firstName: string, lastName?: string) {
+  private async findOrCreateUser(
+    telegramId: string,
+    firstName: string,
+    lastName?: string,
+  ) {
     const existing = await this.prisma.user.findUnique({
       where: { telegramId },
       select: { id: true, savedTargetUsername: true, balance: true },
@@ -251,29 +288,48 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       select: { id: true, savedTargetUsername: true, balance: true },
     });
 
-    const displayName = [firstName, lastName].filter(Boolean).join(' ').trim() || telegramId;
-    this.logger.log(`New Telegram user: ${displayName} (${telegramId}) → ${user.id}`);
+    const displayName =
+      [firstName, lastName].filter(Boolean).join(' ').trim() || telegramId;
+    this.logger.log(
+      `New Telegram user: ${displayName} (${telegramId}) → ${user.id}`,
+    );
     return { ...user, isNew: true };
   }
 
-  private async linkAccount(telegramId: string, username: string): Promise<{ success: boolean; error?: string }> {
+  private async linkAccount(
+    telegramId: string,
+    username: string,
+  ): Promise<{ success: boolean; error?: string }> {
     const user = await this.prisma.user.findUnique({
       where: { username },
       select: { id: true, telegramId: true },
     });
 
-    if (!user) return { success: false, error: `No encontré un usuario "${username}".` };
-    if (user.telegramId && user.telegramId !== telegramId) return { success: false, error: 'Esa cuenta ya está vinculada a otro Telegram.' };
+    if (!user)
+      return { success: false, error: `No encontré un usuario "${username}".` };
+    if (user.telegramId && user.telegramId !== telegramId)
+      return {
+        success: false,
+        error: 'Esa cuenta ya está vinculada a otro Telegram.',
+      };
     if (user.telegramId === telegramId) return { success: true };
 
     // Delete auto-created account if exists
-    const existingTg = await this.prisma.user.findUnique({ where: { telegramId }, select: { id: true } });
+    const existingTg = await this.prisma.user.findUnique({
+      where: { telegramId },
+      select: { id: true },
+    });
     if (existingTg && existingTg.id !== user.id) {
       await this.prisma.user.delete({ where: { id: existingTg.id } });
     }
 
-    await this.prisma.user.update({ where: { id: user.id }, data: { telegramId } });
-    this.logger.log(`Telegram ${telegramId} linked to user ${user.id} (${username})`);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { telegramId },
+    });
+    this.logger.log(
+      `Telegram ${telegramId} linked to user ${user.id} (${username})`,
+    );
     return { success: true };
   }
 
@@ -285,26 +341,36 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     const telegramId = this.getTelegramId(ctx);
     if (!telegramId) return;
 
-    const user = await this.findOrCreateUser(telegramId, ctx.from?.first_name || '', ctx.from?.last_name);
+    const user = await this.findOrCreateUser(
+      telegramId,
+      ctx.from?.first_name || '',
+      ctx.from?.last_name,
+    );
 
     if (user.isNew || !user.savedTargetUsername) {
       await ctx.reply(
         '👋 ¡Bienvenido!\n\nSoy tu asistente para cargar créditos y cobrar premios.\n\nPara empezar, necesito vincular tu cuenta.',
         {
           reply_markup: new InlineKeyboard()
-            .text('🔗 Tengo cuenta en la app', 'link_account').row()
+            .text('🔗 Tengo cuenta en la app', 'link_account')
+            .row()
             .text('🆕 Soy nuevo', 'new_account'),
         },
       );
     } else {
-      await ctx.reply(`👋 ¡Hola de nuevo! Tu usuario: *${this.esc(user.savedTargetUsername)}*`, { parse_mode: 'MarkdownV2' });
+      await ctx.reply(
+        `👋 ¡Hola de nuevo! Tu usuario: *${this.esc(user.savedTargetUsername)}*`,
+        { parse_mode: 'MarkdownV2' },
+      );
       await this.sendMainMenu(ctx);
     }
   }
 
   private async handleLinkStart(ctx: Context) {
     await ctx.answerCallbackQuery();
-    await this.setState(this.getTelegramId(ctx), { step: 'AWAITING_LINK_USERNAME' });
+    await this.setState(this.getTelegramId(ctx), {
+      step: 'AWAITING_LINK_USERNAME',
+    });
     await ctx.reply('Escribí tu nombre de usuario de la app:');
   }
 
@@ -321,9 +387,12 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   private async sendMainMenu(ctx: Context) {
     await ctx.reply('¿Qué querés hacer?', {
       reply_markup: new InlineKeyboard()
-        .text('💰 Cargar Créditos', 'action:load').row()
-        .text('🏆 Cobrar Premio', 'action:prize').row()
-        .text('💬 Soporte', 'action:support').row()
+        .text('💰 Cargar Créditos', 'action:load')
+        .row()
+        .text('🏆 Cobrar Premio', 'action:prize')
+        .row()
+        .text('💬 Soporte', 'action:support')
+        .row()
         .text('👤 Mi Cuenta', 'action:account'),
     });
   }
@@ -342,17 +411,32 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       select: { id: true, savedTargetUsername: true, balance: true },
     });
 
-    if (!user) { await ctx.reply('No tenés cuenta. Usá /start.'); return; }
-    if (!user.savedTargetUsername && action !== 'account' && action !== 'support') {
+    if (!user) {
+      await ctx.reply('No tenés cuenta. Usá /start.');
+      return;
+    }
+    if (
+      !user.savedTargetUsername &&
+      action !== 'account' &&
+      action !== 'support'
+    ) {
       await ctx.reply('Primero necesito tu usuario de juegos. Usá /start.');
       return;
     }
 
     switch (action) {
-      case 'load': await this.startLoadFlow(ctx, telegramId); break;
-      case 'prize': await this.startPrizeFlow(ctx, telegramId); break;
-      case 'account': await this.handleAccount(ctx); break;
-      case 'support': await this.startSupportFlow(ctx); break;
+      case 'load':
+        await this.startLoadFlow(ctx, telegramId);
+        break;
+      case 'prize':
+        await this.startPrizeFlow(ctx, telegramId);
+        break;
+      case 'account':
+        await this.handleAccount(ctx);
+        break;
+      case 'support':
+        await this.startSupportFlow(ctx);
+        break;
     }
   }
 
@@ -365,8 +449,15 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
     const keyboard = new InlineKeyboard();
     for (let i = 0; i < PRESET_AMOUNTS.length; i += 2) {
-      keyboard.text(`$${this.fmt(PRESET_AMOUNTS[i])}`, `amount:${PRESET_AMOUNTS[i]}`);
-      if (PRESET_AMOUNTS[i + 1]) keyboard.text(`$${this.fmt(PRESET_AMOUNTS[i + 1])}`, `amount:${PRESET_AMOUNTS[i + 1]}`);
+      keyboard.text(
+        `$${this.fmt(PRESET_AMOUNTS[i])}`,
+        `amount:${PRESET_AMOUNTS[i]}`,
+      );
+      if (PRESET_AMOUNTS[i + 1])
+        keyboard.text(
+          `$${this.fmt(PRESET_AMOUNTS[i + 1])}`,
+          `amount:${PRESET_AMOUNTS[i + 1]}`,
+        );
       keyboard.row();
     }
     keyboard.text('✏️ Otro monto', 'amount:custom').row();
@@ -391,32 +482,49 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     await this.createLoadRequest(ctx, telegramId, amount);
   }
 
-  private async createLoadRequest(ctx: Context, telegramId: string, amount: number) {
+  private async createLoadRequest(
+    ctx: Context,
+    telegramId: string,
+    amount: number,
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { telegramId },
       select: { id: true },
     });
-    if (!user) { await ctx.reply('Error: usuario no encontrado. Usá /start.'); return; }
+    if (!user) {
+      await ctx.reply('Error: usuario no encontrado. Usá /start.');
+      return;
+    }
 
     try {
       const request = await this.requestsService.create(user.id, { amount });
       const wallet = request.walletId
-        ? await this.prisma.paymentConfig.findUnique({ where: { id: request.walletId } })
+        ? await this.prisma.paymentConfig.findUnique({
+            where: { id: request.walletId },
+          })
         : null;
 
-      await this.setState(telegramId, { step: 'AWAITING_PROOF', requestId: request.id, amount });
+      await this.setState(telegramId, {
+        step: 'AWAITING_PROOF',
+        requestId: request.id,
+        amount,
+      });
 
       if (wallet) {
         const details = wallet.details as any;
         const copyValue = details?.alias || details?.cbu || details?.cvu || '';
-        const copyLabel = details?.alias ? 'Alias' : details?.cbu ? 'CBU' : 'CVU';
+        const copyLabel = details?.alias
+          ? 'Alias'
+          : details?.cbu
+            ? 'CBU'
+            : 'CVU';
 
         // Main message with instructions
         await ctx.reply(
           `💰 *Solicitud creada por \\$${this.esc(this.fmt(amount))}*\n\n` +
-          `Transferí a esta cuenta:\n\n` +
-          `📋 *${this.esc(copyLabel)}:*\n👤 *Titular:* ${this.esc(wallet.holderName)}\n\n` +
-          `Después de transferir, mandame la foto del comprobante\\.`,
+            `Transferí a esta cuenta:\n\n` +
+            `📋 *${this.esc(copyLabel)}:*\n👤 *Titular:* ${this.esc(wallet.holderName)}\n\n` +
+            `Después de transferir, mandame la foto del comprobante\\.`,
           { parse_mode: 'MarkdownV2' },
         );
 
@@ -428,11 +536,16 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       } else {
         await ctx.reply(
           `💰 *Solicitud creada por \\$${this.esc(this.fmt(amount))}*\n\nDespués de transferir, mandame la foto del comprobante\\.`,
-          { parse_mode: 'MarkdownV2', reply_markup: new InlineKeyboard().text('❌ Cancelar', 'cancel') },
+          {
+            parse_mode: 'MarkdownV2',
+            reply_markup: new InlineKeyboard().text('❌ Cancelar', 'cancel'),
+          },
         );
       }
     } catch (err: any) {
-      this.logger.error(`Request creation failed for ${telegramId}: ${err.message}`);
+      this.logger.error(
+        `Request creation failed for ${telegramId}: ${err.message}`,
+      );
       await ctx.reply(`⚠️ ${err.message || 'No se pudo crear la solicitud.'}`);
       await this.clearState(telegramId);
     }
@@ -462,7 +575,10 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     if (photo && photo.length > 0) {
       // Save file ID in state for later use
       const fileId = photo[photo.length - 1].file_id;
-      await this.setState(telegramId, { step: 'IDLE', prizeData: { autoLoadFileId: fileId } as any });
+      await this.setState(telegramId, {
+        step: 'IDLE',
+        prizeData: { autoLoadFileId: fileId } as any,
+      });
 
       await ctx.reply(
         '📸 ¿Querés cargar con este comprobante?\n\nLa IA va a leer el monto automáticamente.',
@@ -493,7 +609,11 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     await this.processProofUpload(ctx, telegramId, state);
   }
 
-  private async processProofUpload(ctx: Context, telegramId: string, state: ConversationState) {
+  private async processProofUpload(
+    ctx: Context,
+    telegramId: string,
+    state: ConversationState,
+  ) {
     const statusMsg = await ctx.reply('⏳ Subiendo comprobante...');
 
     try {
@@ -524,26 +644,57 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       const buffer = Buffer.from(await response.arrayBuffer());
       const hash = createHash('sha256').update(buffer).digest('hex');
 
-      const user = await this.prisma.user.findUnique({ where: { telegramId }, select: { id: true } });
+      const user = await this.prisma.user.findUnique({
+        where: { telegramId },
+        select: { id: true },
+      });
       if (!user) throw new Error('User not found');
 
-      const multerFile = { buffer, originalname: `telegram_${fileName}`, mimetype: mimeType, size: buffer.length } as Express.Multer.File;
-      const uploaded = await this.uploadsService.uploadFile(multerFile, user.id);
+      const multerFile = {
+        buffer,
+        originalname: `telegram_${fileName}`,
+        mimetype: mimeType,
+        size: buffer.length,
+      } as Express.Multer.File;
+      const uploaded = await this.uploadsService.uploadFile(
+        multerFile,
+        user.id,
+      );
 
-      await this.requestsService.uploadProof(state.requestId!, user.id, uploaded.cloudinaryUrl, hash);
+      await this.requestsService.uploadProof(
+        state.requestId!,
+        user.id,
+        uploaded.cloudinaryUrl,
+        hash,
+      );
 
       try {
-        await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, '✅ Comprobante recibido. Validando...\n\nTe aviso cuando esté listo.');
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          statusMsg.message_id,
+          '✅ Comprobante recibido. Validando...\n\nTe aviso cuando esté listo.',
+        );
       } catch {
         await ctx.reply('✅ Comprobante recibido. Validando...');
       }
 
-      await this.setState(telegramId, { step: 'IDLE', requestId: state.requestId });
+      await this.setState(telegramId, {
+        step: 'IDLE',
+        requestId: state.requestId,
+      });
     } catch (err: any) {
-      this.logger.error(`Proof upload failed for ${telegramId}: ${err.message}`);
-      const errorMsg = err.message?.includes('duplicado') ? 'Este comprobante ya fue usado antes.' : 'No se pudo subir el comprobante. Intentá de nuevo.';
+      this.logger.error(
+        `Proof upload failed for ${telegramId}: ${err.message}`,
+      );
+      const errorMsg = err.message?.includes('duplicado')
+        ? 'Este comprobante ya fue usado antes.'
+        : 'No se pudo subir el comprobante. Intentá de nuevo.';
       try {
-        await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `⚠️ ${errorMsg}`);
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          statusMsg.message_id,
+          `⚠️ ${errorMsg}`,
+        );
       } catch {
         await ctx.reply(`⚠️ ${errorMsg}`);
       }
@@ -559,14 +710,24 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
     const keyboard = new InlineKeyboard();
     for (let i = 0; i < PRIZE_PRESET_AMOUNTS.length; i += 2) {
-      keyboard.text(`$${this.fmt(PRIZE_PRESET_AMOUNTS[i])}`, `prize_amount:${PRIZE_PRESET_AMOUNTS[i]}`);
-      if (PRIZE_PRESET_AMOUNTS[i + 1]) keyboard.text(`$${this.fmt(PRIZE_PRESET_AMOUNTS[i + 1])}`, `prize_amount:${PRIZE_PRESET_AMOUNTS[i + 1]}`);
+      keyboard.text(
+        `$${this.fmt(PRIZE_PRESET_AMOUNTS[i])}`,
+        `prize_amount:${PRIZE_PRESET_AMOUNTS[i]}`,
+      );
+      if (PRIZE_PRESET_AMOUNTS[i + 1])
+        keyboard.text(
+          `$${this.fmt(PRIZE_PRESET_AMOUNTS[i + 1])}`,
+          `prize_amount:${PRIZE_PRESET_AMOUNTS[i + 1]}`,
+        );
       keyboard.row();
     }
     keyboard.text('✏️ Otro monto', 'prize_amount:custom').row();
     keyboard.text('❌ Cancelar', 'cancel');
 
-    await ctx.reply(`¿Cuánto querés cobrar?\n(Mínimo $${this.fmt(MIN_PRIZE_AMOUNT)})`, { reply_markup: keyboard });
+    await ctx.reply(
+      `¿Cuánto querés cobrar?\n(Mínimo $${this.fmt(MIN_PRIZE_AMOUNT)})`,
+      { reply_markup: keyboard },
+    );
   }
 
   private async handlePrizeAmount(ctx: Context) {
@@ -575,23 +736,33 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     const telegramId = this.getTelegramId(ctx);
 
     if (data === 'custom') {
-      await this.setState(telegramId, { step: 'AWAITING_PRIZE_CUSTOM_AMOUNT', prizeData: {} });
-      await ctx.reply(`Escribí el monto a cobrar (mínimo $${this.fmt(MIN_PRIZE_AMOUNT)}):`);
+      await this.setState(telegramId, {
+        step: 'AWAITING_PRIZE_CUSTOM_AMOUNT',
+        prizeData: {},
+      });
+      await ctx.reply(
+        `Escribí el monto a cobrar (mínimo $${this.fmt(MIN_PRIZE_AMOUNT)}):`,
+      );
       return;
     }
 
     const amount = parseInt(data || '0', 10);
     if (amount < MIN_PRIZE_AMOUNT) return;
 
-    await this.setState(telegramId, { step: 'AWAITING_PAYMENT_METHOD', prizeData: { amount } });
+    await this.setState(telegramId, {
+      step: 'AWAITING_PAYMENT_METHOD',
+      prizeData: { amount },
+    });
     await this.showPaymentMethodSelector(ctx);
   }
 
   private async showPaymentMethodSelector(ctx: Context) {
     await ctx.reply('¿Cómo querés recibir la plata?', {
       reply_markup: new InlineKeyboard()
-        .text('🏦 CBU (transferencia)', 'payment_method:CBU').row()
-        .text('📱 Alias (MercadoPago)', 'payment_method:ALIAS').row()
+        .text('🏦 CBU (transferencia)', 'payment_method:CBU')
+        .row()
+        .text('📱 Alias (MercadoPago)', 'payment_method:ALIAS')
+        .row()
         .text('❌ Cancelar', 'cancel'),
     });
   }
@@ -624,14 +795,15 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
     await ctx.reply(
       `📋 *Resumen de tu retiro:*\n\n` +
-      `💰 Monto: \\$${this.esc(this.fmt(pd.amount))}\n` +
-      `🏦 Método: ${this.esc(methodLabel)}\n` +
-      `📋 ${this.esc(methodLabel)}: \`${this.esc(detail || '')}\`\n` +
-      `👤 Titular: ${this.esc(pd.accountHolder)}`,
+        `💰 Monto: \\$${this.esc(this.fmt(pd.amount))}\n` +
+        `🏦 Método: ${this.esc(methodLabel)}\n` +
+        `📋 ${this.esc(methodLabel)}: \`${this.esc(detail || '')}\`\n` +
+        `👤 Titular: ${this.esc(pd.accountHolder)}`,
       {
         parse_mode: 'MarkdownV2',
         reply_markup: new InlineKeyboard()
-          .text('✅ Confirmar', 'confirm_prize').text('❌ Cancelar', 'cancel'),
+          .text('✅ Confirmar', 'confirm_prize')
+          .text('❌ Cancelar', 'cancel'),
       },
     );
   }
@@ -648,20 +820,33 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const user = await this.prisma.user.findUnique({ where: { telegramId }, select: { id: true } });
-    if (!user) { await ctx.reply('Error: usuario no encontrado.'); return; }
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId },
+      select: { id: true },
+    });
+    if (!user) {
+      await ctx.reply('Error: usuario no encontrado.');
+      return;
+    }
 
     try {
       await this.prizeClaimsService.createWithPayment(user.id, {
         amount: pd.amount,
         paymentMethod: pd.paymentMethod,
-        paymentDetails: { cbu: pd.cbu, alias: pd.alias, accountHolder: pd.accountHolder },
+        paymentDetails: {
+          cbu: pd.cbu,
+          alias: pd.alias,
+          accountHolder: pd.accountHolder,
+        },
       });
 
       await this.clearState(telegramId);
-      await ctx.reply('✅ ¡Solicitud de retiro creada!\n\nUn operador va a revisarla. Te avisamos cuando esté lista.', {
-        reply_markup: new InlineKeyboard().text('📋 Menú', 'action:load'),
-      });
+      await ctx.reply(
+        '✅ ¡Solicitud de retiro creada!\n\nUn operador va a revisarla. Te avisamos cuando esté lista.',
+        {
+          reply_markup: new InlineKeyboard().text('📋 Menú', 'action:load'),
+        },
+      );
     } catch (err: any) {
       this.logger.error(`Prize claim failed for ${telegramId}: ${err.message}`);
       await ctx.reply(`⚠️ ${err.message || 'Error al crear la solicitud.'}`);
@@ -691,14 +876,25 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       select: { id: true, savedTargetUsername: true },
     });
 
-    if (!user) { await ctx.reply('Error: usuario no encontrado. Usá /start.'); return; }
-    if (!user.savedTargetUsername) { await ctx.reply('Primero configurá tu usuario de juegos. Usá /start.'); return; }
+    if (!user) {
+      await ctx.reply('Error: usuario no encontrado. Usá /start.');
+      return;
+    }
+    if (!user.savedTargetUsername) {
+      await ctx.reply('Primero configurá tu usuario de juegos. Usá /start.');
+      return;
+    }
 
-    const statusMsg = await ctx.reply('⏳ Creando solicitud y subiendo comprobante...');
+    const statusMsg = await ctx.reply(
+      '⏳ Creando solicitud y subiendo comprobante...',
+    );
 
     try {
       // Create request with amount=0 (AI will detect it)
-      const request = await this.requestsService.create(user.id, { amount: 0, autoDetectAmount: true });
+      const request = await this.requestsService.create(user.id, {
+        amount: 0,
+        autoDetectAmount: true,
+      });
 
       // Download photo from Telegram
       const file = await ctx.api.getFile(fileId);
@@ -710,15 +906,30 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       const buffer = Buffer.from(await response.arrayBuffer());
       const hash = createHash('sha256').update(buffer).digest('hex');
 
-      const multerFile = { buffer, originalname: `telegram_autoload.jpg`, mimetype: 'image/jpeg', size: buffer.length } as Express.Multer.File;
-      const uploaded = await this.uploadsService.uploadFile(multerFile, user.id);
+      const multerFile = {
+        buffer,
+        originalname: `telegram_autoload.jpg`,
+        mimetype: 'image/jpeg',
+        size: buffer.length,
+      } as Express.Multer.File;
+      const uploaded = await this.uploadsService.uploadFile(
+        multerFile,
+        user.id,
+      );
 
-      await this.requestsService.uploadProof(request.id, user.id, uploaded.cloudinaryUrl, hash);
+      await this.requestsService.uploadProof(
+        request.id,
+        user.id,
+        uploaded.cloudinaryUrl,
+        hash,
+      );
 
       await this.setState(telegramId, { step: 'IDLE', requestId: request.id });
 
       try {
-        await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id,
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          statusMsg.message_id,
           '✅ Comprobante recibido. La IA está leyendo el monto y validando...\n\nTe aviso cuando esté listo.',
         );
       } catch {
@@ -727,7 +938,11 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     } catch (err: any) {
       this.logger.error(`Auto-load failed for ${telegramId}: ${err.message}`);
       try {
-        await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `⚠️ ${err.message || 'Error al procesar. Intentá de nuevo.'}`);
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          statusMsg.message_id,
+          `⚠️ ${err.message || 'Error al procesar. Intentá de nuevo.'}`,
+        );
       } catch {
         await ctx.reply(`⚠️ ${err.message || 'Error al procesar.'}`);
       }
@@ -747,23 +962,34 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       where: { telegramId },
       select: { id: true },
     });
-    if (!user) { await ctx.reply('No tenés cuenta. Usá /start.'); return; }
+    if (!user) {
+      await ctx.reply('No tenés cuenta. Usá /start.');
+      return;
+    }
 
     try {
       // Get or create user's support chat
       const chat = await this.chatsService.getOrCreateChat(user.id);
 
-      await this.setState(telegramId, { step: 'IN_SUPPORT', supportChatId: chat.id });
+      await this.setState(telegramId, {
+        step: 'IN_SUPPORT',
+        supportChatId: chat.id,
+      });
 
       await ctx.reply(
         '💬 *Modo soporte activado*\n\nTodo lo que escribas lo va a recibir un operador\\. Te responden por acá\\.\n\nPara salir del soporte, usá el botón de abajo\\.',
         {
           parse_mode: 'MarkdownV2',
-          reply_markup: new InlineKeyboard().text('❌ Salir de soporte', 'end_support'),
+          reply_markup: new InlineKeyboard().text(
+            '❌ Salir de soporte',
+            'end_support',
+          ),
         },
       );
     } catch (err: any) {
-      this.logger.error(`Support flow failed for ${telegramId}: ${err.message}`);
+      this.logger.error(
+        `Support flow failed for ${telegramId}: ${err.message}`,
+      );
       await ctx.reply('⚠️ No se pudo iniciar el soporte. Intentá de nuevo.');
     }
   }
@@ -782,7 +1008,11 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
    * and is in support mode — if so, forward the message.
    */
   @OnEvent('chat.operator_message')
-  async onOperatorMessage(data: { chatId: string; content: string; senderId: string }) {
+  async onOperatorMessage(data: {
+    chatId: string;
+    content: string;
+    senderId: string;
+  }) {
     if (!this.bot || !this.enabled) return;
 
     try {
@@ -803,12 +1033,21 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       const state = await this.getState(user.telegramId);
       if (state.step !== 'IN_SUPPORT') return;
 
-      await this.bot.api.sendMessage(user.telegramId, `👨‍💼 *Operador:*\n${this.esc(data.content)}`, {
-        parse_mode: 'MarkdownV2',
-        reply_markup: new InlineKeyboard().text('❌ Salir de soporte', 'end_support'),
-      });
+      await this.bot.api.sendMessage(
+        user.telegramId,
+        `👨‍💼 *Operador:*\n${this.esc(data.content)}`,
+        {
+          parse_mode: 'MarkdownV2',
+          reply_markup: new InlineKeyboard().text(
+            '❌ Salir de soporte',
+            'end_support',
+          ),
+        },
+      );
     } catch (err: any) {
-      this.logger.error(`Failed to forward operator message to TG: ${err.message}`);
+      this.logger.error(
+        `Failed to forward operator message to TG: ${err.message}`,
+      );
     }
   }
 
@@ -828,11 +1067,23 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
     switch (state.step) {
       case 'AWAITING_USERNAME': {
-        if (text.length < 3) { await ctx.reply('El usuario debe tener al menos 3 caracteres:'); return; }
-        const user = await this.prisma.user.findUnique({ where: { telegramId }, select: { id: true } });
-        if (user) await this.prisma.user.update({ where: { id: user.id }, data: { savedTargetUsername: text } });
+        if (text.length < 3) {
+          await ctx.reply('El usuario debe tener al menos 3 caracteres:');
+          return;
+        }
+        const user = await this.prisma.user.findUnique({
+          where: { telegramId },
+          select: { id: true },
+        });
+        if (user)
+          await this.prisma.user.update({
+            where: { id: user.id },
+            data: { savedTargetUsername: text },
+          });
         await this.clearState(telegramId);
-        await ctx.reply(`✅ Usuario configurado: *${this.esc(text)}*`, { parse_mode: 'MarkdownV2' });
+        await ctx.reply(`✅ Usuario configurado: *${this.esc(text)}*`, {
+          parse_mode: 'MarkdownV2',
+        });
         await this.sendMainMenu(ctx);
         break;
       }
@@ -844,14 +1095,19 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
           await ctx.reply('✅ ¡Cuenta vinculada!');
           await this.sendMainMenu(ctx);
         } else {
-          await ctx.reply(`⚠️ ${result.error}\n\nIntentá de nuevo o /cancelar:`);
+          await ctx.reply(
+            `⚠️ ${result.error}\n\nIntentá de nuevo o /cancelar:`,
+          );
         }
         break;
       }
 
       case 'AWAITING_CUSTOM_AMOUNT': {
         const amount = parseInt(text.replace(/[$.]/g, ''), 10);
-        if (isNaN(amount) || amount <= 0) { await ctx.reply('Monto inválido. Escribí un número entero:'); return; }
+        if (isNaN(amount) || amount <= 0) {
+          await ctx.reply('Monto inválido. Escribí un número entero:');
+          return;
+        }
         await this.setState(telegramId, { step: 'IDLE' });
         await this.createLoadRequest(ctx, telegramId, amount);
         break;
@@ -859,31 +1115,52 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
       case 'AWAITING_PRIZE_CUSTOM_AMOUNT': {
         const amount = parseInt(text.replace(/[$.]/g, ''), 10);
-        if (isNaN(amount) || amount < MIN_PRIZE_AMOUNT) { await ctx.reply(`Mínimo $${this.fmt(MIN_PRIZE_AMOUNT)}:`); return; }
-        await this.setState(telegramId, { step: 'AWAITING_PAYMENT_METHOD', prizeData: { amount } });
+        if (isNaN(amount) || amount < MIN_PRIZE_AMOUNT) {
+          await ctx.reply(`Mínimo $${this.fmt(MIN_PRIZE_AMOUNT)}:`);
+          return;
+        }
+        await this.setState(telegramId, {
+          step: 'AWAITING_PAYMENT_METHOD',
+          prizeData: { amount },
+        });
         await this.showPaymentMethodSelector(ctx);
         break;
       }
 
       case 'AWAITING_CBU': {
         const cbu = text.replace(/\s/g, '');
-        if (!/^\d{22}$/.test(cbu)) { await ctx.reply('CBU: exactamente 22 dígitos numéricos:'); return; }
+        if (!/^\d{22}$/.test(cbu)) {
+          await ctx.reply('CBU: exactamente 22 dígitos numéricos:');
+          return;
+        }
         const prizeData = { ...state.prizeData, cbu };
-        await this.setState(telegramId, { step: 'AWAITING_ACCOUNT_HOLDER', prizeData });
+        await this.setState(telegramId, {
+          step: 'AWAITING_ACCOUNT_HOLDER',
+          prizeData,
+        });
         await ctx.reply('Nombre del titular de la cuenta:');
         break;
       }
 
       case 'AWAITING_ALIAS': {
-        if (text.length < 6) { await ctx.reply('Alias: mínimo 6 caracteres:'); return; }
+        if (text.length < 6) {
+          await ctx.reply('Alias: mínimo 6 caracteres:');
+          return;
+        }
         const prizeData = { ...state.prizeData, alias: text };
-        await this.setState(telegramId, { step: 'AWAITING_ACCOUNT_HOLDER', prizeData });
+        await this.setState(telegramId, {
+          step: 'AWAITING_ACCOUNT_HOLDER',
+          prizeData,
+        });
         await ctx.reply('Nombre del titular de la cuenta:');
         break;
       }
 
       case 'AWAITING_ACCOUNT_HOLDER': {
-        if (text.length < 3) { await ctx.reply('Nombre: mínimo 3 caracteres:'); return; }
+        if (text.length < 3) {
+          await ctx.reply('Nombre: mínimo 3 caracteres:');
+          return;
+        }
         const prizeData = { ...state.prizeData, accountHolder: text };
         await this.setState(telegramId, { step: 'IDLE', prizeData });
         await this.showPrizeConfirmation(ctx, telegramId);
@@ -891,17 +1168,27 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       }
 
       case 'AWAITING_PROOF': {
-        await ctx.reply('📸 Necesito la *foto* o *PDF* del comprobante, no texto\\.', { parse_mode: 'MarkdownV2' });
+        await ctx.reply(
+          '📸 Necesito la *foto* o *PDF* del comprobante, no texto\\.',
+          { parse_mode: 'MarkdownV2' },
+        );
         break;
       }
 
       case 'IN_SUPPORT': {
         // Bridge: send user message to operator panel via backend chat
         if (state.supportChatId && text) {
-          const user = await this.prisma.user.findUnique({ where: { telegramId }, select: { id: true } });
+          const user = await this.prisma.user.findUnique({
+            where: { telegramId },
+            select: { id: true },
+          });
           if (user) {
             try {
-              await this.messagesService.sendMessage(user.id, { chatId: state.supportChatId, content: text }, 'CLIENT');
+              await this.messagesService.sendMessage(
+                user.id,
+                { chatId: state.supportChatId, content: text },
+                'CLIENT',
+              );
               // No confirmation needed — feels like real chat
             } catch (err: any) {
               await ctx.reply('⚠️ No se pudo enviar. Intentá de nuevo.');
@@ -933,21 +1220,33 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       select: { savedTargetUsername: true, balance: true, username: true },
     });
 
-    if (!user) { await ctx.reply('No tenés cuenta. Usá /start.'); return; }
+    if (!user) {
+      await ctx.reply('No tenés cuenta. Usá /start.');
+      return;
+    }
 
     await ctx.reply(
       `👤 *Mi Cuenta*\n\n` +
-      `📛 Usuario: \`${this.esc(user.username || '\\-')}\`\n` +
-      `🎮 Juegos: \`${this.esc(user.savedTargetUsername || '\\-')}\`\n` +
-      `💰 Balance: \\$${this.esc(this.fmt(Number(user.balance || 0)))}`,
-      { parse_mode: 'MarkdownV2', reply_markup: new InlineKeyboard().text('📋 Menú', 'action:load') },
+        `📛 Usuario: \`${this.esc(user.username || '\\-')}\`\n` +
+        `🎮 Juegos: \`${this.esc(user.savedTargetUsername || '\\-')}\`\n` +
+        `💰 Balance: \\$${this.esc(this.fmt(Number(user.balance || 0)))}`,
+      {
+        parse_mode: 'MarkdownV2',
+        reply_markup: new InlineKeyboard().text('📋 Menú', 'action:load'),
+      },
     );
   }
 
   private async handleStatus(ctx: Context) {
     const telegramId = this.getTelegramId(ctx);
-    const user = await this.prisma.user.findUnique({ where: { telegramId }, select: { id: true } });
-    if (!user) { await ctx.reply('Usá /start.'); return; }
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId },
+      select: { id: true },
+    });
+    if (!user) {
+      await ctx.reply('Usá /start.');
+      return;
+    }
 
     const request = await this.prisma.request.findFirst({
       where: { userId: user.id },
@@ -955,12 +1254,22 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       select: { status: true, amount: true, targetUsername: true },
     });
 
-    if (!request) { await ctx.reply('No tenés solicitudes. Usá /menu.'); return; }
+    if (!request) {
+      await ctx.reply('No tenés solicitudes. Usá /menu.');
+      return;
+    }
 
     const labels: Record<string, string> = {
-      PENDING_PROOF: '📤 Esperando comprobante', VALIDATING: '🔍 Validando', PENDING_MP_VERIFICATION: '🏦 Verificando pago',
-      VALIDATION_FAILED: '⚠️ En revisión', APPROVED: '✅ Aprobada', PROCESSING: '🔄 Procesando',
-      COMPLETED: '🎉 Completada', FAILED: '❌ Fallida', REJECTED: '🚫 Rechazada', CANCELLED: '🗑️ Cancelada',
+      PENDING_PROOF: '📤 Esperando comprobante',
+      VALIDATING: '🔍 Validando',
+      PENDING_MP_VERIFICATION: '🏦 Verificando pago',
+      VALIDATION_FAILED: '⚠️ En revisión',
+      APPROVED: '✅ Aprobada',
+      PROCESSING: '🔄 Procesando',
+      COMPLETED: '🎉 Completada',
+      FAILED: '❌ Fallida',
+      REJECTED: '🚫 Rechazada',
+      CANCELLED: '🗑️ Cancelada',
     };
 
     await ctx.reply(
@@ -976,7 +1285,10 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
     if (state.requestId) {
       try {
-        const user = await this.prisma.user.findUnique({ where: { telegramId }, select: { id: true } });
+        const user = await this.prisma.user.findUnique({
+          where: { telegramId },
+          select: { id: true },
+        });
         if (user) await this.requestsService.cancel(state.requestId, user.id);
       } catch {}
     }
@@ -1004,23 +1316,31 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       // Cancel pending request if any
       if (conv.requestId) {
         try {
-          const user = await this.prisma.user.findUnique({ where: { telegramId: conv.telegramId }, select: { id: true } });
+          const user = await this.prisma.user.findUnique({
+            where: { telegramId: conv.telegramId },
+            select: { id: true },
+          });
           if (user) await this.requestsService.cancel(conv.requestId, user.id);
         } catch {}
       }
 
-      await this.prisma.telegramConversation.delete({ where: { telegramId: conv.telegramId } });
+      await this.prisma.telegramConversation.delete({
+        where: { telegramId: conv.telegramId },
+      });
 
       // Notify user
       try {
-        await this.bot?.api.sendMessage(conv.telegramId,
+        await this.bot?.api.sendMessage(
+          conv.telegramId,
           '⏰ Tu operación se canceló por inactividad (30 min).\n\nUsá /menu para empezar de nuevo.',
         );
       } catch {} // User might have blocked bot
     }
 
     if (stale.length > 0) {
-      this.logger.log(`Cleaned up ${stale.length} stale Telegram conversation(s)`);
+      this.logger.log(
+        `Cleaned up ${stale.length} stale Telegram conversation(s)`,
+      );
     }
   }
 
@@ -1049,17 +1369,22 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     for (const user of inactiveUsers) {
       if (!user.telegramId) continue;
       try {
-        await this.bot.api.sendMessage(user.telegramId,
+        await this.bot.api.sendMessage(
+          user.telegramId,
           '👋 ¡Ey! ¿Necesitás cargar créditos?\n\nEstamos disponibles 24/7.',
-          { reply_markup: new InlineKeyboard().text('💰 Cargar', 'action:load') },
+          {
+            reply_markup: new InlineKeyboard().text('💰 Cargar', 'action:load'),
+          },
         );
         sent++;
-        await new Promise(r => setTimeout(r, 100)); // Telegram rate limit
+        await new Promise((r) => setTimeout(r, 100)); // Telegram rate limit
       } catch {} // User blocked bot, etc.
     }
 
     if (sent > 0) {
-      this.logger.log(`Sent engagement notifications to ${sent} inactive users`);
+      this.logger.log(
+        `Sent engagement notifications to ${sent} inactive users`,
+      );
     }
   }
 
@@ -1068,16 +1393,26 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   // ==========================================
 
   @OnEvent('job.completed')
-  async onJobCompleted(data: { requestId: string; userId: string; amount: number }) {
-    await this.notifyUser(data.userId,
+  async onJobCompleted(data: {
+    requestId: string;
+    userId: string;
+    amount: number;
+  }) {
+    await this.notifyUser(
+      data.userId,
       `🎉 ¡Créditos cargados!\n\n$${this.fmt(data.amount)} en tu cuenta.`,
-      new InlineKeyboard().text('💰 Cargar más', 'action:load').text('📋 Menú', 'action:account'),
+      new InlineKeyboard()
+        .text('💰 Cargar más', 'action:load')
+        .text('📋 Menú', 'action:account'),
     );
   }
 
   @OnEvent('job.failed')
   async onJobFailed(data: { requestId: string; userId: string }) {
-    await this.notifyUser(data.userId, '❌ Hubo un error al procesar tu carga. Un operador va a revisarlo.');
+    await this.notifyUser(
+      data.userId,
+      '❌ Hubo un error al procesar tu carga. Un operador va a revisarlo.',
+    );
   }
 
   @OnEvent('job.started')
@@ -1088,19 +1423,37 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   @OnEvent('validation.failed')
   async onValidationFailed(data: { requestId: string }) {
     try {
-      const request = await this.prisma.request.findUnique({ where: { id: data.requestId }, select: { userId: true } });
-      if (request) await this.notifyUser(request.userId, '⚠️ No pudimos validar tu comprobante. Un operador lo va a revisar.');
+      const request = await this.prisma.request.findUnique({
+        where: { id: data.requestId },
+        select: { userId: true },
+      });
+      if (request)
+        await this.notifyUser(
+          request.userId,
+          '⚠️ No pudimos validar tu comprobante. Un operador lo va a revisar.',
+        );
     } catch {}
   }
 
-  private async notifyUser(userId: string, message: string, keyboard?: InlineKeyboard) {
+  private async notifyUser(
+    userId: string,
+    message: string,
+    keyboard?: InlineKeyboard,
+  ) {
     if (!this.bot || !this.enabled) return;
     try {
-      const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { telegramId: true } });
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { telegramId: true },
+      });
       if (!user?.telegramId) return;
-      await this.bot.api.sendMessage(user.telegramId, message, { reply_markup: keyboard });
+      await this.bot.api.sendMessage(user.telegramId, message, {
+        reply_markup: keyboard,
+      });
     } catch (err: any) {
-      this.logger.error(`TG notification failed for user ${userId}: ${err.message}`);
+      this.logger.error(
+        `TG notification failed for user ${userId}: ${err.message}`,
+      );
     }
   }
 

@@ -5,6 +5,8 @@ import {
   Logger,
   Inject,
   forwardRef,
+  OnModuleInit,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,6 +19,20 @@ import { PrizeClaimStatus } from '@prisma/client';
 
 const MIN_PRIZE_CLAIM_AMOUNT = 3_000;
 const VERIFY_CHIPS_TIMEOUT_MS = 60_000; // 60 seconds
+// Retry when the extension reports "bot busy" — a transient condition that
+// shouldn't burn the claim into VERIFICATION_FAILED (manual operator work).
+// Tuned 2026-06-16: bumped to 5×60s so a normal load (60-90s) doesn't push the
+// verification through all retries before the bot frees up.
+const BUSY_RETRY_DELAY_MS = 60_000;
+const MAX_BUSY_RETRIES = 5;
+// One extra retry for non-busy errors (selector flake, slow SPA render). After
+// this single retry, the claim falls into VERIFICATION_FAILED for operator review.
+const NON_BUSY_RETRY_DELAY_MS = 30_000;
+const MAX_NON_BUSY_RETRIES = 1;
+// Verification timers live in memory; a server restart orphans claims in
+// VERIFYING_CHIPS/PENDING_VERIFICATION. The sweeper fails them so operators see them.
+const STUCK_VERIFICATION_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+const STUCK_VERIFICATION_CUTOFF_MS = 10 * 60 * 1000;
 
 interface VerificationState {
   claimId: string;
@@ -28,11 +44,21 @@ interface VerificationState {
 }
 
 @Injectable()
-export class PrizeClaimsService {
+export class PrizeClaimsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrizeClaimsService.name);
 
   // In-memory verification tracking (claimId → state)
   private verifications: Map<string, VerificationState> = new Map();
+
+  // Busy-retry attempts per claim (claimId → count)
+  private verifyRetries: Map<string, number> = new Map();
+
+  // Non-busy retry attempts per claim (claimId → count). One shot only — covers
+  // transient flakes like a slow SPA render or a panel still loading the user list.
+  private verifyNonBusyRetries: Map<string, number> = new Map();
+
+  private stuckVerificationInterval: ReturnType<typeof setInterval> | null =
+    null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -45,16 +71,95 @@ export class PrizeClaimsService {
     private readonly pushService: PushService,
   ) {}
 
+  onModuleInit() {
+    this.stuckVerificationInterval = setInterval(() => {
+      this.sweepStuckVerifications().catch((err) =>
+        this.logger.error(`Stuck verification sweep failed: ${err.message}`),
+      );
+    }, STUCK_VERIFICATION_SWEEP_INTERVAL_MS);
+  }
+
+  onModuleDestroy() {
+    if (this.stuckVerificationInterval) {
+      clearInterval(this.stuckVerificationInterval);
+      this.stuckVerificationInterval = null;
+    }
+  }
+
+  /**
+   * new_prize_claim must reach both the root namespace (legacy listeners) and
+   * the /operator namespace, where operator-panel and operator-mobile actually
+   * connect — emitting only via EventsGateway leaves operators blind until
+   * their next full refresh.
+   */
+  private emitNewPrizeClaimToOperators(formattedClaim: any) {
+    this.events.emitToOperators('new_prize_claim', formattedClaim);
+    try {
+      const { OperatorGateway } = require('../events/operator.gateway');
+      const opGateway = this.moduleRef.get(OperatorGateway, { strict: false });
+      opGateway?.emitToAll('new_prize_claim', formattedClaim);
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to emit new_prize_claim to /operator: ${err?.message || err}`,
+      );
+    }
+  }
+
+  /**
+   * Fail claims stuck mid-verification with no in-flight timer (e.g. the
+   * server restarted and the in-memory verification state was lost). Without
+   * this they sit in VERIFYING_CHIPS/PENDING_VERIFICATION forever and the
+   * user keeps seeing "Verificando tus fichas...".
+   */
+  private async sweepStuckVerifications(): Promise<void> {
+    const cutoff = new Date(Date.now() - STUCK_VERIFICATION_CUTOFF_MS);
+    const stuck = await this.prisma.prizeClaim.findMany({
+      where: {
+        status: { in: ['PENDING_VERIFICATION', 'VERIFYING_CHIPS'] },
+        updatedAt: { lt: cutoff },
+      },
+    });
+
+    for (const claim of stuck) {
+      // An in-flight verification or scheduled busy-retry will resolve it
+      if (this.verifications.has(claim.id)) continue;
+
+      this.logger.warn(
+        `Prize claim ${claim.id} stuck in ${claim.status} (no in-flight verification) — marking VERIFICATION_FAILED`,
+      );
+      this.verifyRetries.delete(claim.id);
+
+      await this.prisma.prizeClaim.update({
+        where: { id: claim.id },
+        data: { status: 'VERIFICATION_FAILED' },
+      });
+
+      this.events.emitToUser(claim.userId, 'prize_claim:status_update', {
+        claimId: claim.id,
+        status: 'VERIFICATION_FAILED',
+        message:
+          'No pudimos verificar tus fichas a tiempo. Un operador va a revisar tu solicitud.',
+      });
+      this.emitNewPrizeClaimToOperators(
+        this.formatClaimForOperator({
+          ...claim,
+          status: 'VERIFICATION_FAILED',
+        }),
+      );
+    }
+
+    if (stuck.length > 0) this.events.emitDashboardUpdate();
+  }
+
   // ==========================================
   // CREATE
   // ==========================================
 
-  async create(
-    userId: string,
-    data: { amount: number; chatId?: string },
-  ) {
+  async create(userId: string, data: { amount: number; chatId?: string }) {
     if (!Number.isInteger(data.amount)) {
-      throw new BadRequestException('El monto debe ser un número entero (sin centavos)');
+      throw new BadRequestException(
+        'El monto debe ser un número entero (sin centavos)',
+      );
     }
     if (data.amount < MIN_PRIZE_CLAIM_AMOUNT) {
       throw new BadRequestException(
@@ -119,7 +224,9 @@ export class PrizeClaimsService {
   ) {
     // Validate amount
     if (!Number.isInteger(data.amount)) {
-      throw new BadRequestException('El monto debe ser un número entero (sin centavos)');
+      throw new BadRequestException(
+        'El monto debe ser un número entero (sin centavos)',
+      );
     }
     if (data.amount < MIN_PRIZE_CLAIM_AMOUNT) {
       throw new BadRequestException(
@@ -160,7 +267,9 @@ export class PrizeClaimsService {
     } else if (data.paymentMethod === 'ALIAS') {
       const alias = data.paymentDetails.alias;
       if (!alias || alias.length < 6) {
-        throw new BadRequestException('El alias debe tener al menos 6 caracteres');
+        throw new BadRequestException(
+          'El alias debe tener al menos 6 caracteres',
+        );
       }
     } else {
       throw new BadRequestException('Método de pago inválido');
@@ -229,7 +338,9 @@ export class PrizeClaimsService {
     } else if (dto.paymentMethod === 'ALIAS') {
       const alias = (dto.paymentDetails as any).alias;
       if (!alias || alias.length < 6) {
-        throw new BadRequestException('El alias debe tener al menos 6 caracteres');
+        throw new BadRequestException(
+          'El alias debe tener al menos 6 caracteres',
+        );
       }
     }
 
@@ -246,7 +357,9 @@ export class PrizeClaimsService {
       },
     });
 
-    this.logger.log(`Prize claim ${claimId}: payment details set, triggering verification`);
+    this.logger.log(
+      `Prize claim ${claimId}: payment details set, triggering verification`,
+    );
 
     // Emit status to user
     this.events.emitToUser(userId, 'prize_claim:status_update', {
@@ -270,14 +383,18 @@ export class PrizeClaimsService {
 
     if (!panelId) {
       // Need discovery first — use discovery service
-      this.logger.log(`Prize claim ${claim.id}: no panelId, starting discovery`);
+      this.logger.log(
+        `Prize claim ${claim.id}: no panelId, starting discovery`,
+      );
       await this.startDiscoveryForPrizeClaim(claim);
       return;
     }
 
     // Check if bot is connected for this panel
     if (!this.botGateway.isBotConnectedForPanel(panelId)) {
-      this.logger.warn(`Prize claim ${claim.id}: no bot connected for panel ${panelId}`);
+      this.logger.warn(
+        `Prize claim ${claim.id}: no bot connected for panel ${panelId}`,
+      );
       await this.prisma.prizeClaim.update({
         where: { id: claim.id },
         data: { status: 'VERIFICATION_FAILED' },
@@ -285,9 +402,15 @@ export class PrizeClaimsService {
       this.events.emitToUser(claim.userId, 'prize_claim:status_update', {
         claimId: claim.id,
         status: 'VERIFICATION_FAILED',
-        message: 'No hay conexión con el servidor de juego. Un operador va a revisar tu solicitud.',
+        message:
+          'No hay conexión con el servidor de juego. Un operador va a revisar tu solicitud.',
       });
-      this.events.emitToOperators('new_prize_claim', this.formatClaimForOperator(claim));
+      this.emitNewPrizeClaimToOperators(
+        this.formatClaimForOperator({
+          ...claim,
+          status: 'VERIFICATION_FAILED',
+        }),
+      );
       return;
     }
 
@@ -321,7 +444,11 @@ export class PrizeClaimsService {
     });
   }
 
-  private pushVerifyChipsTask(panelId: string, taskId: string, targetUsername: string) {
+  private pushVerifyChipsTask(
+    panelId: string,
+    taskId: string,
+    targetUsername: string,
+  ) {
     const panelBots = (this.botGateway as any).connectedBots?.get(panelId);
     if (!panelBots || panelBots.size === 0) {
       this.logger.warn(`No bot connected for panel ${panelId} to verify chips`);
@@ -330,19 +457,26 @@ export class PrizeClaimsService {
 
     const [, bot] = panelBots.entries().next().value!;
     bot.emit('verify_chips', { taskId, targetUsername });
-    this.logger.log(`Sent verify_chips to panel ${panelId} for "${targetUsername}" (task ${taskId})`);
+    this.logger.log(
+      `Sent verify_chips to panel ${panelId} for "${targetUsername}" (task ${taskId})`,
+    );
   }
 
   private async startDiscoveryForPrizeClaim(claim: any) {
     // Use discovery service to find the user's panel
     try {
       const { DiscoveryService } = require('../discovery/discovery.service');
-      const discoveryService = this.moduleRef.get(DiscoveryService, { strict: false });
+      const discoveryService = this.moduleRef.get(DiscoveryService, {
+        strict: false,
+      });
 
       // We need to create a temporary request-like entry for discovery
       // Instead, we'll directly search — discovery service works with requestId
       // Let's use the claim.id as the taskId for discovery
-      const sentTo = this.botGateway.pushDiscoveryToIdlePanels(claim.id, claim.targetUsername);
+      const sentTo = this.botGateway.pushDiscoveryToIdlePanels(
+        claim.id,
+        claim.targetUsername,
+      );
 
       if (sentTo.length === 0) {
         this.logger.warn(`No idle bots for prize claim discovery: ${claim.id}`);
@@ -353,11 +487,19 @@ export class PrizeClaimsService {
         this.events.emitToUser(claim.userId, 'prize_claim:status_update', {
           claimId: claim.id,
           status: 'VERIFICATION_FAILED',
-          message: 'No pudimos encontrar tu perfil. Un operador va a revisar tu solicitud.',
+          message:
+            'No pudimos encontrar tu perfil. Un operador va a revisar tu solicitud.',
         });
-        this.events.emitToOperators('new_prize_claim', this.formatClaimForOperator(claim));
+        this.emitNewPrizeClaimToOperators(
+          this.formatClaimForOperator({
+            ...claim,
+            status: 'VERIFICATION_FAILED',
+          }),
+        );
       } else {
-        this.logger.log(`Prize claim ${claim.id}: discovery sent to ${sentTo.length} panels`);
+        this.logger.log(
+          `Prize claim ${claim.id}: discovery sent to ${sentTo.length} panels`,
+        );
         // The discovery result will come back via handleDiscoveryResultForPrizeClaim
         // Set a timeout
         const timeoutTimer = setTimeout(() => {
@@ -374,7 +516,9 @@ export class PrizeClaimsService {
         });
       }
     } catch (error: any) {
-      this.logger.error(`Discovery for prize claim ${claim.id} failed: ${error.message}`);
+      this.logger.error(
+        `Discovery for prize claim ${claim.id} failed: ${error.message}`,
+      );
       await this.prisma.prizeClaim.update({
         where: { id: claim.id },
         data: { status: 'VERIFICATION_FAILED' },
@@ -424,7 +568,12 @@ export class PrizeClaimsService {
     const claim = await this.prisma.prizeClaim.findUnique({
       where: { id: claimId },
     });
-    if (!claim || claim.status === 'VERIFIED' || claim.status === 'VERIFICATION_FAILED') return;
+    if (
+      !claim ||
+      claim.status === 'VERIFIED' ||
+      claim.status === 'VERIFICATION_FAILED'
+    )
+      return;
 
     await this.prisma.prizeClaim.update({
       where: { id: claimId },
@@ -434,9 +583,15 @@ export class PrizeClaimsService {
     this.events.emitToUser(claim.userId, 'prize_claim:status_update', {
       claimId,
       status: 'VERIFICATION_FAILED',
-      message: 'No pudimos verificar tus fichas a tiempo. Un operador va a revisar tu solicitud.',
+      message:
+        'No pudimos verificar tus fichas a tiempo. Un operador va a revisar tu solicitud.',
     });
-    this.events.emitToOperators('new_prize_claim', this.formatClaimForOperator(claim));
+    this.emitNewPrizeClaimToOperators(
+      this.formatClaimForOperator({
+        ...claim,
+        status: 'VERIFICATION_FAILED',
+      }),
+    );
   }
 
   // ==========================================
@@ -465,11 +620,15 @@ export class PrizeClaimsService {
 
     // Idempotency: skip if already in a final-ish state
     if (!['PENDING_VERIFICATION', 'VERIFYING_CHIPS'].includes(claim.status)) {
-      this.logger.warn(`Claim ${claimId} already in ${claim.status}, ignoring verification result`);
+      this.logger.warn(
+        `Claim ${claimId} already in ${claim.status}, ignoring verification result`,
+      );
       return;
     }
 
     if (result.success && result.balance != null) {
+      this.verifyRetries.delete(claimId);
+      this.verifyNonBusyRetries.delete(claimId);
       const hasEnough = result.balance >= Number(claim.amount);
 
       if (hasEnough) {
@@ -497,15 +656,7 @@ export class PrizeClaimsService {
           verifiedBalance: result.balance,
           status: 'VERIFIED',
         });
-        this.events.emitToOperators('new_prize_claim', formattedClaim);
-        // Bridge to /operator namespace
-        try {
-          const { OperatorGateway } = require('../events/operator.gateway');
-          const opGateway = this.moduleRef.get(OperatorGateway, { strict: false });
-          opGateway?.emitToAll('new_prize_claim', formattedClaim);
-        } catch (err) {
-          this.logger.warn(`Failed to emit new_prize_claim to operators: ${err?.message || err}`);
-        }
+        this.emitNewPrizeClaimToOperators(formattedClaim);
 
         // Telegram alert
         this.telegramService
@@ -531,35 +682,110 @@ export class PrizeClaimsService {
           `Prize claim ${claimId} FAILED: user has ${result.balance} chips but claimed ${claim.amount}`,
         );
 
+        const balanceStr = result.balance.toLocaleString('es-AR');
+        const claimedStr = Number(claim.amount).toLocaleString('es-AR');
+        const minStr = MIN_PRIZE_CLAIM_AMOUNT.toLocaleString('es-AR');
+        const userMessage =
+          result.balance < MIN_PRIZE_CLAIM_AMOUNT
+            ? `No tenés suficientes fichas para cobrar. Tenés ${balanceStr} y el mínimo para cobrar un premio es $${minStr}. Cuando llegues a $${minStr} podés cobrar.`
+            : `No tenés suficientes fichas. Tenés ${balanceStr} pero pediste $${claimedStr}. Probá con un monto menor o igual a ${balanceStr} (mínimo $${minStr}).`;
+
         this.events.emitToUser(claim.userId, 'prize_claim:status_update', {
           claimId,
           status: 'VERIFICATION_FAILED',
-          message: `No tenés suficientes fichas. Tenés ${result.balance.toLocaleString('es-AR')} pero pediste $${Number(claim.amount).toLocaleString('es-AR')}. Podés intentar con un monto menor.`,
+          message: userMessage,
         });
 
         // Push so the user knows even with the app closed.
         this.pushService
-          .sendToUser(
-            claim.userId,
-            '⚠️ Fichas insuficientes',
-            `Tenés ${result.balance.toLocaleString('es-AR')} fichas pero pediste cobrar $${Number(claim.amount).toLocaleString('es-AR')}. Podés intentar con un monto menor.`,
-            { claimId, type: 'prize_verification_insufficient' },
-          )
-          .catch((err: any) => this.logger.warn(`Push (prize_verification_insufficient) failed: ${err.message}`));
+          .sendToUser(claim.userId, '⚠️ Fichas insuficientes', userMessage, {
+            claimId,
+            type: 'prize_verification_insufficient',
+          })
+          .catch((err: any) =>
+            this.logger.warn(
+              `Push (prize_verification_insufficient) failed: ${err.message}`,
+            ),
+          );
       }
     } else {
-      // Verification failed (error)
+      // Verification failed (error). "Bot busy" is transient (the extension
+      // was mid-job/discovery) — retry instead of burning the claim into
+      // VERIFICATION_FAILED. verify_chips is read-only, so retrying is safe.
+      const errMsg = result.error || 'unknown';
+      const isBusy = errMsg.toLowerCase().includes('busy');
+
+      // Log the full error+context every time so we can diagnose recurring failures
+      // in prod logs (Render). Cheap to add, expensive to miss if it regresses again.
+      this.logger.warn(
+        `Prize claim ${claimId} (user="${claim.targetUsername}") verification error: "${errMsg}" (isBusy=${isBusy})`,
+      );
+
+      const busyRetries = this.verifyRetries.get(claimId) || 0;
+      if (isBusy && busyRetries < MAX_BUSY_RETRIES) {
+        this.verifyRetries.set(claimId, busyRetries + 1);
+        await this.prisma.prizeClaim.update({
+          where: { id: claimId },
+          data: { status: 'PENDING_VERIFICATION' },
+        });
+        this.logger.log(
+          `Prize claim ${claimId}: bot busy, retrying verification in ${BUSY_RETRY_DELAY_MS / 1000}s (attempt ${busyRetries + 1}/${MAX_BUSY_RETRIES})`,
+        );
+        setTimeout(() => {
+          this.triggerVerification({
+            ...claim,
+            status: 'PENDING_VERIFICATION',
+          }).catch((err: any) =>
+            this.logger.error(
+              `Busy-retry verification failed for claim ${claimId}: ${err.message}`,
+            ),
+          );
+        }, BUSY_RETRY_DELAY_MS);
+        return;
+      }
+
+      // Non-busy error: try once more with a short delay before giving up. Covers
+      // transient flakes (panel SPA still rendering, slow datatable load).
+      const nonBusyRetries = this.verifyNonBusyRetries.get(claimId) || 0;
+      if (!isBusy && nonBusyRetries < MAX_NON_BUSY_RETRIES) {
+        this.verifyNonBusyRetries.set(claimId, nonBusyRetries + 1);
+        await this.prisma.prizeClaim.update({
+          where: { id: claimId },
+          data: { status: 'PENDING_VERIFICATION' },
+        });
+        this.logger.log(
+          `Prize claim ${claimId}: non-busy error, retrying once in ${NON_BUSY_RETRY_DELAY_MS / 1000}s`,
+        );
+        setTimeout(() => {
+          this.triggerVerification({
+            ...claim,
+            status: 'PENDING_VERIFICATION',
+          }).catch((err: any) =>
+            this.logger.error(
+              `Non-busy retry verification failed for claim ${claimId}: ${err.message}`,
+            ),
+          );
+        }, NON_BUSY_RETRY_DELAY_MS);
+        return;
+      }
+
+      this.verifyRetries.delete(claimId);
+      this.verifyNonBusyRetries.delete(claimId);
+
       await this.prisma.prizeClaim.update({
         where: { id: claimId },
         data: { status: 'VERIFICATION_FAILED' },
       });
 
-      this.logger.error(`Prize claim ${claimId} verification error: ${result.error}`);
+      this.logger.error(
+        `Prize claim ${claimId} verification error (final): ${errMsg}`,
+      );
 
       this.events.emitToUser(claim.userId, 'prize_claim:status_update', {
         claimId,
         status: 'VERIFICATION_FAILED',
-        message: 'Hubo un problema al verificar tus fichas. Un operador va a revisar tu solicitud.',
+        message:
+          'Hubo un problema al verificar tus fichas. Un operador va a revisar tu solicitud.',
       });
 
       // Push so the user knows even with the app closed.
@@ -570,9 +796,18 @@ export class PrizeClaimsService {
           'No pudimos verificar tus fichas automáticamente. Un operador revisará tu solicitud.',
           { claimId, type: 'prize_verification_error' },
         )
-        .catch((err: any) => this.logger.warn(`Push (prize_verification_error) failed: ${err.message}`));
+        .catch((err: any) =>
+          this.logger.warn(
+            `Push (prize_verification_error) failed: ${err.message}`,
+          ),
+        );
 
-      this.events.emitToOperators('new_prize_claim', this.formatClaimForOperator(claim));
+      this.emitNewPrizeClaimToOperators(
+        this.formatClaimForOperator({
+          ...claim,
+          status: 'VERIFICATION_FAILED',
+        }),
+      );
     }
   }
 
@@ -590,7 +825,17 @@ export class PrizeClaimsService {
     });
 
     if (!claim) throw new NotFoundException('Premio no encontrado');
-    if (claim.status !== 'VERIFIED') {
+    // FAILED: operator manually retries a withdrawal that died (e.g. job
+    // auto-failed while the extension was busy).
+    // VERIFICATION_FAILED: automatic chip verification failed but the operator
+    // checked the panel by hand and decided to withdraw anyway (same pattern
+    // as manual APPROVE on requests with VALIDATION_FAILED).
+    const processableStatuses: PrizeClaimStatus[] = [
+      'VERIFIED',
+      'FAILED',
+      'VERIFICATION_FAILED',
+    ];
+    if (!processableStatuses.includes(claim.status)) {
       throw new BadRequestException(
         `El premio debe estar verificado para procesarlo. Estado actual: ${claim.status}`,
       );
@@ -647,7 +892,9 @@ export class PrizeClaimsService {
         jobId: job.id,
       });
     } catch (err) {
-      this.logger.warn(`Failed to emit prize_claim_updated (PROCESSING): ${err?.message || err}`);
+      this.logger.warn(
+        `Failed to emit prize_claim_updated (PROCESSING): ${err?.message || err}`,
+      );
     }
 
     // Dispatch the job to the bot
@@ -656,7 +903,9 @@ export class PrizeClaimsService {
       const jobsService = this.moduleRef.get(JobsService, { strict: false });
       await jobsService.tryDispatchNextJob(claim.panelId);
     } catch (error: any) {
-      this.logger.error(`Failed to dispatch withdraw job ${job.id}: ${error.message}`);
+      this.logger.error(
+        `Failed to dispatch withdraw job ${job.id}: ${error.message}`,
+      );
     }
 
     this.events.emitDashboardUpdate();
@@ -668,7 +917,11 @@ export class PrizeClaimsService {
    * Handle result from WITHDRAW_CHIPS job.
    * Called by BotService when a WITHDRAW_CHIPS job completes/fails.
    */
-  async handleWithdrawalResult(claimId: string, success: boolean, error?: string) {
+  async handleWithdrawalResult(
+    claimId: string,
+    success: boolean,
+    error?: string,
+  ) {
     const claim = await this.prisma.prizeClaim.findUnique({
       where: { id: claimId },
     });
@@ -679,7 +932,9 @@ export class PrizeClaimsService {
     }
 
     if (claim.status !== 'PROCESSING') {
-      this.logger.warn(`Claim ${claimId} not in PROCESSING state, ignoring withdrawal result`);
+      this.logger.warn(
+        `Claim ${claimId} not in PROCESSING state, ignoring withdrawal result`,
+      );
       return;
     }
 
@@ -704,21 +959,31 @@ export class PrizeClaimsService {
       this.events.emitToOperators('prize_claim_updated', formattedClaim);
       try {
         const { OperatorGateway } = require('../events/operator.gateway');
-        const opGateway = this.moduleRef.get(OperatorGateway, { strict: false });
+        const opGateway = this.moduleRef.get(OperatorGateway, {
+          strict: false,
+        });
         opGateway?.emitToAll('prize_claim_updated', formattedClaim);
       } catch (err) {
-        this.logger.warn(`Failed to emit prize_claim_updated (CHIPS_WITHDRAWN): ${err?.message || err}`);
+        this.logger.warn(
+          `Failed to emit prize_claim_updated (CHIPS_WITHDRAWN): ${err?.message || err}`,
+        );
       }
 
       // Auto-create outbound payment (if auto-payment enabled)
       try {
-        const { OutboundPaymentsService } = require('../outbound-payments/outbound-payments.service');
-        const outboundService = this.moduleRef.get(OutboundPaymentsService, { strict: false });
+        const {
+          OutboundPaymentsService,
+        } = require('../outbound-payments/outbound-payments.service');
+        const outboundService = this.moduleRef.get(OutboundPaymentsService, {
+          strict: false,
+        });
         if (outboundService) {
           await outboundService.createFromPrizeClaim(claimId);
         }
       } catch (err: any) {
-        this.logger.warn(`Auto-payment creation failed for prize ${claimId}: ${err?.message || err}`);
+        this.logger.warn(
+          `Auto-payment creation failed for prize ${claimId}: ${err?.message || err}`,
+        );
       }
     } else {
       await this.prisma.prizeClaim.update({
@@ -726,12 +991,15 @@ export class PrizeClaimsService {
         data: { status: 'FAILED' },
       });
 
-      this.logger.error(`Prize claim ${claimId}: chip withdrawal FAILED: ${error}`);
+      this.logger.error(
+        `Prize claim ${claimId}: chip withdrawal FAILED: ${error}`,
+      );
 
       this.events.emitToUser(claim.userId, 'prize_claim:status_update', {
         claimId,
         status: 'FAILED',
-        message: 'Hubo un problema al retirar tus fichas. Un operador va a revisarlo.',
+        message:
+          'Hubo un problema al retirar tus fichas. Un operador va a revisarlo.',
       });
 
       // Push so the user knows even with the app closed.
@@ -742,7 +1010,9 @@ export class PrizeClaimsService {
           'No pudimos retirar las fichas del panel. Un operador lo revisará.',
           { claimId, type: 'prize_failed' },
         )
-        .catch((err: any) => this.logger.warn(`Push (prize_failed) failed: ${err.message}`));
+        .catch((err: any) =>
+          this.logger.warn(`Push (prize_failed) failed: ${err.message}`),
+        );
 
       this.events.emitToOperators('prize_claim_updated', {
         id: claimId,
@@ -752,7 +1022,10 @@ export class PrizeClaimsService {
 
       // Telegram alert
       this.telegramService
-        .alertPrizeWithdrawalFailed(claim.targetUsername, error || 'Error desconocido')
+        .alertPrizeWithdrawalFailed(
+          claim.targetUsername,
+          error || 'Error desconocido',
+        )
         .catch(() => {});
     }
 
@@ -760,9 +1033,27 @@ export class PrizeClaimsService {
   }
 
   /**
-   * Operator marks prize as paid (CHIPS_WITHDRAWN → COMPLETED)
+   * Operator marks prize as paid (CHIPS_WITHDRAWN → COMPLETED).
+   * Requiere que el operador adjunte el comprobante de la transferencia (imagen o PDF) ya
+   * subido a Cloudinary vía POST /uploads/operator/payout-proof. Sin el comprobante no se
+   * puede pasar a COMPLETED — es nuestra evidencia de que efectivamente le pagamos al usuario.
    */
-  async complete(claimId: string, operatorId: string) {
+  async complete(
+    claimId: string,
+    operatorId: string,
+    payout: { proofUrl: string; proofType?: 'image' | 'pdf' | string },
+  ) {
+    if (!payout?.proofUrl || typeof payout.proofUrl !== 'string') {
+      throw new BadRequestException(
+        'Adjuntá el comprobante de la transferencia (imagen o PDF) para poder marcar el premio como pagado.',
+      );
+    }
+    if (!/^https?:\/\//i.test(payout.proofUrl)) {
+      throw new BadRequestException(
+        'URL de comprobante invalida — usá el endpoint /uploads/operator/payout-proof',
+      );
+    }
+
     const claim = await this.prisma.prizeClaim.findUnique({
       where: { id: claimId },
       include: { user: { select: { balance: true } } },
@@ -774,6 +1065,9 @@ export class PrizeClaimsService {
         `Solo se puede completar un premio con fichas ya retiradas. Estado actual: ${claim.status}`,
       );
     }
+
+    const proofType: 'image' | 'pdf' =
+      payout.proofType === 'pdf' ? 'pdf' : 'image';
 
     // Create transaction record for audit trail
     const balanceBefore = Number(claim.user.balance);
@@ -794,21 +1088,83 @@ export class PrizeClaimsService {
       data: {
         status: 'COMPLETED',
         completedBy: operatorId,
+        payoutProofUrl: payout.proofUrl,
+        payoutProofType: proofType,
       },
     });
 
-    this.logger.log(`Prize claim ${claimId} COMPLETED by operator ${operatorId}`);
+    this.logger.log(
+      `Prize claim ${claimId} COMPLETED by operator ${operatorId}`,
+    );
 
     this.events.emitToUser(claim.userId, 'prize_claim:status_update', {
       claimId,
       status: 'COMPLETED',
       message: `¡Listo! Tu premio de $${Number(claim.amount).toLocaleString('es-AR')} fue enviado. ¡Felicitaciones!`,
+      payoutProofUrl: payout.proofUrl,
+      payoutProofType: proofType,
     });
+
+    // Persistimos un mensaje SYSTEM en el chat del usuario con el comprobante adjunto
+    // (imagen inline o link a PDF) para que tenga evidencia visible y permanente del pago,
+    // no solo el toast pasajero.
+    try {
+      // Los claims creados por HTTP desde el chat-app no traen chatId, así que
+      // caemos al chat activo del usuario para no perder el comprobante.
+      let proofChatId = claim.chatId;
+      if (!proofChatId) {
+        const chat = await this.prisma.chat.findFirst({
+          where: { userId: claim.userId, status: { in: ['OPEN', 'ASSIGNED'] } },
+          orderBy: { updatedAt: 'desc' },
+          select: { id: true },
+        });
+        proofChatId = chat?.id ?? null;
+      }
+      if (proofChatId) {
+        const { MessagesService } = require('../messages/messages.service');
+        const messagesService = this.moduleRef.get(MessagesService, {
+          strict: false,
+        });
+        if (messagesService) {
+          // Normalize the proof URL so PDFs are delivered as a JPG of page 1
+          // (the chat bubble renders message.imageUrl as <Image>; raw PDF URLs
+          // would not render). uploadsService is optional-resolved via moduleRef
+          // because PrizeClaimsService is not in PrizeClaim's imports yet.
+          const { UploadsService } = require('../uploads/uploads.service');
+          const uploadsService = this.moduleRef.get(UploadsService, {
+            strict: false,
+          });
+          const displayUrl = uploadsService
+            ? uploadsService.toDeliverableUrl(
+                payout.proofUrl,
+                proofType === 'pdf' ? 'application/pdf' : undefined,
+              )
+            : payout.proofUrl;
+          const content = `Tu premio de $${Number(claim.amount).toLocaleString('es-AR')} fue pagado. Adjuntamos el comprobante de la transferencia.`;
+          await messagesService.sendSystemMessage(
+            proofChatId,
+            content,
+            undefined,
+            displayUrl,
+          );
+        }
+      } else {
+        this.logger.warn(
+          `No chat found for user ${claim.userId} — payout proof for claim ${claimId} not posted to chat`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to post payout-proof system message for claim ${claimId}: ${err?.message || err}`,
+      );
+    }
 
     this.events.emitToOperators('prize_claim_updated', {
       id: claimId,
       status: 'COMPLETED',
       completedBy: operatorId,
+      payoutProofUrl: payout.proofUrl,
+      payoutProofType: proofType,
     });
     try {
       const { OperatorGateway } = require('../events/operator.gateway');
@@ -817,9 +1173,13 @@ export class PrizeClaimsService {
         id: claimId,
         status: 'COMPLETED',
         completedBy: operatorId,
+        payoutProofUrl: payout.proofUrl,
+        payoutProofType: proofType,
       });
     } catch (err) {
-      this.logger.warn(`Failed to emit prize_claim_updated (COMPLETED): ${err?.message || err}`);
+      this.logger.warn(
+        `Failed to emit prize_claim_updated (COMPLETED): ${err?.message || err}`,
+      );
     }
 
     this.events.emitDashboardUpdate();
@@ -859,7 +1219,9 @@ export class PrizeClaimsService {
       },
     });
 
-    this.logger.log(`Prize claim ${claimId} REJECTED by ${operatorId}: ${trimmedReason}`);
+    this.logger.log(
+      `Prize claim ${claimId} REJECTED by ${operatorId}: ${trimmedReason}`,
+    );
 
     const amountLabel = `$${Number(claim.amount).toLocaleString('es-AR')}`;
     const detailedMessage =
@@ -883,7 +1245,9 @@ export class PrizeClaimsService {
         `Motivo: ${trimmedReason}`,
         { claimId, type: 'prize_rejected', reason: trimmedReason },
       )
-      .catch((err: any) => this.logger.warn(`Push (prize_rejected) failed: ${err.message}`));
+      .catch((err: any) =>
+        this.logger.warn(`Push (prize_rejected) failed: ${err.message}`),
+      );
 
     this.events.emitToOperators('prize_claim_updated', {
       id: claimId,
@@ -899,7 +1263,9 @@ export class PrizeClaimsService {
         status: 'REJECTED',
       });
     } catch (err) {
-      this.logger.warn(`Failed to emit prize_claim_updated (REJECTED): ${err?.message || err}`);
+      this.logger.warn(
+        `Failed to emit prize_claim_updated (REJECTED): ${err?.message || err}`,
+      );
     }
 
     this.events.emitDashboardUpdate();
@@ -914,7 +1280,17 @@ export class PrizeClaimsService {
   async findPending() {
     return this.prisma.prizeClaim.findMany({
       where: {
-        status: { in: ['VERIFIED', 'CHIPS_WITHDRAWN', 'PROCESSING', 'FAILED'] },
+        OR: [
+          {
+            status: {
+              in: ['VERIFIED', 'CHIPS_WITHDRAWN', 'PROCESSING', 'FAILED'],
+            },
+          },
+          // Verification *errors* need operator review. Insufficient-balance
+          // failures (verifiedBalance set) don't — the user was already told
+          // to claim a lower amount and can create a new claim.
+          { status: 'VERIFICATION_FAILED', verifiedBalance: null },
+        ],
       },
       include: {
         user: {
@@ -987,7 +1363,9 @@ export class PrizeClaimsService {
     return this.prisma.prizeClaim.findFirst({
       where: {
         userId,
-        status: { in: ['COMPLETED', 'REJECTED', 'VERIFICATION_FAILED', 'FAILED'] },
+        status: {
+          in: ['COMPLETED', 'REJECTED', 'VERIFICATION_FAILED', 'FAILED'],
+        },
         updatedAt: { gte: sixHoursAgo },
       },
       orderBy: { updatedAt: 'desc' },
@@ -1015,12 +1393,16 @@ export class PrizeClaimsService {
       select: { updatedAt: true },
     });
     if (recentPaid) {
-      const nextAvailableAt = new Date(recentPaid.updatedAt.getTime() + 24 * 60 * 60 * 1000);
-      const elapsedHours = (Date.now() - recentPaid.updatedAt.getTime()) / (1000 * 60 * 60);
+      const nextAvailableAt = new Date(
+        recentPaid.updatedAt.getTime() + 24 * 60 * 60 * 1000,
+      );
+      const elapsedHours =
+        (Date.now() - recentPaid.updatedAt.getTime()) / (1000 * 60 * 60);
       const remainingHours = Math.max(0, 24 - elapsedHours);
-      const remainingLabel = remainingHours >= 1
-        ? `${Math.ceil(remainingHours)} hs`
-        : `${Math.ceil(remainingHours * 60)} min`;
+      const remainingLabel =
+        remainingHours >= 1
+          ? `${Math.ceil(remainingHours)} hs`
+          : `${Math.ceil(remainingHours * 60)} min`;
       // Render Argentine time (UTC-3) so users always see local time even if the
       // server is in a different TZ.
       const fmt = new Intl.DateTimeFormat('es-AR', {
@@ -1054,7 +1436,9 @@ export class PrizeClaimsService {
       status: claim.status,
       paymentMethod: claim.paymentMethod,
       paymentDetails: claim.paymentDetails,
-      verifiedBalance: claim.verifiedBalance ? Number(claim.verifiedBalance) : null,
+      verifiedBalance: claim.verifiedBalance
+        ? Number(claim.verifiedBalance)
+        : null,
       verifiedAt: claim.verifiedAt,
       panelId: claim.panelId,
       chatId: claim.chatId,

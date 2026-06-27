@@ -5,6 +5,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { EventsModule } from '../events/events.module';
 import { BotModule } from '../bot/bot.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     forwardRef(() => EventsModule),
     forwardRef(() => BotModule),
     forwardRef(() => NotificationsModule),
+    UploadsModule,
   ],
   controllers: [PrizeClaimsController],
   providers: [PrizeClaimsService],

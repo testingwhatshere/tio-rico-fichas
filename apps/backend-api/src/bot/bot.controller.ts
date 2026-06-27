@@ -99,6 +99,28 @@ export class BotController {
   }
 
   /**
+   * Extension reports the target username does not exist on its panel.
+   * Backend invalidates the stale User.panelId and re-runs discovery on
+   * the remaining panels — prevents duplicate user creation across panels.
+   */
+  @Post('jobs/:jobId/user-not-found')
+  @HttpCode(HttpStatus.OK)
+  async handleUserNotFoundOnPanel(
+    @Param('jobId') jobId: string,
+    @Headers('x-panel-id') panelId: string,
+    @Body()
+    _body: { targetUsername?: string; panelId?: string; timestamp?: string },
+  ) {
+    if (!panelId) {
+      throw new BadRequestException('X-Panel-Id header is required');
+    }
+    return this.discoveryService.handleUserNotFoundOnAssignedPanel(
+      jobId,
+      panelId,
+    );
+  }
+
+  /**
    * Get pending jobs (for bot polling mode)
    * Filters by X-Panel-Id header when provided.
    */
@@ -222,12 +244,37 @@ export class BotController {
   async handleDiscoveryResult(
     @Param('taskId') taskId: string,
     @Headers('x-panel-id') panelId: string,
-    @Body() body: { found: boolean; busy?: boolean; error?: string },
+    @Body()
+    body: {
+      found: boolean;
+      busy?: boolean;
+      error?: string;
+      matched?: number;
+      totalRows?: number;
+      paginationVisible?: boolean;
+      pageInfoText?: string;
+      reason?: string;
+    },
   ) {
     if (!panelId) {
-      throw new BadRequestException('X-Panel-Id header is required for discovery');
+      throw new BadRequestException(
+        'X-Panel-Id header is required for discovery',
+      );
     }
-    return this.discoveryService.handleDiscoveryResult(taskId, panelId, body.found, body.busy, body.error);
+    return this.discoveryService.handleDiscoveryResult(
+      taskId,
+      panelId,
+      body.found,
+      body.busy,
+      body.error,
+      {
+        matched: body.matched,
+        totalRows: body.totalRows,
+        paginationVisible: body.paginationVisible,
+        pageInfoText: body.pageInfoText,
+        reason: body.reason,
+      },
+    );
   }
 
   // =========================================
@@ -243,10 +290,18 @@ export class BotController {
   async handleCreateUserResult(
     @Param('taskId') taskId: string,
     @Headers('x-panel-id') panelId: string,
-    @Body() body: { success: boolean; targetUsername?: string; password?: string; error?: string },
+    @Body()
+    body: {
+      success: boolean;
+      targetUsername?: string;
+      password?: string;
+      error?: string;
+    },
   ) {
     if (!panelId) {
-      throw new BadRequestException('X-Panel-Id header is required for user creation');
+      throw new BadRequestException(
+        'X-Panel-Id header is required for user creation',
+      );
     }
     return this.discoveryService.handleUserCreationResult(
       taskId,
@@ -267,7 +322,13 @@ export class BotController {
   @Post('verify-chips/result')
   @HttpCode(HttpStatus.OK)
   async handleVerifyChipsResult(
-    @Body() body: { taskId: string; success: boolean; balance?: number; error?: string },
+    @Body()
+    body: {
+      taskId: string;
+      success: boolean;
+      balance?: number;
+      error?: string;
+    },
   ) {
     if (!body.taskId) {
       throw new BadRequestException('taskId is required');
@@ -290,7 +351,8 @@ export class BotController {
   @Post('logs')
   @HttpCode(HttpStatus.OK)
   async submitLog(
-    @Body() body: {
+    @Body()
+    body: {
       level?: string;
       category: string;
       action: string;
@@ -335,7 +397,8 @@ export class BotController {
   @UseInterceptors(FileInterceptor('screenshot'))
   async submitScreenshot(
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: {
+    @Body()
+    body: {
       category: string;
       description?: string;
       jobId?: string;
@@ -376,7 +439,8 @@ export class BotController {
   @Post('session-log')
   @HttpCode(HttpStatus.OK)
   async submitSessionLog(
-    @Body() body: {
+    @Body()
+    body: {
       sessionId: string;
       action: string;
       selector?: string;
@@ -419,9 +483,17 @@ export class BotController {
   @Post('selector-check')
   @HttpCode(HttpStatus.OK)
   async handleSelectorCheck(
-    @Body() body: { total: number; matched: number; failed: string[]; checkedAt?: string },
+    @Body()
+    body: {
+      total: number;
+      matched: number;
+      failed: string[];
+      checkedAt?: string;
+    },
   ) {
-    this.logger.log(`Selector check: ${body.matched}/${body.total} OK, ${body.failed.length} failed`);
+    this.logger.log(
+      `Selector check: ${body.matched}/${body.total} OK, ${body.failed.length} failed`,
+    );
 
     if (body.failed.length > 0) {
       this.logger.warn(`Failed selectors: ${body.failed.join(', ')}`);

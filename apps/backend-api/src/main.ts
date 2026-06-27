@@ -7,7 +7,10 @@ import { CorrelationInterceptor } from './common/interceptors/correlation.interc
 const logger = new Logger('Process');
 
 process.on('unhandledRejection', (reason: any) => {
-  logger.error(`Unhandled Rejection: ${reason?.message || reason}`, reason?.stack);
+  logger.error(
+    `Unhandled Rejection: ${reason?.message || reason}`,
+    reason?.stack,
+  );
 });
 
 process.on('uncaughtException', (error: Error) => {

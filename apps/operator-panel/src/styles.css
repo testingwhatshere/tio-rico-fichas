@@ -331,6 +331,16 @@ input {
   display: none;
 }
 
+.nav-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  padding: 14px 16px 4px;
+  user-select: none;
+}
+
 .sidebar-footer {
   padding: 16px 12px;
   border-top: 1px solid var(--border-color);
@@ -915,6 +925,13 @@ input {
   gap: 6px;
 }
 
+.prize-hint {
+  color: var(--text-secondary, #999);
+  font-size: 12px;
+  align-self: center;
+  margin-right: auto;
+}
+
 /* ============================================
    JOBS LIST
    ============================================ */
@@ -1215,14 +1232,29 @@ input {
 
 .chat-header-info {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 
 .chat-header-name {
   font-size: 16px;
   font-weight: 600;
   margin: 0;
+  line-height: 1.2;
+}
+
+.chat-header-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary, #9ca3af);
+  line-height: 1.2;
+}
+
+.chat-header-subtitle strong {
+  color: var(--text-primary, #f3f4f6);
+  font-weight: 600;
 }
 
 .chat-header-status {
@@ -1242,6 +1274,143 @@ input {
 .chat-header-status.assigned {
   background: rgba(212, 160, 23, 0.15);
   color: var(--purple-400);
+}
+
+/* Chat pending summary (cargas + premios del usuario asociado) */
+.pending-summary-block,
+.pending-summary-loading,
+.pending-summary-empty,
+.pending-summary-error {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  font-size: 12.5px;
+  background: rgba(99, 102, 241, 0.04);
+}
+.pending-summary-loading { color: var(--text-secondary, #9ca3af); font-style: italic; }
+.pending-summary-empty { color: var(--text-secondary, #9ca3af); }
+.pending-summary-error { color: #ef4444; }
+.pending-section { margin-bottom: 6px; }
+.pending-section:last-child { margin-bottom: 0; }
+.pending-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary, #9ca3af);
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pending-section-count {
+  background: rgba(99, 102, 241, 0.2);
+  color: #a5b4fc;
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.pending-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pending-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 6px;
+}
+.pending-card-icon { font-size: 16px; line-height: 1; }
+.pending-card-body { flex: 1; min-width: 0; }
+.pending-card-line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.pending-card-amount {
+  font-weight: 700;
+  color: var(--text-primary, #f3f4f6);
+}
+.pending-card-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary, #cbd5e1);
+}
+.pending-card-badge-approved,
+.pending-card-badge-verified { background: rgba(16, 185, 129, 0.18); color: #34d399; }
+.pending-card-badge-processing,
+.pending-card-badge-verifying_chips { background: rgba(56, 189, 248, 0.18); color: #38bdf8; }
+.pending-card-badge-validating,
+.pending-card-badge-pending_payment_details,
+.pending-card-badge-pending_verification,
+.pending-card-badge-pending_mp_verification { background: rgba(234, 179, 8, 0.18); color: #facc15; }
+.pending-card-badge-validation_failed { background: rgba(239, 68, 68, 0.18); color: #f87171; }
+.pending-card-badge-chips_withdrawn { background: rgba(217, 70, 239, 0.18); color: #e879f9; }
+.pending-card-line2 {
+  font-size: 11px;
+  color: var(--text-secondary, #9ca3af);
+}
+.pending-card-link {
+  margin-left: 6px;
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+.panel-info-block {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 8px 16px;
+  background: rgba(212, 160, 23, 0.06);
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  font-size: 13px;
+  align-items: center;
+}
+.panel-info-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.panel-info-label {
+  color: var(--text-muted, #94a3b8);
+  font-weight: 500;
+}
+.panel-info-value {
+  color: var(--text-primary, #f1f5f9);
+  font-family: 'Menlo', 'Monaco', monospace;
+  font-weight: 600;
+}
+.panel-info-pwd { letter-spacing: 1px; }
+.panel-info-default { font-style: italic; opacity: 0.85; }
+.panel-info-hint {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+  font-style: italic;
+}
+.panel-info-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 13px;
+  opacity: 0.75;
+  transition: opacity 0.15s ease;
+}
+.panel-info-btn:hover { opacity: 1; }
+.panel-info-loading,
+.panel-info-error {
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  font-style: italic;
 }
 
 .chat-header-status.closed {
@@ -2675,6 +2844,35 @@ kbd {
   border: 1px solid var(--border-color);
   border-radius: 6px;
   box-shadow: 0 2px 0 var(--bg-primary);
+}
+
+/* Inline carga-request card on a message (when message.requestId is set) */
+.chat-msg-request-card {
+  margin-top: 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 8px;
+  max-width: 280px;
+}
+.chat-msg-request-icon { font-size: 18px; line-height: 1; }
+.chat-msg-request-body { flex: 1; min-width: 0; }
+.chat-msg-request-line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.chat-msg-request-amount {
+  font-weight: 700;
+  color: var(--text-primary, #f3f4f6);
+}
+.chat-msg-request-line2 {
+  font-size: 11px;
+  color: var(--text-secondary, #9ca3af);
 }
 
 /* ============================================

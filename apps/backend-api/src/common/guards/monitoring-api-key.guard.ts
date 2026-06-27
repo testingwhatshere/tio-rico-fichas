@@ -24,11 +24,16 @@ export class MonitoringApiKeyGuard implements CanActivate {
     const monitoringKey = request.headers['x-monitoring-api-key'];
     const botKey = request.headers['x-bot-api-key'];
 
-    const expectedMonitoringKey = this.configService.get<string>('MONITORING_API_KEY');
+    const expectedMonitoringKey =
+      this.configService.get<string>('MONITORING_API_KEY');
     const expectedBotKey = this.configService.get<string>('BOT_API_KEY');
 
     // Try monitoring key first
-    if (monitoringKey && expectedMonitoringKey && monitoringKey === expectedMonitoringKey) {
+    if (
+      monitoringKey &&
+      expectedMonitoringKey &&
+      monitoringKey === expectedMonitoringKey
+    ) {
       return true;
     }
 
@@ -38,7 +43,9 @@ export class MonitoringApiKeyGuard implements CanActivate {
     }
 
     if (!monitoringKey && !botKey) {
-      throw new UnauthorizedException('Missing X-Monitoring-API-Key or X-Bot-API-Key header');
+      throw new UnauthorizedException(
+        'Missing X-Monitoring-API-Key or X-Bot-API-Key header',
+      );
     }
 
     throw new UnauthorizedException('Invalid API key');

@@ -54,12 +54,22 @@ export class RequestsService {
    * Send a system message to the user's persistent chat, tagged with the request.
    * Falls back to per-request chat for old data.
    */
-  private async sendRequestSystemMessage(requestId: string, userId: string, content: string) {
+  private async sendRequestSystemMessage(
+    requestId: string,
+    userId: string,
+    content: string,
+  ) {
     try {
       const userChat = await this.chatsService.getOrCreateChat(userId);
-      return this.messagesService.sendSystemMessage(userChat.id, content, requestId);
+      return this.messagesService.sendSystemMessage(
+        userChat.id,
+        content,
+        requestId,
+      );
     } catch (err) {
-      this.logger.error(`Failed to send request system message for ${requestId}: ${err.message}`);
+      this.logger.error(
+        `Failed to send request system message for ${requestId}: ${err.message}`,
+      );
     }
   }
 
@@ -67,24 +77,37 @@ export class RequestsService {
    * Accumulate wallet amount on approval and check for auto-rotation.
    * Best-effort: never fails the approval.
    */
-  private async handleWalletAccumulation(walletId: string | null, amount: number, requestId: string) {
+  private async handleWalletAccumulation(
+    walletId: string | null,
+    amount: number,
+    requestId: string,
+  ) {
     if (!walletId) return;
 
     // Guard against double-accumulation: check if this request was already accumulated
     const existing = await this.prisma.requestStatusHistory.findFirst({
-      where: { requestId, metadata: { path: ['walletAccumulated'], equals: true } },
+      where: {
+        requestId,
+        metadata: { path: ['walletAccumulated'], equals: true },
+      },
     });
     if (existing) {
-      this.logger.warn(`Wallet already accumulated for request ${requestId}, skipping`);
+      this.logger.warn(
+        `Wallet already accumulated for request ${requestId}, skipping`,
+      );
       return;
     }
     const MAX_RETRIES = 1;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const result = await this.paymentsService.accumulateAndCheckRotation(walletId, amount);
+        const result = await this.paymentsService.accumulateAndCheckRotation(
+          walletId,
+          amount,
+        );
 
         // Emit wallet_updated for the accumulated wallet
-        const updatedWallet = await this.paymentsService.getWalletById(walletId);
+        const updatedWallet =
+          await this.paymentsService.getWalletById(walletId);
         if (updatedWallet) {
           this.operatorGateway.emitToAll('wallet_updated', updatedWallet);
         }
@@ -106,22 +129,32 @@ export class RequestsService {
         }
 
         // Record that wallet was accumulated for this request (dedup marker)
-        await this.prisma.requestStatusHistory.create({
-          data: {
-            requestId,
-            status: 'APPROVED',
-            changedBy: 'system-wallet',
-            metadata: { walletAccumulated: true, walletId, amount },
-          },
-        }).catch(err => this.logger.error(`Failed to record wallet accumulation marker: ${err.message}`));
+        await this.prisma.requestStatusHistory
+          .create({
+            data: {
+              requestId,
+              status: 'APPROVED',
+              changedBy: 'system-wallet',
+              metadata: { walletAccumulated: true, walletId, amount },
+            },
+          })
+          .catch((err) =>
+            this.logger.error(
+              `Failed to record wallet accumulation marker: ${err.message}`,
+            ),
+          );
 
         return;
       } catch (err: any) {
         if (err.code === 'P2034' && attempt < MAX_RETRIES) {
-          this.logger.warn(`Wallet accumulation serialization conflict for request ${requestId}, retrying...`);
+          this.logger.warn(
+            `Wallet accumulation serialization conflict for request ${requestId}, retrying...`,
+          );
           continue;
         }
-        this.logger.error(`Wallet accumulation failed for request ${requestId}: ${err.message}`);
+        this.logger.error(
+          `Wallet accumulation failed for request ${requestId}: ${err.message}`,
+        );
         return;
       }
     }
@@ -148,7 +181,9 @@ export class RequestsService {
 
     // Blacklist check: banned users cannot create requests
     if (!user.isActive) {
-      throw new ForbiddenException('Tu cuenta ha sido deshabilitada. Contacta a soporte.');
+      throw new ForbiddenException(
+        'Tu cuenta ha sido deshabilitada. Contacta a soporte.',
+      );
     }
 
     // TypeScript now knows user.username is non-null
@@ -159,7 +194,13 @@ export class RequestsService {
       where: {
         userId,
         status: {
-          in: ['PENDING_PROOF', 'VALIDATING', 'PENDING_MP_VERIFICATION', 'APPROVED', 'PROCESSING'],
+          in: [
+            'PENDING_PROOF',
+            'VALIDATING',
+            'PENDING_MP_VERIFICATION',
+            'APPROVED',
+            'PROCESSING',
+          ],
         },
       },
     });
@@ -173,9 +214,10 @@ export class RequestsService {
     // Check rate limit (max requests per hour)
     const rateLimit = await this.settingsService.checkUserRateLimit(userId);
     if (!rateLimit.allowed) {
-      const minutesUntilReset = Math.max(1, Math.ceil(
-        (rateLimit.resetAt.getTime() - Date.now()) / 60000,
-      ));
+      const minutesUntilReset = Math.max(
+        1,
+        Math.ceil((rateLimit.resetAt.getTime() - Date.now()) / 60000),
+      );
       throw new BadRequestException(
         `Límite de solicitudes excedido. Intenta de nuevo en ${minutesUntilReset} minutos.`,
       );
@@ -238,11 +280,15 @@ export class RequestsService {
     const userChat = await this.chatsService.getOrCreateChat(userId);
 
     // Send initial system message tagged with the new requestId
-    this.messagesService.sendSystemMessage(
-      userChat.id,
-      `Solicitud creada por $${Number(request.amount).toLocaleString('es-AR')}. Esperando comprobante de pago.`,
-      request.id,
-    ).catch(err => this.logger.error(`Initial system message failed: ${err.message}`));
+    this.messagesService
+      .sendSystemMessage(
+        userChat.id,
+        `Solicitud creada por $${Number(request.amount).toLocaleString('es-AR')}. Esperando comprobante de pago.`,
+        request.id,
+      )
+      .catch((err) =>
+        this.logger.error(`Initial system message failed: ${err.message}`),
+      );
 
     this.events.emitRequestCreated(userId, {
       requestId: request.id,
@@ -292,13 +338,43 @@ export class RequestsService {
       where: {
         userId,
         status: {
-          in: ['PENDING_PROOF', 'VALIDATING', 'PENDING_MP_VERIFICATION', 'APPROVED', 'PROCESSING'],
+          in: [
+            'PENDING_PROOF',
+            'VALIDATING',
+            'PENDING_MP_VERIFICATION',
+            'APPROVED',
+            'PROCESSING',
+          ],
         },
       },
       include: {
         chat: { select: { id: true } },
       },
       orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
+   * Active request OR the latest terminal one within the last 6 hours so the home banner
+   * can show "Carga completada" / "Carga rechazada" / "Validación fallida" right after the
+   * status changes. Mirrors the prize-claims `findCurrentForUser` pattern.
+   */
+  async findCurrentForUser(userId: string) {
+    const active = await this.findActiveForUser(userId);
+    if (active) return active;
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+    return this.prisma.request.findFirst({
+      where: {
+        userId,
+        status: {
+          in: ['COMPLETED', 'REJECTED', 'VALIDATION_FAILED', 'FAILED'],
+        },
+        updatedAt: { gte: sixHoursAgo },
+      },
+      include: {
+        chat: { select: { id: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
     });
   }
 
@@ -324,7 +400,12 @@ export class RequestsService {
     return request;
   }
 
-  async uploadProof(requestId: string, userId: string, proofUrl: string, proofHash: string) {
+  async uploadProof(
+    requestId: string,
+    userId: string,
+    proofUrl: string,
+    proofHash: string,
+  ) {
     // Fix 5: Use Serializable transaction to prevent concurrent proof uploads
     let updated: any;
     try {
@@ -343,8 +424,13 @@ export class RequestsService {
             throw new ForbiddenException('No tienes acceso a esta solicitud');
           }
 
-          if (request.status !== 'PENDING_PROOF' && request.status !== 'VALIDATION_FAILED') {
-            throw new BadRequestException('Esta solicitud ya tiene un comprobante');
+          if (
+            request.status !== 'PENDING_PROOF' &&
+            request.status !== 'VALIDATION_FAILED'
+          ) {
+            throw new BadRequestException(
+              'Esta solicitud ya tiene un comprobante',
+            );
           }
 
           // Check for duplicate proof — block if used in ANY non-terminal request (same or different user)
@@ -363,14 +449,14 @@ export class RequestsService {
             const isSameUser = duplicate.userId === userId;
             this.logger.warn(
               `Duplicate proof detected: hash=${proofHash.slice(0, 16)}... ` +
-              `original_request=${duplicate.id} status=${duplicate.status} ` +
-              `same_user=${isSameUser}`,
+                `original_request=${duplicate.id} status=${duplicate.status} ` +
+                `same_user=${isSameUser}`,
             );
             throw new BadRequestException(
               isSameUser
                 ? 'Ya usaste este comprobante en otra solicitud. Subí uno diferente.'
                 : 'Este comprobante ya fue utilizado en otra solicitud. ' +
-                  'Por favor, subí un comprobante diferente.',
+                    'Por favor, subí un comprobante diferente.',
             );
           }
 
@@ -388,7 +474,9 @@ export class RequestsService {
       );
     } catch (error: any) {
       if (error.code === 'P2034') {
-        throw new BadRequestException('Otra operación en curso. Reintentá en unos segundos.');
+        throw new BadRequestException(
+          'Otra operación en curso. Reintentá en unos segundos.',
+        );
       }
       throw error;
     }
@@ -411,7 +499,16 @@ export class RequestsService {
   async cancel(requestId: string, userId: string) {
     const request = await this.findOne(requestId, userId);
 
-    if (!['PENDING_PROOF', 'VALIDATING', 'VALIDATION_FAILED', 'PENDING_MP_VERIFICATION', 'APPROVED', 'CANCELLED'].includes(request.status)) {
+    if (
+      ![
+        'PENDING_PROOF',
+        'VALIDATING',
+        'VALIDATION_FAILED',
+        'PENDING_MP_VERIFICATION',
+        'APPROVED',
+        'CANCELLED',
+      ].includes(request.status)
+    ) {
       throw new BadRequestException(
         request.status === 'PROCESSING'
           ? 'La carga ya está en proceso, no se puede cancelar'
@@ -478,7 +575,11 @@ export class RequestsService {
     });
   }
 
-  async findAll(options?: { status?: RequestStatus; limit?: number; offset?: number }) {
+  async findAll(options?: {
+    status?: RequestStatus;
+    limit?: number;
+    offset?: number;
+  }) {
     return this.prisma.request.findMany({
       where: options?.status ? { status: options.status } : undefined,
       orderBy: { createdAt: 'desc' },
@@ -492,7 +593,11 @@ export class RequestsService {
     });
   }
 
-  async approve(requestId: string, operatorId: string, dto?: ApproveRequestDto) {
+  async approve(
+    requestId: string,
+    operatorId: string,
+    dto?: ApproveRequestDto,
+  ) {
     // Fix 33: Use Serializable transaction to prevent two operators approving simultaneously
     let updated: any;
     try {
@@ -500,21 +605,36 @@ export class RequestsService {
         async (tx) => {
           const request = await tx.request.findUnique({
             where: { id: requestId },
+            include: { job: { select: { id: true, status: true } } },
           });
 
           if (!request) {
             throw new NotFoundException('Solicitud no encontrada');
           }
 
-          if (!['VALIDATING', 'VALIDATION_FAILED', 'PENDING_MP_VERIFICATION'].includes(request.status)) {
-            throw new BadRequestException('Esta solicitud no puede ser aprobada');
+          const ALLOWED = [
+            'VALIDATING',
+            'VALIDATION_FAILED',
+            'PENDING_MP_VERIFICATION',
+          ];
+          // Also allow re-approve for the "APPROVED but no job" inconsistency that
+          // can happen when JobsService.createJobForRequest fails silently. Without
+          // this, the operator gets "Esta solicitud no puede ser aprobada" with no
+          // way to recover. We detect it as: status APPROVED and no Job row exists.
+          const isApprovedWithoutJob =
+            request.status === 'APPROVED' && !request.job;
+          if (!ALLOWED.includes(request.status) && !isApprovedWithoutJob) {
+            throw new BadRequestException(
+              `Esta solicitud no puede ser aprobada (estado actual: ${request.status})`,
+            );
           }
 
           // If operator approved with a different (extracted) amount, update it
           const originalAmount = Number(request.amount);
-          const useApprovedAmount = dto?.approvedAmount !== undefined
-            && dto.approvedAmount > 0
-            && dto.approvedAmount !== originalAmount;
+          const useApprovedAmount =
+            dto?.approvedAmount !== undefined &&
+            dto.approvedAmount > 0 &&
+            dto.approvedAmount !== originalAmount;
 
           // Validate approvedAmount: cannot exceed original amount
           if (useApprovedAmount) {
@@ -546,7 +666,9 @@ export class RequestsService {
               metadata: {
                 manualApproval: true,
                 note: dto?.note,
-                ...(useApprovedAmount ? { originalAmount, approvedAmount: dto.approvedAmount } : {}),
+                ...(useApprovedAmount
+                  ? { originalAmount, approvedAmount: dto.approvedAmount }
+                  : {}),
               },
             },
           });
@@ -557,7 +679,9 @@ export class RequestsService {
       );
     } catch (error: any) {
       if (error.code === 'P2034') {
-        throw new BadRequestException('Esta solicitud fue modificada por otro operador. Reintentá.');
+        throw new BadRequestException(
+          'Esta solicitud fue modificada por otro operador. Reintentá.',
+        );
       }
       throw error;
     }
@@ -574,7 +698,6 @@ export class RequestsService {
 
     // After commit: emit events, send notification, create job
 
-
     this.events.emitRequestUpdated(updated.userId, {
       requestId: updated.id,
       status: 'APPROVED',
@@ -584,9 +707,15 @@ export class RequestsService {
 
     // Accumulate wallet amount and check for auto-rotation
     try {
-      await this.handleWalletAccumulation(updated.walletId, Number(updated.amount), requestId);
+      await this.handleWalletAccumulation(
+        updated.walletId,
+        Number(updated.amount),
+        requestId,
+      );
     } catch (walletError) {
-      this.logger.error(`Wallet accumulation failed for request ${requestId}: ${walletError.message}`);
+      this.logger.error(
+        `Wallet accumulation failed for request ${requestId}: ${walletError.message}`,
+      );
       this.operatorGateway.emitToAll('wallet_accumulation_failed', {
         requestId,
         walletId: updated.walletId,
@@ -636,7 +765,11 @@ export class RequestsService {
             throw new NotFoundException('Solicitud no encontrada');
           }
 
-          if (!['VALIDATING', 'VALIDATION_FAILED', 'APPROVED'].includes(request.status)) {
+          if (
+            !['VALIDATING', 'VALIDATION_FAILED', 'APPROVED'].includes(
+              request.status,
+            )
+          ) {
             throw new BadRequestException('Esta solicitud ya fue procesada');
           }
 
@@ -672,12 +805,16 @@ export class RequestsService {
       );
     } catch (error: any) {
       if (error.code === 'P2034') {
-        throw new BadRequestException('Esta solicitud fue modificada por otro operador. Reintentá.');
+        throw new BadRequestException(
+          'Esta solicitud fue modificada por otro operador. Reintentá.',
+        );
       }
       throw error;
     }
 
-    this.logger.log(`Request ${requestId} rejected by operator ${operatorId}: ${dto.reason}`);
+    this.logger.log(
+      `Request ${requestId} rejected by operator ${operatorId}: ${dto.reason}`,
+    );
 
     // Send system message to chat with rejection reason
     // Send rejection message to user's persistent chat
@@ -687,7 +824,6 @@ export class RequestsService {
     this.sendRequestSystemMessage(requestId, updated.userId, rejectMsg);
 
     // After commit: emit events, send notification
-
 
     this.events.emitRequestUpdated(updated.userId, {
       requestId: updated.id,
@@ -707,27 +843,39 @@ export class RequestsService {
       .sendToUser(
         updated.userId,
         'Solicitud rechazada',
-        dto.reason ? `Motivo: ${dto.reason}` : 'Tu solicitud fue rechazada. Abrí la app para más detalle.',
+        dto.reason
+          ? `Motivo: ${dto.reason}`
+          : 'Tu solicitud fue rechazada. Abrí la app para más detalle.',
         { requestId: updated.id, type: 'request_rejected' },
       )
-      .catch((err: any) => this.logger.warn(`Push (reject) failed for user ${updated.userId}: ${err.message}`));
+      .catch((err: any) =>
+        this.logger.warn(
+          `Push (reject) failed for user ${updated.userId}: ${err.message}`,
+        ),
+      );
 
     this.events.emitDashboardUpdate();
 
     // Fix 9: Reverse wallet accumulation if request was previously APPROVED
-    if ((updated as any)._wasApproved && (updated as any)._walletId) {
+    if (updated._wasApproved && updated._walletId) {
       try {
         await this.paymentsService.decrementWalletAmount(
-          (updated as any)._walletId,
-          (updated as any)._amount,
+          updated._walletId,
+          updated._amount,
         );
-        const wallet = await this.paymentsService.getWalletById((updated as any)._walletId);
+        const wallet = await this.paymentsService.getWalletById(
+          updated._walletId,
+        );
         if (wallet) {
           this.operatorGateway.emitToAll('wallet_updated', wallet);
         }
-        this.logger.log(`Wallet amount decremented for rejected request ${requestId}`);
+        this.logger.log(
+          `Wallet amount decremented for rejected request ${requestId}`,
+        );
       } catch (walletError) {
-        this.logger.error(`Failed to decrement wallet for rejected request ${requestId}: ${walletError.message}`);
+        this.logger.error(
+          `Failed to decrement wallet for rejected request ${requestId}: ${walletError.message}`,
+        );
       }
     }
 
@@ -770,8 +918,17 @@ export class RequestsService {
         select: { requiresVerification: true },
       });
       walletRequiresVerification = wallet?.requiresVerification ?? false;
+      if (walletRequiresVerification) {
+        // Aviso temprano: misma razón que en PaymentsService.performValidationFlow.
+        this.logger.warn(
+          `setValidationResult: wallet ${request.walletId} has requiresVerification=true but MP ` +
+            `extension is not in use. Request ${requestId} would hang in PENDING_MP_VERIFICATION.`,
+        );
+      }
     }
-    const approvedStatus: RequestStatus = walletRequiresVerification ? 'PENDING_MP_VERIFICATION' : 'APPROVED';
+    const approvedStatus: RequestStatus = walletRequiresVerification
+      ? 'PENDING_MP_VERIFICATION'
+      : 'APPROVED';
 
     // Auto-detect amount: if request was created with amount=0, fill it from AI extraction
     const isAutoDetect = Number(request.amount) === 0;
@@ -781,16 +938,23 @@ export class RequestsService {
       const extracted = result.details?.extractedAmount;
       if (extracted && extracted > 0) {
         autoDetectedAmount = Math.floor(extracted);
-        this.logger.log(`Auto-detect: extracted amount $${autoDetectedAmount} for request ${requestId}`);
+        this.logger.log(
+          `Auto-detect: extracted amount $${autoDetectedAmount} for request ${requestId}`,
+        );
       } else {
         // AI couldn't extract amount — mark as failed so operator can review
         result.valid = false;
-        result.error = 'No se pudo detectar el monto del comprobante. Intentá cargando manualmente.';
-        this.logger.warn(`Auto-detect: could not extract amount for request ${requestId}`);
+        result.error =
+          'No se pudo detectar el monto del comprobante. Intentá cargando manualmente.';
+        this.logger.warn(
+          `Auto-detect: could not extract amount for request ${requestId}`,
+        );
       }
     }
 
-    const newStatus: RequestStatus = result.valid ? approvedStatus : 'VALIDATION_FAILED';
+    const newStatus: RequestStatus = result.valid
+      ? approvedStatus
+      : 'VALIDATION_FAILED';
 
     // Merge status update + validation fields + history record in a single transaction
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -840,7 +1004,11 @@ export class RequestsService {
 
     // Wallet accumulation: only if going straight to APPROVED (MP verification disabled)
     if (newStatus === 'APPROVED') {
-      this.handleWalletAccumulation(request.walletId, Number(request.amount), requestId);
+      this.handleWalletAccumulation(
+        request.walletId,
+        Number(request.amount),
+        requestId,
+      );
     }
 
     return updated;
@@ -860,7 +1028,9 @@ export class RequestsService {
     }
 
     if (!['VALIDATION_FAILED', 'FAILED'].includes(request.status)) {
-      throw new BadRequestException('Solo se pueden asignar solicitudes fallidas');
+      throw new BadRequestException(
+        'Solo se pueden asignar solicitudes fallidas',
+      );
     }
 
     const updated = await this.prisma.request.update({
@@ -923,7 +1093,9 @@ export class RequestsService {
       orderBy: { assignedAt: 'asc' },
       include: {
         user: { select: { id: true, email: true } },
-        job: { select: { id: true, status: true, error: true, screenshot: true } },
+        job: {
+          select: { id: true, status: true, error: true, screenshot: true },
+        },
       },
     });
   }
@@ -937,7 +1109,9 @@ export class RequestsService {
       orderBy: { createdAt: 'asc' },
       include: {
         user: { select: { id: true, email: true } },
-        job: { select: { id: true, status: true, error: true, screenshot: true } },
+        job: {
+          select: { id: true, status: true, error: true, screenshot: true },
+        },
       },
     });
   }
@@ -1011,7 +1185,9 @@ export class RequestsService {
 
     // Check access: user must be owner or operator
     const isOwner = request.userId === userId;
-    const isOperator = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(userRole);
+    const isOperator = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(
+      userRole,
+    );
 
     if (!isOwner && !isOperator) {
       throw new ForbiddenException('No tienes acceso a esta solicitud');
@@ -1034,12 +1210,14 @@ export class RequestsService {
   private getStatusSystemMessage(status: RequestStatus): string | null {
     const map: Partial<Record<RequestStatus, string>> = {
       VALIDATING: 'Validando comprobante de pago...',
-      PENDING_MP_VERIFICATION: 'Comprobante validado. Verificando recepción del pago...',
+      PENDING_MP_VERIFICATION:
+        'Comprobante validado. Verificando recepción del pago...',
       APPROVED: 'Pago verificado. Procesando carga de fichas...',
       PROCESSING: 'Cargando fichas en tu cuenta...',
       COMPLETED: 'Fichas cargadas exitosamente!',
       FAILED: 'Error al cargar fichas. Un operador va a revisar tu caso.',
-      VALIDATION_FAILED: 'No pudimos validar el comprobante. Un operador va a revisar tu solicitud.',
+      VALIDATION_FAILED:
+        'No pudimos validar el comprobante. Un operador va a revisar tu solicitud.',
       REJECTED: 'Solicitud rechazada.',
     };
     return map[status] || null;
@@ -1065,7 +1243,8 @@ export class RequestsService {
       select: { status: true },
     });
     if (currentRequest) {
-      const allowedTransitions = RequestsService.VALID_TRANSITIONS[currentRequest.status] || [];
+      const allowedTransitions =
+        RequestsService.VALID_TRANSITIONS[currentRequest.status] || [];
       if (!allowedTransitions.includes(newStatus)) {
         this.logger.warn(
           `Invalid status transition for request ${requestId}: ${currentRequest.status} → ${newStatus}. Allowed: ${allowedTransitions.join(', ')}`,
@@ -1136,12 +1315,23 @@ export class RequestsService {
   // ==========================================
 
   @OnEvent(AppEvent.JOB_STARTED)
-  async onJobStarted(event: { jobId: string; requestId: string; userId: string }) {
-    this.logger.log(`[Event] job.started — requestId=${event.requestId}, jobId=${event.jobId}`);
+  async onJobStarted(event: {
+    jobId: string;
+    requestId: string;
+    userId: string;
+  }) {
+    this.logger.log(
+      `[Event] job.started — requestId=${event.requestId}, jobId=${event.jobId}`,
+    );
     try {
-      await this.updateRequestStatus(event.requestId, 'PROCESSING', 'system-bot', {
-        jobId: event.jobId,
-      });
+      await this.updateRequestStatus(
+        event.requestId,
+        'PROCESSING',
+        'system-bot',
+        {
+          jobId: event.jobId,
+        },
+      );
     } catch (error) {
       this.logger.error(
         `Failed to update request ${event.requestId} to PROCESSING: ${error.message}`,
@@ -1151,11 +1341,18 @@ export class RequestsService {
 
   @OnEvent(AppEvent.JOB_COMPLETED)
   async onJobCompleted(event: { requestId: string; jobId: string }) {
-    this.logger.log(`[Event] job.completed — requestId=${event.requestId}, jobId=${event.jobId}`);
+    this.logger.log(
+      `[Event] job.completed — requestId=${event.requestId}, jobId=${event.jobId}`,
+    );
     try {
-      await this.updateRequestStatus(event.requestId, 'COMPLETED', 'system-bot', {
-        jobId: event.jobId,
-      });
+      await this.updateRequestStatus(
+        event.requestId,
+        'COMPLETED',
+        'system-bot',
+        {
+          jobId: event.jobId,
+        },
+      );
     } catch (error) {
       this.logger.error(
         `Failed to update request ${event.requestId} to COMPLETED: ${error.message}`,
@@ -1164,8 +1361,14 @@ export class RequestsService {
   }
 
   @OnEvent(AppEvent.JOB_FAILED)
-  async onJobFailed(event: { requestId: string; jobId: string; error?: string }) {
-    this.logger.log(`[Event] job.failed — requestId=${event.requestId}, jobId=${event.jobId}`);
+  async onJobFailed(event: {
+    requestId: string;
+    jobId: string;
+    error?: string;
+  }) {
+    this.logger.log(
+      `[Event] job.failed — requestId=${event.requestId}, jobId=${event.jobId}`,
+    );
     try {
       await this.updateRequestStatus(event.requestId, 'FAILED', 'system-bot', {
         jobId: event.jobId,

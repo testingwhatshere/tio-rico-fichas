@@ -7,7 +7,14 @@ import {
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
-import { Logger, Inject, forwardRef, UsePipes, ValidationPipe, OnModuleDestroy } from '@nestjs/common';
+import {
+  Logger,
+  Inject,
+  forwardRef,
+  UsePipes,
+  ValidationPipe,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { Server, Socket } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
@@ -33,8 +40,8 @@ interface WalletValidationInfo {
 interface ValidationRequest {
   id: string;
   requestId: string;
-  imageUrl: string;       // Cloudinary URL — validator fetches directly
-  imageBase64?: string;   // Legacy fallback (kept for backward compat during rollout)
+  imageUrl: string; // Cloudinary URL — validator fetches directly
+  imageBase64?: string; // Legacy fallback (kept for backward compat during rollout)
   mimeType: string;
   expectedAmount: number;
   expectedWallet?: WalletValidationInfo | null;
@@ -138,9 +145,13 @@ export class ValidatorGateway
   private getOperatorGateway(): OperatorGateway | null {
     if (!this.operatorGateway) {
       try {
-        this.operatorGateway = this.moduleRef.get(OperatorGateway, { strict: false });
+        this.operatorGateway = this.moduleRef.get(OperatorGateway, {
+          strict: false,
+        });
       } catch {
-        this.logger.warn('OperatorGateway not available for validator status events');
+        this.logger.warn(
+          'OperatorGateway not available for validator status events',
+        );
       }
     }
     return this.operatorGateway;
@@ -165,7 +176,9 @@ export class ValidatorGateway
    * Get validation timeout from settings (dynamic)
    */
   private async getValidationTimeout(): Promise<number> {
-    const value = await this.settingsService.getSetting('VALIDATION_TIMEOUT_MS');
+    const value = await this.settingsService.getSetting(
+      'VALIDATION_TIMEOUT_MS',
+    );
     return parseInt(value || '60000', 10);
   }
 
@@ -193,11 +206,17 @@ export class ValidatorGateway
             this.lastHeartbeat?.toISOString() || 'never'
           }) with ${client.id}`,
         );
-        try { this.connectedValidator.disconnect(); } catch { /* noop */ }
+        try {
+          this.connectedValidator.disconnect();
+        } catch {
+          /* noop */
+        }
         this.connectedValidator = null;
       } else {
         this.logger.warn('Another validator already connected, rejecting');
-        client.emit('error', { message: 'Another validator is already connected' });
+        client.emit('error', {
+          message: 'Another validator is already connected',
+        });
         client.disconnect();
         return;
       }
@@ -325,7 +344,9 @@ export class ValidatorGateway
       });
 
       // Send to validator
-      this.logger.log(`Sending validation request ${id} for request ${requestId}`);
+      this.logger.log(
+        `Sending validation request ${id} for request ${requestId}`,
+      );
       this.connectedValidator!.emit('validate', request);
     });
   }

@@ -250,3 +250,19 @@ bun.lock
 
 # Root placeholder
 index.ts
+
+# OCR bench artifacts (debug local, no se commitea)
+tmp-comprobantes/
+expanded-metadata.json
+chatbubble-fix-verify.png
+operator-panel-sidebar.png
+
+# .env backups (contienen secretos)
+*.env.local.dev-bak
+.env.local.dev-bak
+
+# Local-only artifacts
+apps/chat-app/dist-local/
+*.mhtml
+*.zip
+referencias/

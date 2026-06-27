@@ -2,7 +2,10 @@ import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import Constants from 'expo-constants';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+// EXPO_PUBLIC_API_URL ya incluye el sufijo /api (ej: https://tiorico-api.onrender.com/api).
+// Antes el código pegaba /api/settings/... arriba y resultaba en /api/api/settings/check-update → 404
+// silencioso, así que los APK nunca recibían el aviso de actualización.
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://tiorico-api.onrender.com/api';
 const APP_NAME = 'chat';
 
 export interface UpdateInfo {
@@ -19,7 +22,7 @@ export interface UpdateInfo {
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
   try {
     const currentVersion = Constants.expoConfig?.version || '1.0.0';
-    const url = `${API_BASE_URL}/api/settings/check-update?app=${APP_NAME}&currentVersion=${currentVersion}`;
+    const url = `${API_BASE_URL}/settings/check-update?app=${APP_NAME}&currentVersion=${currentVersion}`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);

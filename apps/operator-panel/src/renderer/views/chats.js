@@ -291,19 +291,32 @@ export function renderChatMain() {
   }
 
   const userName = selectedChat.user?.username || selectedChat.user?.email || selectedChat.userName || 'Usuario';
+  const userPhone = selectedChat.user?.phone || '';
+  // savedTargetUsername viene en el chat list desde el backend (chats.service.ts:254).
+  // Mostrarlo en el header de una para que el operador no espere el async loading.
+  const playerName = selectedChat.user?.savedTargetUsername || '';
   const chatStatus = selectedChat.status || 'OPEN';
   const isClosed = chatStatus === 'CLOSED';
+
+  const userId = selectedChat.user?.id || selectedChat.userId;
+  const subtitleParts = [];
+  if (userPhone) subtitleParts.push(escapeHtml(userPhone));
+  if (playerName) subtitleParts.push(`Jugador: <strong>${escapeHtml(playerName)}</strong>`);
+  const subtitle = subtitleParts.join(' · ');
 
   container.innerHTML = `
     <div class="chat-header">
       <div class="chat-header-info">
         <h3 class="chat-header-name">${escapeHtml(userName)}</h3>
+        ${subtitle ? `<div class="chat-header-subtitle">${subtitle}</div>` : ''}
         <span class="chat-header-status ${chatStatus.toLowerCase()}">${escapeHtml(chatStatus)}</span>
       </div>
       <div class="chat-header-actions">
         ${!isClosed ? `<button class="btn btn-sm btn-secondary" onclick="closeCurrentChat()">Cerrar Chat</button>` : ''}
       </div>
     </div>
+    ${userId ? renderPanelInfoBlock(userId) : ''}
+    ${selectedChat.id ? `<div id="pending-summary-container" data-chat-id="${selectedChat.id}"></div>` : ''}
 
     <div class="chat-messages" id="chat-messages-container">
       ${chatMessages.length === 0 ? `<div class="chat-messages-empty"><p>No hay mensajes</p></div>`
@@ -360,6 +373,11 @@ export function renderChatMain() {
       }
     });
   }
+
+  // Load pending Requests/PrizeClaims for this user (async, doesn't block chat render)
+  if (selectedChat.id) {
+    setTimeout(() => loadPendingSummary(selectedChat.id), 0);
+  }
 }
 
 function renderMessage(msg) {
@@ -383,11 +401,27 @@ function renderMessage(msg) {
     ? `<div class="message-content">${escapeHtml(msg.content)}</div>`
     : '';
 
+  // If the message is linked to a Request, render an inline card with the
+  // amount/status so the operator can see at a glance which carga corresponds.
+  const requestCardHtml = msg.request
+    ? `<div class="chat-msg-request-card">
+        <span class="chat-msg-request-icon">💰</span>
+        <div class="chat-msg-request-body">
+          <div class="chat-msg-request-line1">
+            <span class="chat-msg-request-amount">${formatAmount(msg.request.amount)}</span>
+            <span class="pending-card-badge pending-card-badge-${(msg.request.status || '').toLowerCase()}">${escapeHtml(REQUEST_STATUS_LABELS[msg.request.status] || msg.request.status)}</span>
+          </div>
+          <div class="chat-msg-request-line2">${escapeHtml(msg.request.targetUsername || '-')} · #${escapeHtml((msg.request.id || '').slice(0, 8))}</div>
+        </div>
+      </div>`
+    : '';
+
   if (isSystem) {
     return `
       <div class="chat-message system">
         ${contentHtml}
         ${imageHtml}
+        ${requestCardHtml}
         <div class="message-time">${formatMessageTime(msg.createdAt)}</div>
       </div>
     `;
@@ -399,6 +433,7 @@ function renderMessage(msg) {
       ${senderName ? `<div class="message-sender">${escapeHtml(senderName)}</div>` : ''}
       ${imageHtml}
       ${contentHtml}
+      ${requestCardHtml}
       <div class="message-time">${formatMessageTime(msg.createdAt)}</div>
     </div>
   `;
@@ -544,5 +579,242 @@ export async function closeCurrentChat() {
     }
   } catch (error) {
     showToast('Error al cerrar', 'error');
+  }
+}
+
+// ============================================
+// Panel info (game-panel credentials for support)
+// ============================================
+
+const _panelInfoCache = new Map(); // userId -> { savedTargetUsername, panelPassword, panelPasswordUpdatedAt }
+
+export function renderPanelInfoBlock(userId) {
+  const cached = _panelInfoCache.get(userId);
+  // Always render the block; load async if no cache yet.
+  if (!cached) {
+    setTimeout(() => loadPanelInfo(userId), 0);
+    return `
+      <div class="panel-info-block" id="panel-info-${userId}">
+        <span class="panel-info-loading">Cargando datos del panel…</span>
+      </div>
+    `;
+  }
+  return renderPanelInfoContent(userId, cached);
+}
+
+function renderPanelInfoContent(userId, info) {
+  const username = info.savedTargetUsername || '(sin asignar)';
+  const hasPwd = info.panelPassword != null && info.panelPassword !== '';
+  const pwdValue = hasPwd ? info.panelPassword : '';
+  const pwdNote = hasPwd
+    ? ''
+    : '<span class="panel-info-hint">Default: 123casino (si no la cambió)</span>';
+  return `
+    <div class="panel-info-block" id="panel-info-${userId}" data-user-id="${userId}">
+      <div class="panel-info-row">
+        <span class="panel-info-label">Usuario panel:</span>
+        <span class="panel-info-value">${escapeHtml(username)}</span>
+        ${info.savedTargetUsername
+          ? `<button class="panel-info-btn" title="Copiar" onclick="copyPanelInfoValue('${escapeHtml(info.savedTargetUsername)}')">📋</button>`
+          : ''}
+        <button class="panel-info-btn" title="Cambiar usuario del panel" onclick="changePanelUsernameFor('${userId}')">✏️</button>
+      </div>
+      <div class="panel-info-row">
+        <span class="panel-info-label">Contraseña:</span>
+        ${hasPwd
+          ? `<span class="panel-info-value panel-info-pwd" id="panel-info-pwd-${userId}" data-pwd="${escapeHtml(pwdValue)}" data-shown="0">••••••••</span>
+             <button class="panel-info-btn" title="Mostrar/ocultar" onclick="togglePanelInfoPwd('${userId}')">👁</button>
+             <button class="panel-info-btn" title="Copiar" onclick="copyPanelInfoValue('${escapeHtml(pwdValue)}')">📋</button>`
+          : `<span class="panel-info-value panel-info-default">123casino</span>
+             <button class="panel-info-btn" title="Copiar" onclick="copyPanelInfoValue('123casino')">📋</button>`}
+        ${pwdNote}
+      </div>
+    </div>
+  `;
+}
+
+async function loadPanelInfo(userId) {
+  try {
+    const result = await window.api.getUserPanelInfo(userId);
+    if (result?.success && result.data) {
+      _panelInfoCache.set(userId, result.data);
+      const el = document.getElementById(`panel-info-${userId}`);
+      if (el) el.outerHTML = renderPanelInfoContent(userId, result.data);
+    } else {
+      const el = document.getElementById(`panel-info-${userId}`);
+      if (el) el.innerHTML = `<span class="panel-info-error">No se pudo cargar los datos del panel</span>`;
+    }
+  } catch (e) {
+    const el = document.getElementById(`panel-info-${userId}`);
+    if (el) el.innerHTML = `<span class="panel-info-error">Error: ${escapeHtml(e.message || 'desconocido')}</span>`;
+  }
+}
+
+export function togglePanelInfoPwd(userId) {
+  const el = document.getElementById(`panel-info-pwd-${userId}`);
+  if (!el) return;
+  const shown = el.dataset.shown === '1';
+  if (shown) {
+    el.textContent = '••••••••';
+    el.dataset.shown = '0';
+  } else {
+    el.textContent = el.dataset.pwd || '';
+    el.dataset.shown = '1';
+  }
+}
+
+export async function copyPanelInfoValue(value) {
+  try {
+    await navigator.clipboard.writeText(value);
+    showToast('Copiado', 'success');
+  } catch {
+    showToast('No se pudo copiar', 'error');
+  }
+}
+
+// Invalidate panel-info cache when bot reports a password change so the next
+// render shows the new value. Called from renderer.js socket handler.
+export function invalidatePanelInfo(userId) {
+  _panelInfoCache.delete(userId);
+}
+
+// ============================================
+// Pending summary (cargas + premios pendientes del usuario asociado al chat)
+// ============================================
+
+const REQUEST_STATUS_LABELS = {
+  VALIDATING: 'Validando',
+  VALIDATION_FAILED: 'Validación falló',
+  PENDING_MP_VERIFICATION: 'Esperando MP',
+  APPROVED: 'Aprobado',
+  PROCESSING: 'Cargando',
+};
+
+const PRIZE_STATUS_LABELS = {
+  PENDING_PAYMENT_DETAILS: 'Esperando datos',
+  PENDING_VERIFICATION: 'Por verificar',
+  VERIFYING_CHIPS: 'Verificando fichas',
+  VERIFIED: 'Verificado',
+  PROCESSING: 'Retirando',
+  CHIPS_WITHDRAWN: 'Pagar al usuario',
+};
+
+function formatAmount(value) {
+  const n = Number(value);
+  if (!isFinite(n)) return value;
+  return '$' + n.toLocaleString('es-AR');
+}
+
+function renderPendingCard(kind, item) {
+  const labelMap = kind === 'request' ? REQUEST_STATUS_LABELS : PRIZE_STATUS_LABELS;
+  const label = labelMap[item.status] || item.status;
+  const icon = kind === 'request' ? '💰' : '🏆';
+  const proofLink = kind === 'request' && item.proofUrl
+    ? `<a href="#" class="pending-card-link" onclick="event.preventDefault(); openImageZoom('${escapeHtml(item.proofUrl)}')">Ver comprobante</a>`
+    : '';
+  const time = getTimeAgo(item.createdAt);
+  return `
+    <div class="pending-card pending-card-${kind}">
+      <span class="pending-card-icon">${icon}</span>
+      <div class="pending-card-body">
+        <div class="pending-card-line1">
+          <span class="pending-card-amount">${formatAmount(item.amount)}</span>
+          <span class="pending-card-badge pending-card-badge-${item.status.toLowerCase()}">${escapeHtml(label)}</span>
+        </div>
+        <div class="pending-card-line2">
+          ${escapeHtml(item.targetUsername || '-')} · hace ${escapeHtml(time)}
+          ${proofLink}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderPendingSummaryHtml(summary) {
+  const { requests = [], prizeClaims = [] } = summary || {};
+  if (requests.length === 0 && prizeClaims.length === 0) {
+    return `<div class="pending-summary-empty">Sin cargas ni premios pendientes</div>`;
+  }
+  const requestCards = requests.map(r => renderPendingCard('request', r)).join('');
+  const prizeCards = prizeClaims.map(p => renderPendingCard('prize', p)).join('');
+  return `
+    ${requests.length > 0 ? `
+      <div class="pending-section">
+        <div class="pending-section-title">Cargas pendientes <span class="pending-section-count">${requests.length}</span></div>
+        <div class="pending-cards">${requestCards}</div>
+      </div>
+    ` : ''}
+    ${prizeClaims.length > 0 ? `
+      <div class="pending-section">
+        <div class="pending-section-title">Premios pendientes <span class="pending-section-count">${prizeClaims.length}</span></div>
+        <div class="pending-cards">${prizeCards}</div>
+      </div>
+    ` : ''}
+  `;
+}
+
+export async function loadPendingSummary(chatId) {
+  if (!chatId) return;
+  const container = document.getElementById('pending-summary-container');
+  if (!container || container.dataset.chatId !== chatId) return;
+  container.innerHTML = `<div class="pending-summary-loading">Cargando pendientes…</div>`;
+  try {
+    const result = await window.api.getPendingSummary(chatId);
+    // Re-verify the container is still for this chat (operator may have switched)
+    const current = document.getElementById('pending-summary-container');
+    if (!current || current.dataset.chatId !== chatId) return;
+    if (result?.success) {
+      current.innerHTML = `<div class="pending-summary-block">${renderPendingSummaryHtml(result.data)}</div>`;
+    } else {
+      current.innerHTML = `<div class="pending-summary-error">No se pudieron cargar pendientes: ${escapeHtml(result?.error || 'error')}</div>`;
+    }
+  } catch (e) {
+    const current = document.getElementById('pending-summary-container');
+    if (current && current.dataset.chatId === chatId) {
+      current.innerHTML = `<div class="pending-summary-error">Error: ${escapeHtml(e.message || 'desconocido')}</div>`;
+    }
+  }
+}
+
+export function refreshPendingSummaryForUser(userId) {
+  const selectedChat = getSelectedChat();
+  if (!selectedChat) return;
+  if ((selectedChat.user?.id || selectedChat.userId) !== userId) return;
+  loadPendingSummary(selectedChat.id);
+}
+
+/**
+ * Operator-driven flow when a user's panel-game username has to change (e.g. the
+ * panel rejected auto-creation because the name was already taken). Backend
+ * resets the user's panelId binding and re-runs discovery automatically — the
+ * operator doesn't need to touch anything else.
+ */
+export async function changePanelUsernameFor(userId) {
+  const newName = await showTextInputModal(
+    'Cambiar usuario del panel',
+    'Nuevo nombre (3-20, letras/números/_)',
+    'Guardar',
+  );
+  if (!newName) return;
+  const trimmed = newName.trim().toLowerCase();
+  if (trimmed.length < 3 || trimmed.length > 20 || !/^[a-z0-9_]+$/.test(trimmed)) {
+    showToast('Nombre inválido: 3-20 chars, solo letras/números/_', 'error');
+    return;
+  }
+  try {
+    const result = await window.api.setUserTargetUsername(userId, trimmed);
+    if (result?.success) {
+      _panelInfoCache.delete(userId);
+      const el = document.getElementById(`panel-info-${userId}`);
+      if (el) el.outerHTML = renderPanelInfoBlock(userId);
+      const msg = result.data?.retriedRequestId
+        ? `Nombre actualizado. Discovery reiniciado para el último pedido.`
+        : `Nombre actualizado.`;
+      showToast(msg, 'success');
+    } else {
+      showToast(result?.error || 'No se pudo cambiar el nombre', 'error');
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
   }
 }

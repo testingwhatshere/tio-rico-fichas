@@ -317,7 +317,7 @@ export function openFailureModal(failureId) {
         retryDiscoveryBtn.disabled = true;
         retryDiscoveryBtn.textContent = 'Reintentando...';
         try {
-          const result = await window.electronAPI.retryFailedRequest(requestId);
+          const result = await window.api.retryFailedRequest(requestId);
           if (result?.success) {
             showToast('Discovery reiniciado. Se buscará/creará al usuario.', 'success');
             closeAllModals();

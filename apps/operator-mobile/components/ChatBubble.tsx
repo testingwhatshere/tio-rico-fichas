@@ -47,6 +47,41 @@ export default function ChatBubble({ message }: ChatBubbleProps) {
     return (
       <View style={styles.systemContainer}>
         <View style={styles.systemBubble}>
+          {/* Image attachment */}
+          {message.imageUrl ? (
+            <>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setImageModalVisible(true)}
+              >
+                <Image
+                  source={{ uri: message.imageUrl }}
+                  style={styles.image}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+
+              {/* Fullscreen image modal */}
+              <Modal
+                visible={imageModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setImageModalVisible(false)}
+              >
+                <TouchableOpacity
+                  style={styles.imageModalOverlay}
+                  activeOpacity={1}
+                  onPress={() => setImageModalVisible(false)}
+                >
+                  <Image
+                    source={{ uri: message.imageUrl }}
+                    style={styles.imageModalFull}
+                    resizeMode="contain"
+                  />
+                </TouchableOpacity>
+              </Modal>
+            </>
+          ) : null}
           <Text style={styles.systemText}>{message.content}</Text>
           {time ? <Text style={styles.systemTime}>{time}</Text> : null}
         </View>

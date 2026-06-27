@@ -5,6 +5,8 @@ export class AuthResponseDto {
   user: {
     id: string;
     email: string;
+    username?: string;
+    savedTargetUsername?: string;
     role: UserRole;
   };
 }

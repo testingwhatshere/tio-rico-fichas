@@ -1,4 +1,11 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto, RegisterDto, AuthResponseDto, ClientAuthDto } from './dto';
 import type { CurrentUserPayload } from './interfaces/current-user.interface';
@@ -35,7 +42,9 @@ export class AuthController {
   }
 
   @Get('me')
-  async me(@CurrentUser() user: CurrentUserPayload): Promise<CurrentUserPayload> {
+  async me(
+    @CurrentUser() user: CurrentUserPayload,
+  ): Promise<CurrentUserPayload> {
     return user;
   }
 }

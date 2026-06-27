@@ -35,39 +35,30 @@ export class JobProcessor {
       }
     }
 
-    // Execute credit loading (with auto-create if user not found)
+    // Execute credit loading. If user not found on THIS panel, report to backend
+    // so it can re-run discovery across other panels (the user might already exist elsewhere).
+    // We must NOT auto-create here — that's what caused duplicate users across panels.
     console.log('[JobProcessor] Executing credit load...');
     try {
       const result = await this.executeLoadCredits(tab.id, job, config);
       console.log('[JobProcessor] Job completed successfully');
       return result;
     } catch (loadError) {
-      // If user not found on panel, auto-create and retry once
       const isUserNotFound = loadError.message &&
         (loadError.message.includes('not found in search results') ||
          loadError.message.includes('no encontrado'));
 
       if (!isUserNotFound) throw loadError;
 
-      console.log(`[JobProcessor] User "${job.targetUsername}" not found — attempting auto-creation...`);
+      console.log(`[JobProcessor] User "${job.targetUsername}" not found on panel ${config.panelId} — reporting to backend for re-discovery`);
+      await ApiClient.reportUserNotFoundOnPanel(config, job.id, job.targetUsername);
 
-      // Create the user on the panel
-      const createResult = await this.createUser(job.targetUsername, config);
-      if (!createResult.success) {
-        throw new Error(`User not found and auto-creation failed: ${createResult.error}`);
-      }
-
-      console.log(`[JobProcessor] User "${job.targetUsername}" created successfully, retrying credit load...`);
-
-      // Re-ensure panel tab and session after creation (page may have changed)
-      tab = await this.ensurePanelTab(config.panelUrl);
-      await this.waitForTabLoad(tab.id);
-      tab = await this.validateSession(tab, config);
-
-      // Retry credit loading
-      const retryResult = await this.executeLoadCredits(tab.id, job, config);
-      console.log('[JobProcessor] Job completed successfully (after auto-creation)');
-      return retryResult;
+      // Throw so the service worker stops processing this job. Backend has already
+      // marked it FAILED with the rediscovery marker; reportJobResult will be ignored
+      // by the idempotency guard in bot.service handleJobResult.
+      const err = new Error(`Usuario "${job.targetUsername}" no encontrado en este panel — backend reintentará en otros paneles`);
+      err.isUserNotFoundOnPanel = true;
+      throw err;
     }
   }
 
@@ -741,6 +732,123 @@ export class JobProcessor {
     }
 
     const changeResult = result[0].result;
+
+    // Content script filled both password inputs and is asking us to click in MAIN world.
+    // Same pattern as createUser — Vue ignores synthetic clicks from isolated world.
+    if (changeResult?.success && changeResult?.needsMainWorldClick) {
+      console.log('[JobProcessor] Password fields filled, executing MAIN world click...');
+
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          world: 'MAIN',
+          func: () => {
+            try {
+              const modal = document.querySelector('.insert-mo.modal');
+              if (!modal) { console.error('[Bot-MAIN] password modal not found'); return; }
+
+              // Force Vue v-model sync for the two password inputs
+              const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              modal.querySelectorAll('input:not([disabled])').forEach(input => {
+                nativeSetter.call(input, input.value);
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+              });
+
+              setTimeout(() => {
+                let btn = modal.querySelector('button.btn.btn-cyan');
+                if (!btn) {
+                  for (const b of modal.querySelectorAll('button')) {
+                    if (b.textContent.trim().toLowerCase().includes('aceptar')) { btn = b; break; }
+                  }
+                }
+                if (!btn) { console.error('[Bot-MAIN] Aceptar button not found (password)'); return; }
+                btn.removeAttribute('aria-disabled');
+                btn.disabled = false;
+                btn.click();
+                console.log('[Bot-MAIN] Clicked Aceptar (change password)');
+              }, 150);
+            } catch(e) {
+              console.error('[Bot-MAIN] changePassword error:', e);
+            }
+          }
+        });
+      } catch (mainWorldError) {
+        console.warn('[JobProcessor] MAIN world changePassword click failed:', mainWorldError.message);
+      }
+
+      // Poll for result (toast or modal closed). Same shape as createUser.
+      await new Promise(r => setTimeout(r, 2500));
+      let finalResult = null;
+      for (let attempt = 0; attempt < 30; attempt++) {
+        await new Promise(r => setTimeout(r, 500));
+        const check = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            const ERROR_TOAST_SEL = '#toast-container .toast-error, .toast-error, .md-toast-error, .b-toast-danger, [class*="md-toast-error"], [class*="toast-danger"]';
+            const SUCCESS_TOAST_SEL = '#toast-container .toast-success, .toast-success, .md-toast-success, .b-toast-success, [class*="md-toast-success"]';
+
+            const toastErr = document.querySelector(ERROR_TOAST_SEL);
+            if (toastErr && toastErr.offsetParent !== null) {
+              return { success: false, error: toastErr.textContent?.trim() || 'Error (toast)' };
+            }
+            const swal2e = document.querySelector('.swal2-popup .swal2-icon.swal2-error');
+            if (swal2e) return { success: false, error: 'Error (SweetAlert)' };
+
+            const toast = document.querySelector(SUCCESS_TOAST_SEL);
+            if (toast) return { success: true, message: toast.textContent?.trim() || 'Password changed (toast)' };
+            const swal2 = document.querySelector('.swal2-popup .swal2-icon.swal2-success');
+            if (swal2) return { success: true, message: 'Password changed (SweetAlert)' };
+
+            const modal = document.querySelector('.insert-mo.modal');
+            if (modal) {
+              const s = getComputedStyle(modal);
+              if (s.display === 'none' || parseFloat(s.opacity) === 0) return { modalGone: true };
+              return null;
+            }
+            return { modalGone: true };
+          }
+        });
+        const r = check?.[0]?.result;
+        if (!r) continue;
+
+        if (r.success === false || (r.success === true && !r.modalGone)) {
+          finalResult = r;
+          break;
+        }
+
+        if (r.modalGone) {
+          await new Promise(r2 => setTimeout(r2, 600));
+          const reCheck = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => {
+              const ERROR_TOAST_SEL = '#toast-container .toast-error, .toast-error, .md-toast-error, .b-toast-danger, [class*="md-toast-error"], [class*="toast-danger"]';
+              const toastErr = document.querySelector(ERROR_TOAST_SEL);
+              if (toastErr && toastErr.offsetParent !== null) {
+                return { success: false, error: toastErr.textContent?.trim() || 'Error (toast)' };
+              }
+              return { success: true, message: 'Password changed (modal closed, grace clean)' };
+            }
+          });
+          finalResult = reCheck?.[0]?.result || { success: true, message: 'Password changed (modal closed)' };
+          break;
+        }
+      }
+
+      if (finalResult?.success) {
+        console.log('[JobProcessor] Password change completed:', finalResult.message);
+        return { success: true, targetUsername: changeResult.targetUsername, message: finalResult.message };
+      }
+      if (finalResult && !finalResult.success) {
+        const error = new Error(`Password change failed: ${finalResult.error}`);
+        error.screenshot = await this.captureScreenshotSafe();
+        throw error;
+      }
+      const error = new Error('Password change failed: No response after clicking Aceptar');
+      error.screenshot = await this.captureScreenshotSafe();
+      throw error;
+    }
+
     if (!changeResult.success) {
       const error = new Error(`Password change failed: ${changeResult.error}`);
       error.screenshot = await this.captureScreenshotSafe();
@@ -823,38 +931,73 @@ export class JobProcessor {
         console.warn('[JobProcessor] MAIN world createUser click failed:', mainWorldError.message);
       }
 
-      // Poll for result (toast/modal closed)
-      await new Promise(r => setTimeout(r, 2000));
+      // Poll for result (toast/modal closed). Wider initial delay (2500ms) gives the
+      // panel time to render the toast before we start checking — without it we'd
+      // miss the duplicate-user error toast in the first iterations.
+      await new Promise(r => setTimeout(r, 2500));
       let finalResult = null;
       for (let attempt = 0; attempt < 30; attempt++) {
         await new Promise(r => setTimeout(r, 500));
         const check = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => {
-            // Toast success
-            const toast = document.querySelector('#toast-container .toast-success, .toast-success');
-            if (toast) return { success: true, message: toast.textContent?.trim() || 'User created (toast)' };
-            // Toast error
-            const toastErr = document.querySelector('#toast-container .toast-error, .toast-error');
-            if (toastErr) return { success: false, error: toastErr.textContent?.trim() || 'Error (toast)' };
-            // SweetAlert v2
-            const swal2 = document.querySelector('.swal2-popup .swal2-icon.swal2-success');
-            if (swal2) return { success: true, message: 'User created (SweetAlert)' };
+            // Toast selector list covers Bootstrap, mdBootstrap (md-toast-*) and
+            // bootstrap-vue (b-toast-*). Order matters — ERROR is checked before
+            // any "modal closed = success" inference to avoid false positives.
+            const ERROR_TOAST_SEL = '#toast-container .toast-error, .toast-error, .md-toast-error, .b-toast-danger, [class*="md-toast-error"], [class*="toast-danger"]';
+            const SUCCESS_TOAST_SEL = '#toast-container .toast-success, .toast-success, .md-toast-success, .b-toast-success, [class*="md-toast-success"]';
+
+            // 1) ERROR has priority over modal-close inference.
+            const toastErr = document.querySelector(ERROR_TOAST_SEL);
+            if (toastErr && toastErr.offsetParent !== null) {
+              return { success: false, error: toastErr.textContent?.trim() || 'Error (toast)' };
+            }
             const swal2e = document.querySelector('.swal2-popup .swal2-icon.swal2-error');
             if (swal2e) return { success: false, error: 'Error (SweetAlert)' };
-            // Modal closed
+
+            // 2) Explicit success
+            const toast = document.querySelector(SUCCESS_TOAST_SEL);
+            if (toast) return { success: true, message: toast.textContent?.trim() || 'User created (toast)' };
+            const swal2 = document.querySelector('.swal2-popup .swal2-icon.swal2-success');
+            if (swal2) return { success: true, message: 'User created (SweetAlert)' };
+
+            // 3) Modal state — used only as last signal when no toast was found.
+            //    The CALLER applies a grace window before accepting this as success.
             const modal = document.querySelector('.insert-mo.modal');
             if (modal) {
               const s = getComputedStyle(modal);
-              if (s.display === 'none' || parseFloat(s.opacity) === 0) return { success: true, message: 'User created (modal closed)' };
-            } else {
-              return { success: true, message: 'User created (modal removed)' };
+              if (s.display === 'none' || parseFloat(s.opacity) === 0) return { modalGone: true };
+              return null;
             }
-            return null;
+            return { modalGone: true };
           }
         });
-        finalResult = check?.[0]?.result;
-        if (finalResult) break;
+        const r = check?.[0]?.result;
+        if (!r) continue;
+
+        // Definitive result (explicit error or explicit success): stop polling.
+        if (r.success === false || (r.success === true && !r.modalGone)) {
+          finalResult = r;
+          break;
+        }
+
+        // Modal gone — wait one more cycle and re-check for late-rendering error toasts.
+        if (r.modalGone) {
+          await new Promise(r2 => setTimeout(r2, 600));
+          const reCheck = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => {
+              const ERROR_TOAST_SEL = '#toast-container .toast-error, .toast-error, .md-toast-error, .b-toast-danger, [class*="md-toast-error"], [class*="toast-danger"]';
+              const toastErr = document.querySelector(ERROR_TOAST_SEL);
+              if (toastErr && toastErr.offsetParent !== null) {
+                return { success: false, error: toastErr.textContent?.trim() || 'Error (toast)' };
+              }
+              return { success: true, message: 'User created (modal closed, grace clean)' };
+            }
+          });
+          finalResult = reCheck?.[0]?.result || { success: true, message: 'User created (modal closed)' };
+          break;
+        }
       }
 
       if (finalResult?.success) {

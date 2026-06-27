@@ -20,6 +20,11 @@ let ocrInitializing = false;
 let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_FAILURES = 3;
 let ocrDisabled = false;
+let ocrDisabledAt = 0;
+// Auto-recovery: tras 5 minutos de "disabled", reintentamos solo. Sin esto el
+// validator queda inválido hasta que el operador cierre y abra la app — exactamente
+// el incidente del 2026-06-24 (rechazaba todo en producción).
+const OCR_RECOVERY_COOLDOWN_MS = 5 * 60 * 1000;
 
 /**
  * Locate `spa.traineddata` shipped with the app.
@@ -146,7 +151,25 @@ async function recognizeWithTimeout(worker, buffer, timeoutMs = OCR_RECOGNIZE_TI
  * @returns {Promise<{text: string, confidence: number, method: string}>}
  */
 async function recognizeWithMultiPass(imageBuffer, sendToRenderer) {
-  if (ocrDisabled) return null;
+  // Auto-recovery: si pasaron 5 min desde la última desactivación, reintentamos.
+  if (ocrDisabled) {
+    const sinceDisabled = Date.now() - ocrDisabledAt;
+    if (sinceDisabled >= OCR_RECOVERY_COOLDOWN_MS) {
+      logger.info('OCR', `Auto-recovery: re-habilitando OCR tras ${Math.round(sinceDisabled / 1000)}s desactivado`);
+      if (sendToRenderer) sendToRenderer('log', { message: 'Lectura Inteligente: reintentando despues del cooldown', type: 'info' });
+      ocrDisabled = false;
+      consecutiveFailures = 0;
+      // Forzar reinicialización del worker — el viejo puede estar en estado inválido
+      if (ocrWorker) {
+        try { await ocrWorker.terminate(); } catch (_) {}
+        ocrWorker = null;
+      }
+    } else {
+      const remaining = Math.round((OCR_RECOVERY_COOLDOWN_MS - sinceDisabled) / 1000);
+      logger.warn('OCR', `OCR aún desactivado (auto-recovery en ${remaining}s)`);
+      return null;
+    }
+  }
 
   let worker = await initOCRWorker(sendToRenderer);
   if (!worker) return null;
@@ -210,8 +233,9 @@ async function recognizeWithMultiPass(imageBuffer, sendToRenderer) {
         consecutiveFailures++;
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
           ocrDisabled = true;
-          logger.error('OCR', `OCR disabled after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`);
-          if (sendToRenderer) sendToRenderer('log', { message: 'Lectura Inteligente desactivada por fallos repetidos. Usando Verificacion IA.', type: 'error' });
+          ocrDisabledAt = Date.now();
+          logger.error('OCR', `OCR disabled after ${MAX_CONSECUTIVE_FAILURES} consecutive failures — auto-recovery in ${OCR_RECOVERY_COOLDOWN_MS / 1000}s`);
+          if (sendToRenderer) sendToRenderer('log', { message: `Lectura Inteligente desactivada por fallos. Reintenta en ${Math.round(OCR_RECOVERY_COOLDOWN_MS / 60000)} min.`, type: 'error' });
         }
         break;
       }
@@ -263,8 +287,18 @@ async function recognizeWithMultiPass(imageBuffer, sendToRenderer) {
 
 function resetOCRDisabled() {
   ocrDisabled = false;
+  ocrDisabledAt = 0;
   consecutiveFailures = 0;
   logger.info('OCR', 'OCR re-enabled manually');
 }
 
-module.exports = { initOCRWorker, resetOCRWorker, recognizeWithMultiPass, resetOCRDisabled };
+function getOCRStatus() {
+  return {
+    disabled: ocrDisabled,
+    disabledAt: ocrDisabledAt || null,
+    consecutiveFailures,
+    autoRecoveryAt: ocrDisabled ? ocrDisabledAt + OCR_RECOVERY_COOLDOWN_MS : null,
+  };
+}
+
+module.exports = { initOCRWorker, resetOCRWorker, recognizeWithMultiPass, resetOCRDisabled, getOCRStatus };

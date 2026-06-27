@@ -14,6 +14,7 @@ import { SettingsService } from '../settings/settings.service';
 import { JobsService } from '../jobs/jobs.service';
 import { MessagesService } from '../messages/messages.service';
 import { ChatsService } from '../chats/chats.service';
+import { PushService } from '../notifications/push.service';
 
 describe('RequestsService', () => {
   let service: RequestsService;
@@ -21,6 +22,7 @@ describe('RequestsService', () => {
   // Prisma mock with nested model methods
   let prisma: {
     user: { findUnique: jest.Mock };
+    paymentConfig: { findUnique: jest.Mock };
     request: {
       create: jest.Mock;
       findUnique: jest.Mock;
@@ -55,6 +57,7 @@ describe('RequestsService', () => {
   let settingsService: {
     checkUserRateLimit: jest.Mock;
     getSetting: jest.Mock;
+    getSystemSettings: jest.Mock;
   };
   let jobsService: { createJobForRequest: jest.Mock };
   let messagesService: { sendSystemMessage: jest.Mock };
@@ -63,6 +66,11 @@ describe('RequestsService', () => {
   beforeEach(async () => {
     prisma = {
       user: { findUnique: jest.fn() },
+      paymentConfig: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ requiresVerification: false }),
+      },
       request: {
         create: jest.fn(),
         findUnique: jest.fn(),
@@ -103,6 +111,9 @@ describe('RequestsService', () => {
     settingsService = {
       checkUserRateLimit: jest.fn(),
       getSetting: jest.fn(),
+      getSystemSettings: jest
+        .fn()
+        .mockResolvedValue({ maxRequestAmount: 1_000_000 }),
     };
     jobsService = { createJobForRequest: jest.fn() };
     messagesService = { sendSystemMessage: jest.fn().mockResolvedValue({}) };
@@ -120,6 +131,10 @@ describe('RequestsService', () => {
         { provide: JobsService, useValue: jobsService },
         { provide: MessagesService, useValue: messagesService },
         { provide: ChatsService, useValue: chatsService },
+        {
+          provide: PushService,
+          useValue: { sendToUser: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 
@@ -134,11 +149,17 @@ describe('RequestsService', () => {
     const dto = { amount: 500 };
 
     function setupCreateHappyPath() {
-      prisma.user.findUnique.mockResolvedValue({ username: 'player1', isActive: true });
+      prisma.user.findUnique.mockResolvedValue({
+        username: 'player1',
+        isActive: true,
+      });
       prisma.request.count.mockResolvedValue(0);
       settingsService.checkUserRateLimit.mockResolvedValue({ allowed: true });
       settingsService.getSetting.mockResolvedValue('10000');
-      paymentsService.getSelectedWallet.mockResolvedValue({ id: 'wallet-1', alias: 'main' });
+      paymentsService.getSelectedWallet.mockResolvedValue({
+        id: 'wallet-1',
+        alias: 'main',
+      });
 
       const createdRequest = {
         id: 'req-1',
@@ -163,62 +184,94 @@ describe('RequestsService', () => {
       expect(result).toEqual({ ...createdRequest, chat: { id: 'chat-1' } });
       expect(prisma.user.findUnique).toHaveBeenCalledWith({
         where: { id: userId },
-        select: { username: true, isActive: true },
+        select: { username: true, isActive: true, panelId: true },
       });
       expect(prisma.$transaction).toHaveBeenCalled();
-      expect(eventsGateway.emitRequestCreated).toHaveBeenCalledWith(userId, expect.objectContaining({
-        requestId: 'req-1',
-        status: 'PENDING_PROOF',
-      }));
+      expect(eventsGateway.emitRequestCreated).toHaveBeenCalledWith(
+        userId,
+        expect.objectContaining({
+          requestId: 'req-1',
+          status: 'PENDING_PROOF',
+        }),
+      );
       expect(eventsGateway.emitDashboardUpdate).toHaveBeenCalled();
     });
 
     it('should throw BadRequestException if user not found', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.create(userId, dto)).rejects.toThrow(BadRequestException);
+      await expect(service.create(userId, dto)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should throw BadRequestException if user has no username', async () => {
-      prisma.user.findUnique.mockResolvedValue({ username: null, isActive: true });
+      prisma.user.findUnique.mockResolvedValue({
+        username: null,
+        isActive: true,
+      });
 
-      await expect(service.create(userId, dto)).rejects.toThrow(BadRequestException);
+      await expect(service.create(userId, dto)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should throw ForbiddenException if user is inactive', async () => {
-      prisma.user.findUnique.mockResolvedValue({ username: 'player1', isActive: false });
+      prisma.user.findUnique.mockResolvedValue({
+        username: 'player1',
+        isActive: false,
+      });
 
-      await expect(service.create(userId, dto)).rejects.toThrow(ForbiddenException);
+      await expect(service.create(userId, dto)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('should throw BadRequestException if user already has a pending request', async () => {
-      prisma.user.findUnique.mockResolvedValue({ username: 'player1', isActive: true });
+      prisma.user.findUnique.mockResolvedValue({
+        username: 'player1',
+        isActive: true,
+      });
       prisma.request.count.mockResolvedValue(1);
 
-      await expect(service.create(userId, dto)).rejects.toThrow(BadRequestException);
+      await expect(service.create(userId, dto)).rejects.toThrow(
+        BadRequestException,
+      );
       await expect(service.create(userId, dto)).rejects.toThrow(
         'Ya tenés una carga en proceso',
       );
     });
 
     it('should throw BadRequestException if rate limit exceeded', async () => {
-      prisma.user.findUnique.mockResolvedValue({ username: 'player1', isActive: true });
+      prisma.user.findUnique.mockResolvedValue({
+        username: 'player1',
+        isActive: true,
+      });
       prisma.request.count.mockResolvedValue(0);
       settingsService.checkUserRateLimit.mockResolvedValue({
         allowed: false,
         resetAt: new Date(Date.now() + 600000),
       });
 
-      await expect(service.create(userId, dto)).rejects.toThrow(BadRequestException);
-      await expect(service.create(userId, dto)).rejects.toThrow('Límite de solicitudes excedido');
+      await expect(service.create(userId, dto)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.create(userId, dto)).rejects.toThrow(
+        'Límite de solicitudes excedido',
+      );
     });
 
     it('should throw BadRequestException if amount is zero or negative', async () => {
-      prisma.user.findUnique.mockResolvedValue({ username: 'player1', isActive: true });
+      prisma.user.findUnique.mockResolvedValue({
+        username: 'player1',
+        isActive: true,
+      });
       prisma.request.count.mockResolvedValue(0);
       settingsService.checkUserRateLimit.mockResolvedValue({ allowed: true });
 
-      await expect(service.create(userId, { amount: 0 })).rejects.toThrow(BadRequestException);
+      await expect(service.create(userId, { amount: 0 })).rejects.toThrow(
+        BadRequestException,
+      );
       await expect(service.create(userId, { amount: -10 })).rejects.toThrow(
         'El monto debe ser mayor a 0',
       );
@@ -227,14 +280,21 @@ describe('RequestsService', () => {
     // MAX_REQUEST_AMOUNT limit removed — no amount cap
 
     it('should throw BadRequestException if no wallet is selected', async () => {
-      prisma.user.findUnique.mockResolvedValue({ username: 'player1', isActive: true });
+      prisma.user.findUnique.mockResolvedValue({
+        username: 'player1',
+        isActive: true,
+      });
       prisma.request.count.mockResolvedValue(0);
       settingsService.checkUserRateLimit.mockResolvedValue({ allowed: true });
       settingsService.getSetting.mockResolvedValue('10000');
       paymentsService.getSelectedWallet.mockResolvedValue(null);
 
-      await expect(service.create(userId, dto)).rejects.toThrow(BadRequestException);
-      await expect(service.create(userId, dto)).rejects.toThrow('No hay billetera configurada');
+      await expect(service.create(userId, dto)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.create(userId, dto)).rejects.toThrow(
+        'No hay billetera configurada',
+      );
     });
   });
 
@@ -267,7 +327,10 @@ describe('RequestsService', () => {
       chatsService.getOrCreateChat.mockResolvedValue({ id: 'chat-1' });
       jobsService.createJobForRequest.mockResolvedValue({});
       prisma.requestStatusHistory.findFirst.mockResolvedValue(null);
-      paymentsService.accumulateAndCheckRotation.mockResolvedValue({ rotated: false, allFull: false });
+      paymentsService.accumulateAndCheckRotation.mockResolvedValue({
+        rotated: false,
+        allFull: false,
+      });
       paymentsService.getWalletById.mockResolvedValue({ id: 'wallet-1' });
 
       const result = await service.approve(requestId, operatorId);
@@ -320,7 +383,9 @@ describe('RequestsService', () => {
         amount: '500',
       });
 
-      await expect(service.approve(requestId, operatorId)).rejects.toThrow(BadRequestException);
+      await expect(service.approve(requestId, operatorId)).rejects.toThrow(
+        BadRequestException,
+      );
       await expect(service.approve(requestId, operatorId)).rejects.toThrow(
         'Esta solicitud no puede ser aprobada',
       );
@@ -329,7 +394,9 @@ describe('RequestsService', () => {
     it('should throw NotFoundException if request does not exist', async () => {
       prisma.request.findUnique.mockResolvedValue(null);
 
-      await expect(service.approve(requestId, operatorId)).rejects.toThrow(NotFoundException);
+      await expect(service.approve(requestId, operatorId)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should update amount when approvedAmount is provided', async () => {
@@ -343,7 +410,7 @@ describe('RequestsService', () => {
       prisma.request.update.mockResolvedValue({
         id: requestId,
         userId: 'user-1',
-        amount: 700,
+        amount: 300,
         status: 'APPROVED',
         walletId: null,
       });
@@ -353,12 +420,13 @@ describe('RequestsService', () => {
       jobsService.createJobForRequest.mockResolvedValue({});
       settingsService.getSetting.mockResolvedValue('10000');
 
-      await service.approve(requestId, operatorId, { approvedAmount: 700 });
+      // approvedAmount must be ≤ requested amount (operator can only lower it)
+      await service.approve(requestId, operatorId, { approvedAmount: 300 });
 
       expect(prisma.request.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            amount: 700,
+            amount: 300,
           }),
         }),
       );
@@ -397,7 +465,9 @@ describe('RequestsService', () => {
       prisma.requestStatusHistory.create.mockResolvedValue({});
       prisma.user.findUnique.mockResolvedValue(null);
       chatsService.getOrCreateChat.mockResolvedValue({ id: 'chat-1' });
-      jobsService.createJobForRequest.mockRejectedValue(new Error('Queue full'));
+      jobsService.createJobForRequest.mockRejectedValue(
+        new Error('Queue full'),
+      );
 
       // Should not throw despite job creation failure
       const result = await service.approve(requestId, operatorId);
@@ -439,16 +509,22 @@ describe('RequestsService', () => {
       const result = await service.reject(requestId, operatorId, dto);
 
       expect(result.status).toBe('REJECTED');
-      expect(eventsGateway.emitRequestUpdated).toHaveBeenCalledWith('user-1', expect.objectContaining({
-        requestId,
-        status: 'REJECTED',
-        reason: dto.reason,
-      }));
-      expect(eventsGateway.emitRequestRejected).toHaveBeenCalledWith('user-1', expect.objectContaining({
-        requestId,
-        status: 'REJECTED',
-        reason: dto.reason,
-      }));
+      expect(eventsGateway.emitRequestUpdated).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({
+          requestId,
+          status: 'REJECTED',
+          reason: dto.reason,
+        }),
+      );
+      expect(eventsGateway.emitRequestRejected).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({
+          requestId,
+          status: 'REJECTED',
+          reason: dto.reason,
+        }),
+      );
       expect(eventsGateway.emitDashboardUpdate).toHaveBeenCalled();
     });
 
@@ -501,8 +577,13 @@ describe('RequestsService', () => {
 
       await service.reject(requestId, operatorId, dto);
 
-      expect(paymentsService.decrementWalletAmount).toHaveBeenCalledWith('wallet-1', 500);
-      expect(operatorGateway.emitToAll).toHaveBeenCalledWith('wallet_updated', { id: 'wallet-1' });
+      expect(paymentsService.decrementWalletAmount).toHaveBeenCalledWith(
+        'wallet-1',
+        500,
+      );
+      expect(operatorGateway.emitToAll).toHaveBeenCalledWith('wallet_updated', {
+        id: 'wallet-1',
+      });
     });
 
     it('should throw BadRequestException for invalid status', async () => {
@@ -512,7 +593,9 @@ describe('RequestsService', () => {
         amount: '500',
       });
 
-      await expect(service.reject(requestId, operatorId, dto)).rejects.toThrow(BadRequestException);
+      await expect(service.reject(requestId, operatorId, dto)).rejects.toThrow(
+        BadRequestException,
+      );
       await expect(service.reject(requestId, operatorId, dto)).rejects.toThrow(
         'Esta solicitud ya fue procesada',
       );
@@ -521,7 +604,9 @@ describe('RequestsService', () => {
     it('should throw NotFoundException if request does not exist', async () => {
       prisma.request.findUnique.mockResolvedValue(null);
 
-      await expect(service.reject(requestId, operatorId, dto)).rejects.toThrow(NotFoundException);
+      await expect(service.reject(requestId, operatorId, dto)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -550,7 +635,10 @@ describe('RequestsService', () => {
       prisma.user.findUnique.mockResolvedValue(null);
       chatsService.getOrCreateChat.mockResolvedValue({ id: 'chat-1' });
       prisma.requestStatusHistory.findFirst.mockResolvedValue(null);
-      paymentsService.accumulateAndCheckRotation.mockResolvedValue({ rotated: false, allFull: false });
+      paymentsService.accumulateAndCheckRotation.mockResolvedValue({
+        rotated: false,
+        allFull: false,
+      });
       paymentsService.getWalletById.mockResolvedValue({ id: 'wallet-1' });
 
       const result = await service.setValidationResult(requestId, {
@@ -567,10 +655,13 @@ describe('RequestsService', () => {
           }),
         }),
       );
-      expect(eventsGateway.emitRequestUpdated).toHaveBeenCalledWith('user-1', expect.objectContaining({
-        status: 'APPROVED',
-        validationScore: 0.95,
-      }));
+      expect(eventsGateway.emitRequestUpdated).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({
+          status: 'APPROVED',
+          validationScore: 0.95,
+        }),
+      );
     });
 
     it('should set VALIDATION_FAILED when validation is invalid', async () => {
@@ -684,7 +775,13 @@ describe('RequestsService', () => {
         where: {
           userId: 'user-1',
           status: {
-            in: ['PENDING_PROOF', 'VALIDATING', 'APPROVED', 'PROCESSING'],
+            in: [
+              'PENDING_PROOF',
+              'VALIDATING',
+              'PENDING_MP_VERIFICATION',
+              'APPROVED',
+              'PROCESSING',
+            ],
           },
         },
         include: {
@@ -725,7 +822,9 @@ describe('RequestsService', () => {
     it('should throw NotFoundException if not found', async () => {
       prisma.request.findUnique.mockResolvedValue(null);
 
-      await expect(service.findOne('nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('nonexistent')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw ForbiddenException if userId does not match', async () => {
@@ -737,7 +836,9 @@ describe('RequestsService', () => {
         chat: null,
       });
 
-      await expect(service.findOne('req-1', 'other-user')).rejects.toThrow(ForbiddenException);
+      await expect(service.findOne('req-1', 'other-user')).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 });

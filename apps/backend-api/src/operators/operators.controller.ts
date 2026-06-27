@@ -38,7 +38,10 @@ export class OperatorsController {
     @Body() body: { isAvailable: boolean },
     @Request() req: any,
   ) {
-    return this.operatorsService.setAvailability(req.user.sub, body.isAvailable);
+    return this.operatorsService.setAvailability(
+      req.user.sub,
+      body.isAvailable,
+    );
   }
 
   /**
@@ -47,7 +50,9 @@ export class OperatorsController {
   @Get('me/stats')
   @Roles('OPERATOR', 'SENIOR_OPERATOR', 'ADMIN')
   async getMyStats(@Request() req: any) {
-    const profile = await this.operatorsService.getOperatorByUserId(req.user.sub);
+    const profile = await this.operatorsService.getOperatorByUserId(
+      req.user.sub,
+    );
     return this.operatorsService.getOperatorStats(profile.id);
   }
 
@@ -114,7 +119,10 @@ export class OperatorsController {
    */
   @Patch(':id')
   @Roles('ADMIN')
-  async updateOperator(@Param('id') id: string, @Body() dto: UpdateOperatorDto) {
+  async updateOperator(
+    @Param('id') id: string,
+    @Body() dto: UpdateOperatorDto,
+  ) {
     return this.operatorsService.updateOperator(id, dto);
   }
 

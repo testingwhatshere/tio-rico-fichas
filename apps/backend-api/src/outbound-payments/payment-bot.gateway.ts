@@ -26,7 +26,9 @@ import { OutboundPaymentsService } from './outbound-payments.service';
   pingInterval: 60000,
   pingTimeout: 30000,
 })
-export class PaymentBotGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class PaymentBotGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server: Server;
 
@@ -66,14 +68,18 @@ export class PaymentBotGateway implements OnGatewayConnection, OnGatewayDisconne
       '';
 
     if (apiKey !== this.expectedApiKey) {
-      this.logger.warn(`Payment bot rejected: invalid API key (socket ${client.id})`);
+      this.logger.warn(
+        `Payment bot rejected: invalid API key (socket ${client.id})`,
+      );
       client.emit('error', { message: 'Invalid API key' });
       client.disconnect();
       return;
     }
 
     if (!walletType) {
-      this.logger.warn(`Payment bot rejected: no walletType (socket ${client.id})`);
+      this.logger.warn(
+        `Payment bot rejected: no walletType (socket ${client.id})`,
+      );
       client.emit('error', { message: 'walletType required' });
       client.disconnect();
       return;
@@ -82,14 +88,18 @@ export class PaymentBotGateway implements OnGatewayConnection, OnGatewayDisconne
     // Replace existing bot for this walletType
     const existing = this.connectedBots.get(walletType);
     if (existing && existing.id !== client.id) {
-      this.logger.warn(`Replacing existing payment bot for ${walletType} (old: ${existing.id})`);
+      this.logger.warn(
+        `Replacing existing payment bot for ${walletType} (old: ${existing.id})`,
+      );
       this.socketToWalletType.delete(existing.id);
     }
 
     this.connectedBots.set(walletType, client);
     this.socketToWalletType.set(client.id, walletType);
 
-    this.logger.log(`Payment bot connected: ${walletType} (socket ${client.id})`);
+    this.logger.log(
+      `Payment bot connected: ${walletType} (socket ${client.id})`,
+    );
     client.emit('connected', { walletType });
 
     // Emit status to operators
@@ -118,11 +128,20 @@ export class PaymentBotGateway implements OnGatewayConnection, OnGatewayDisconne
 
   @SubscribeMessage('payment_result')
   async handlePaymentResult(
-    @MessageBody() data: { jobId: string; success: boolean; operationNumber?: string; screenshotUrl?: string; error?: string },
+    @MessageBody()
+    data: {
+      jobId: string;
+      success: boolean;
+      operationNumber?: string;
+      screenshotUrl?: string;
+      error?: string;
+    },
     @ConnectedSocket() client: Socket,
   ) {
     const walletType = this.socketToWalletType.get(client.id) || 'unknown';
-    this.logger.log(`Payment result from ${walletType}: job=${data.jobId}, success=${data.success}`);
+    this.logger.log(
+      `Payment result from ${walletType}: job=${data.jobId}, success=${data.success}`,
+    );
 
     try {
       const service = this.getOutboundPaymentsService();
@@ -140,10 +159,7 @@ export class PaymentBotGateway implements OnGatewayConnection, OnGatewayDisconne
   }
 
   @SubscribeMessage('heartbeat')
-  handleHeartbeat(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleHeartbeat(@MessageBody() data: any, @ConnectedSocket() client: Socket) {
     const walletType = this.socketToWalletType.get(client.id);
     if (walletType) {
       this.logger.debug(`Payment bot heartbeat: ${walletType}`);
@@ -156,7 +172,8 @@ export class PaymentBotGateway implements OnGatewayConnection, OnGatewayDisconne
     @MessageBody() data: { walletType: string; balance: number },
     @ConnectedSocket() client: Socket,
   ) {
-    const walletType = this.socketToWalletType.get(client.id) || data.walletType;
+    const walletType =
+      this.socketToWalletType.get(client.id) || data.walletType;
     this.logger.log(`Balance report from ${walletType}: $${data.balance}`);
 
     // Update wallet outbound balance
@@ -210,14 +227,17 @@ export class PaymentBotGateway implements OnGatewayConnection, OnGatewayDisconne
       if (queuedPayments.length > 0) {
         const payment = queuedPayments[0];
         if (payment.job) {
-          const dispatched = await this.pushPaymentJob({
-            id: payment.job.id,
-            type: payment.job.type,
-            amount: Number(payment.amount),
-            paymentMethod: payment.paymentMethod,
-            paymentDetails: payment.paymentDetails,
+          const dispatched = await this.pushPaymentJob(
+            {
+              id: payment.job.id,
+              type: payment.job.type,
+              amount: Number(payment.amount),
+              paymentMethod: payment.paymentMethod,
+              paymentDetails: payment.paymentDetails,
+              walletType,
+            },
             walletType,
-          }, walletType);
+          );
 
           if (dispatched) {
             await this.prisma.outboundPayment.update({
@@ -228,7 +248,9 @@ export class PaymentBotGateway implements OnGatewayConnection, OnGatewayDisconne
         }
       }
     } catch (err: any) {
-      this.logger.error(`Failed to dispatch queued jobs for ${walletType}: ${err.message}`);
+      this.logger.error(
+        `Failed to dispatch queued jobs for ${walletType}: ${err.message}`,
+      );
     }
   }
 
@@ -237,15 +259,25 @@ export class PaymentBotGateway implements OnGatewayConnection, OnGatewayDisconne
   // ==========================================
 
   @OnEvent('outbound_payment.job_created')
-  async onJobCreated(data: { jobId: string; paymentId: string; walletType: string; amount: number; paymentMethod: string; paymentDetails: any }) {
-    const dispatched = await this.pushPaymentJob({
-      id: data.jobId,
-      type: 'OUTBOUND_PAYMENT',
-      amount: data.amount,
-      paymentMethod: data.paymentMethod,
-      paymentDetails: data.paymentDetails,
-      walletType: data.walletType,
-    }, data.walletType);
+  async onJobCreated(data: {
+    jobId: string;
+    paymentId: string;
+    walletType: string;
+    amount: number;
+    paymentMethod: string;
+    paymentDetails: any;
+  }) {
+    const dispatched = await this.pushPaymentJob(
+      {
+        id: data.jobId,
+        type: 'OUTBOUND_PAYMENT',
+        amount: data.amount,
+        paymentMethod: data.paymentMethod,
+        paymentDetails: data.paymentDetails,
+        walletType: data.walletType,
+      },
+      data.walletType,
+    );
 
     if (dispatched) {
       await this.prisma.outboundPayment.update({
@@ -256,15 +288,24 @@ export class PaymentBotGateway implements OnGatewayConnection, OnGatewayDisconne
   }
 
   @OnEvent('crypto_buy.created')
-  async onCryptoBuyCreated(data: { jobId: string; walletId: string; amount: number }) {
-    const dispatched = await this.pushPaymentJob({
-      id: data.jobId,
-      type: 'BUY_CRYPTO',
-      amount: data.amount,
-    }, 'FIWIND'); // Crypto only on Fiwind
+  async onCryptoBuyCreated(data: {
+    jobId: string;
+    walletId: string;
+    amount: number;
+  }) {
+    const dispatched = await this.pushPaymentJob(
+      {
+        id: data.jobId,
+        type: 'BUY_CRYPTO',
+        amount: data.amount,
+      },
+      'FIWIND',
+    ); // Crypto only on Fiwind
 
     if (!dispatched) {
-      this.logger.warn(`No Fiwind payment bot connected for crypto buy job ${data.jobId}`);
+      this.logger.warn(
+        `No Fiwind payment bot connected for crypto buy job ${data.jobId}`,
+      );
     }
   }
 

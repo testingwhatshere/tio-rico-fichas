@@ -13,12 +13,14 @@ jest.mock('bcrypt');
 
 describe('AuthService', () => {
   let service: AuthService;
-  let prisma: { user: { findUnique: jest.Mock; create: jest.Mock } };
+  let prisma: {
+    user: { findUnique: jest.Mock; findFirst: jest.Mock; create: jest.Mock };
+  };
   let jwtService: { sign: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
-      user: { findUnique: jest.fn(), create: jest.fn() },
+      user: { findUnique: jest.fn(), findFirst: jest.fn(), create: jest.fn() },
     };
     jwtService = { sign: jest.fn().mockReturnValue('mock-jwt-token') };
 
@@ -136,32 +138,45 @@ describe('AuthService', () => {
 
   describe('clientAuth', () => {
     it('should login existing client by username', async () => {
-      prisma.user.findUnique.mockResolvedValue({
+      prisma.user.findFirst.mockResolvedValue({
         id: 'user-1',
         username: 'juan_perez',
+        savedTargetUsername: 'juan_perez',
         role: 'CLIENT',
         isActive: true,
+        phone: '1155667788',
       });
 
-      const result = await service.clientAuth({ username: 'Juan_Perez' });
+      const result = await service.clientAuth({
+        username: 'Juan_Perez',
+        phone: '1155667788',
+      });
 
       expect(result.accessToken).toBe('mock-jwt-token');
-      // Username is normalized to lowercase
-      expect(prisma.user.findUnique).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { username: 'juan_perez' } }),
+      expect(result.user.username).toBe('juan_perez');
+      expect(result.user.savedTargetUsername).toBe('juan_perez');
+      // Username is normalized to lowercase, lookup is case-insensitive
+      expect(prisma.user.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            username: { equals: 'juan_perez', mode: 'insensitive' },
+          },
+        }),
       );
     });
 
     it('should throw if existing client is disabled', async () => {
-      prisma.user.findUnique.mockResolvedValue({
+      prisma.user.findFirst.mockResolvedValue({
         id: 'user-1',
         username: 'disabled',
+        savedTargetUsername: 'disabled',
         role: 'CLIENT',
         isActive: false,
+        phone: '1155667788',
       });
 
       await expect(
-        service.clientAuth({ username: 'disabled' }),
+        service.clientAuth({ username: 'disabled', phone: '1155667788' }),
       ).rejects.toThrow('Cuenta deshabilitada');
     });
 
@@ -174,14 +189,12 @@ describe('AuthService', () => {
     });
 
     it('should register new user with phone', async () => {
-      // First call: findUnique for username → null (new user)
-      // Second call: findUnique for phone → null (available)
-      prisma.user.findUnique
-        .mockResolvedValueOnce(null)  // username lookup
-        .mockResolvedValueOnce(null); // phone lookup
+      prisma.user.findFirst.mockResolvedValue(null); // username lookup
+      prisma.user.findUnique.mockResolvedValue(null); // phone lookup
       prisma.user.create.mockResolvedValue({
         id: 'new-user',
         username: 'new_user',
+        savedTargetUsername: 'new_user',
         role: 'CLIENT',
         isActive: true,
       });
@@ -196,7 +209,8 @@ describe('AuthService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             username: 'new_user',
-            phone: '1155667788',
+            // Phone is canonicalized to "549<area><number>"
+            phone: '5491155667788',
             role: 'CLIENT',
           }),
         }),
@@ -204,9 +218,9 @@ describe('AuthService', () => {
     });
 
     it('should reject reserved usernames', async () => {
-      await expect(
-        service.clientAuth({ username: 'admin' }),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.clientAuth({ username: 'admin' })).rejects.toThrow(
+        BadRequestException,
+      );
 
       await expect(
         service.clientAuth({ username: 'OPERATOR' }),
@@ -214,9 +228,8 @@ describe('AuthService', () => {
     });
 
     it('should reject duplicate phone numbers', async () => {
-      prisma.user.findUnique
-        .mockResolvedValueOnce(null)  // username: new
-        .mockResolvedValueOnce({ id: 'other-user' }); // phone: taken
+      prisma.user.findFirst.mockResolvedValue(null); // username: new
+      prisma.user.findUnique.mockResolvedValue({ id: 'other-user' }); // phone: taken
 
       await expect(
         service.clientAuth({ username: 'new_user', phone: '1155667788' }),

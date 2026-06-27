@@ -7,7 +7,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
 @Module({
   // forwardRef on NotificationsModule because the cycle is:
   // ChatsModule -> NotificationsModule -> MessagesModule -> ChatsModule.
-  imports: [forwardRef(() => EventsModule), forwardRef(() => NotificationsModule)],
+  imports: [
+    forwardRef(() => EventsModule),
+    forwardRef(() => NotificationsModule),
+  ],
   controllers: [ChatsController],
   providers: [ChatsService],
   exports: [ChatsService],

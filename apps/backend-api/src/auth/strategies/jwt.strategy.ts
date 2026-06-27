@@ -30,6 +30,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         id: true,
         email: true,
         username: true,
+        savedTargetUsername: true,
         role: true,
         isActive: true,
       },
@@ -45,6 +46,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       id: user.id, // Duplicate for convenience
       email: user.email ?? undefined,
       username: user.username ?? undefined,
+      savedTargetUsername: user.savedTargetUsername ?? undefined,
       role: user.role,
     };
   }

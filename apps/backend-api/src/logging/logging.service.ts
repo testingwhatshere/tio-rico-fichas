@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { LogLevel, LogSource } from '@prisma/client';
@@ -58,8 +63,14 @@ export class LoggingService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
   ) {
     this.logDir = this.configService.get<string>('LOG_DIR', './logs');
-    this.screenshotDir = this.configService.get<string>('SCREENSHOT_DIR', './screenshots');
-    this.fileLoggingEnabled = this.configService.get<boolean>('FILE_LOGGING_ENABLED', true);
+    this.screenshotDir = this.configService.get<string>(
+      'SCREENSHOT_DIR',
+      './screenshots',
+    );
+    this.fileLoggingEnabled = this.configService.get<boolean>(
+      'FILE_LOGGING_ENABLED',
+      true,
+    );
 
     this.ensureDirectories();
   }
@@ -71,12 +82,15 @@ export class LoggingService implements OnModuleInit, OnModuleDestroy {
     );
 
     // Schedule daily cleanup (every 24 hours)
-    this.cleanupTimer = setInterval(() => {
-      this.logger.log('Running scheduled log cleanup...');
-      this.cleanupOldLogs(30).catch((err) =>
-        this.logger.error(`Scheduled log cleanup failed: ${err.message}`),
-      );
-    }, 24 * 60 * 60 * 1000);
+    this.cleanupTimer = setInterval(
+      () => {
+        this.logger.log('Running scheduled log cleanup...');
+        this.cleanupOldLogs(30).catch((err) =>
+          this.logger.error(`Scheduled log cleanup failed: ${err.message}`),
+        );
+      },
+      24 * 60 * 60 * 1000,
+    );
   }
 
   onModuleDestroy() {
@@ -147,22 +161,28 @@ export class LoggingService implements OnModuleInit, OnModuleDestroy {
    */
   private logToFile(entry: LogEntry, timestamp: Date) {
     const dateStr = timestamp.toISOString().split('T')[0];
-    const logFile = path.join(this.logDir, `${entry.category.toLowerCase()}-${dateStr}.log`);
+    const logFile = path.join(
+      this.logDir,
+      `${entry.category.toLowerCase()}-${dateStr}.log`,
+    );
 
-    const logLine = JSON.stringify({
-      timestamp: timestamp.toISOString(),
-      level: entry.level || 'INFO',
-      source: entry.source || 'BACKEND',
-      category: entry.category,
-      action: entry.action,
-      message: entry.message,
-      ...entry.context,
-      metadata: entry.metadata,
-      error: entry.error,
-    }) + '\n';
+    const logLine =
+      JSON.stringify({
+        timestamp: timestamp.toISOString(),
+        level: entry.level || 'INFO',
+        source: entry.source || 'BACKEND',
+        category: entry.category,
+        action: entry.action,
+        message: entry.message,
+        ...entry.context,
+        metadata: entry.metadata,
+        error: entry.error,
+      }) + '\n';
 
     fsPromises.appendFile(logFile, logLine).catch((err) => {
-      this.logger.error(`Failed to write to log file ${logFile}: ${err.message}`);
+      this.logger.error(
+        `Failed to write to log file ${logFile}: ${err.message}`,
+      );
     });
   }
 
@@ -188,15 +208,48 @@ export class LoggingService implements OnModuleInit, OnModuleDestroy {
   // CONVENIENCE METHODS
   // ==========================================
 
-  async info(category: string, action: string, message: string, context?: LogContext, metadata?: Record<string, any>) {
-    return this.log({ level: LogLevel.INFO, category, action, message, context, metadata });
+  async info(
+    category: string,
+    action: string,
+    message: string,
+    context?: LogContext,
+    metadata?: Record<string, any>,
+  ) {
+    return this.log({
+      level: LogLevel.INFO,
+      category,
+      action,
+      message,
+      context,
+      metadata,
+    });
   }
 
-  async warn(category: string, action: string, message: string, context?: LogContext, metadata?: Record<string, any>) {
-    return this.log({ level: LogLevel.WARN, category, action, message, context, metadata });
+  async warn(
+    category: string,
+    action: string,
+    message: string,
+    context?: LogContext,
+    metadata?: Record<string, any>,
+  ) {
+    return this.log({
+      level: LogLevel.WARN,
+      category,
+      action,
+      message,
+      context,
+      metadata,
+    });
   }
 
-  async error(category: string, action: string, message: string, error?: Error, context?: LogContext, metadata?: Record<string, any>) {
+  async error(
+    category: string,
+    action: string,
+    message: string,
+    error?: Error,
+    context?: LogContext,
+    metadata?: Record<string, any>,
+  ) {
     return this.log({
       level: LogLevel.ERROR,
       category,
@@ -209,7 +262,14 @@ export class LoggingService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async critical(category: string, action: string, message: string, error?: Error, context?: LogContext, metadata?: Record<string, any>) {
+  async critical(
+    category: string,
+    action: string,
+    message: string,
+    error?: Error,
+    context?: LogContext,
+    metadata?: Record<string, any>,
+  ) {
     return this.log({
       level: LogLevel.CRITICAL,
       category,
@@ -226,23 +286,48 @@ export class LoggingService implements OnModuleInit, OnModuleDestroy {
   // DOMAIN-SPECIFIC LOGGING
   // ==========================================
 
-  async logAuth(action: string, message: string, context?: LogContext, metadata?: Record<string, any>) {
+  async logAuth(
+    action: string,
+    message: string,
+    context?: LogContext,
+    metadata?: Record<string, any>,
+  ) {
     return this.info('AUTH', action, message, context, metadata);
   }
 
-  async logRequest(action: string, message: string, context?: LogContext, metadata?: Record<string, any>) {
+  async logRequest(
+    action: string,
+    message: string,
+    context?: LogContext,
+    metadata?: Record<string, any>,
+  ) {
     return this.info('REQUEST', action, message, context, metadata);
   }
 
-  async logJob(action: string, message: string, context?: LogContext, metadata?: Record<string, any>) {
+  async logJob(
+    action: string,
+    message: string,
+    context?: LogContext,
+    metadata?: Record<string, any>,
+  ) {
     return this.info('JOB', action, message, context, metadata);
   }
 
-  async logPayment(action: string, message: string, context?: LogContext, metadata?: Record<string, any>) {
+  async logPayment(
+    action: string,
+    message: string,
+    context?: LogContext,
+    metadata?: Record<string, any>,
+  ) {
     return this.info('PAYMENT', action, message, context, metadata);
   }
 
-  async logBot(action: string, message: string, context?: LogContext, metadata?: Record<string, any>) {
+  async logBot(
+    action: string,
+    message: string,
+    context?: LogContext,
+    metadata?: Record<string, any>,
+  ) {
     return this.log({
       level: LogLevel.INFO,
       source: LogSource.BOT,
@@ -254,7 +339,13 @@ export class LoggingService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async logBotError(action: string, message: string, error?: Error, context?: LogContext, metadata?: Record<string, any>) {
+  async logBotError(
+    action: string,
+    message: string,
+    error?: Error,
+    context?: LogContext,
+    metadata?: Record<string, any>,
+  ) {
     return this.log({
       level: LogLevel.ERROR,
       source: LogSource.BOT,
@@ -279,24 +370,28 @@ export class LoggingService implements OnModuleInit, OnModuleDestroy {
     // Upload to Cloudinary instead of local filesystem
     let screenshotPath: string;
     try {
-      const uploadResult = await new Promise<{ secure_url: string }>((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(
-          {
-            folder: 'screenshots',
-            public_id: filename.replace(/\.[^.]+$/, ''),
-            resource_type: 'image',
-          },
-          (error, result) => {
-            if (error) reject(error);
-            else resolve(result!);
-          },
-        );
-        stream.end(data.buffer);
-      });
+      const uploadResult = await new Promise<{ secure_url: string }>(
+        (resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            {
+              folder: 'screenshots',
+              public_id: filename.replace(/\.[^.]+$/, ''),
+              resource_type: 'image',
+            },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result!);
+            },
+          );
+          stream.end(data.buffer);
+        },
+      );
       screenshotPath = uploadResult.secure_url;
     } catch (uploadError) {
       // Fallback to local storage if Cloudinary fails
-      this.logger.warn(`Cloudinary upload failed, saving locally: ${uploadError.message}`);
+      this.logger.warn(
+        `Cloudinary upload failed, saving locally: ${uploadError.message}`,
+      );
       const filepath = path.join(this.screenshotDir, filename);
       await fsPromises.writeFile(filepath, data.buffer);
       screenshotPath = filepath;
@@ -486,7 +581,11 @@ export class LoggingService implements OnModuleInit, OnModuleDestroy {
   private maskSensitiveData(value: string): string {
     // Mask passwords and sensitive data
     if (value.length > 4) {
-      return value.substring(0, 2) + '*'.repeat(value.length - 4) + value.substring(value.length - 2);
+      return (
+        value.substring(0, 2) +
+        '*'.repeat(value.length - 4) +
+        value.substring(value.length - 2)
+      );
     }
     return '****';
   }
@@ -495,25 +594,26 @@ export class LoggingService implements OnModuleInit, OnModuleDestroy {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
 
-    const [deletedLogs, deletedBotLogs, deletedHistory, deletedScreenshots] = await Promise.all([
-      this.prisma.activityLog.deleteMany({
-        where: { timestamp: { lt: cutoffDate } },
-      }),
-      this.prisma.botSessionLog.deleteMany({
-        where: { createdAt: { lt: cutoffDate } },
-      }),
-      this.prisma.requestStatusHistory.deleteMany({
-        where: { createdAt: { lt: cutoffDate } },
-      }),
-      this.prisma.screenshot.deleteMany({
-        where: { createdAt: { lt: cutoffDate } },
-      }),
-    ]);
+    const [deletedLogs, deletedBotLogs, deletedHistory, deletedScreenshots] =
+      await Promise.all([
+        this.prisma.activityLog.deleteMany({
+          where: { timestamp: { lt: cutoffDate } },
+        }),
+        this.prisma.botSessionLog.deleteMany({
+          where: { createdAt: { lt: cutoffDate } },
+        }),
+        this.prisma.requestStatusHistory.deleteMany({
+          where: { createdAt: { lt: cutoffDate } },
+        }),
+        this.prisma.screenshot.deleteMany({
+          where: { createdAt: { lt: cutoffDate } },
+        }),
+      ]);
 
     this.logger.log(
       `Cleanup: ${deletedLogs.count} activity logs, ${deletedBotLogs.count} bot logs, ` +
-      `${deletedHistory.count} status history, ${deletedScreenshots.count} screenshots ` +
-      `(older than ${daysToKeep} days)`,
+        `${deletedHistory.count} status history, ${deletedScreenshots.count} screenshots ` +
+        `(older than ${daysToKeep} days)`,
     );
 
     return {

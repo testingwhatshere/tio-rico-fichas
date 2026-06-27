@@ -57,17 +57,38 @@ export default function ChatBubble({ message, previousMessage }: ChatBubbleProps
 
   // System/Bot Message with Optional Interactive Card
   if (isSystem) {
+    const hasImage = !!message.imageUrl;
+    const hasCaption = hasImage && !!message.content;
     return (
       <View style={[styles.systemContainer, { marginVertical: verticalMargin }]}>
-        {message.content ? (
-          <View style={styles.systemBubble}>
-            <Image source={require('@/assets/icon.png')} style={styles.systemIconImage} />
-            <Text style={styles.systemText}>{message.content}</Text>
+        {(message.content || hasImage) && (
+          <View
+            style={[
+              styles.systemBubble,
+              hasImage && styles.imageBubble,
+              hasCaption && styles.imageBubbleWithCaption,
+            ]}
+          >
+            {!hasImage && <Image source={require('@/assets/icon.png')} style={styles.systemIconImage} />}
+            {hasImage && (
+              <TouchableOpacity onPress={() => Linking.openURL(message.imageUrl!)} activeOpacity={0.8}>
+                <Image
+                  source={{ uri: message.imageUrl }}
+                  style={styles.chatImage}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+            )}
+            {message.content ? (
+              <Text style={[styles.systemText, hasImage && styles.systemCaption]}>
+                {message.content}
+              </Text>
+            ) : null}
           </View>
-        ) : null}
-        {message.content ? (
+        )}
+        {(message.content || hasImage) && (
           <Text style={styles.systemTimestamp}>{formatTime(message.createdAt)}</Text>
-        ) : null}
+        )}
 
         {/* Render Interactive Card */}
         {message.interactiveCard && renderInteractiveCard(message.interactiveCard)}
@@ -232,6 +253,12 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     lineHeight: 20,
   },
+  systemCaption: {
+    flex: 0,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+    paddingTop: 6,
+  },
   systemTimestamp: {
     fontSize: 11,
     color: colors.textMuted,
@@ -335,6 +362,10 @@ const styles = StyleSheet.create({
     paddingBottom: 3,
     minWidth: 220,
     overflow: 'hidden',
+    // Force column so system bubbles (which default to row for icon+text)
+    // stack image-above-caption instead of side-by-side.
+    flexDirection: 'column',
+    alignItems: 'center',
   },
   // Adds breathing room when image has a caption underneath
   imageBubbleWithCaption: {

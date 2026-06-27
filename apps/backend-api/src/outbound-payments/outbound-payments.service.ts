@@ -35,7 +35,9 @@ export class OutboundPaymentsService {
   async createFromPrizeClaim(claimId: string): Promise<any> {
     const settings = await this.settingsService.getSystemSettings();
     if (!settings.autoPaymentEnabled) {
-      this.logger.log(`Auto-payment disabled, skipping outbound payment for prize ${claimId}`);
+      this.logger.log(
+        `Auto-payment disabled, skipping outbound payment for prize ${claimId}`,
+      );
       return null;
     }
 
@@ -67,7 +69,9 @@ export class OutboundPaymentsService {
     // Select wallet for payment
     const wallet = await this.selectWalletForPayment(amount);
     if (!wallet) {
-      this.logger.warn(`No wallet available for outbound payment of $${amount}`);
+      this.logger.warn(
+        `No wallet available for outbound payment of $${amount}`,
+      );
       this.eventEmitter.emit(AppEvent.OPERATOR_ALERT, {
         type: 'no_wallet_available',
         message: `No hay billetera disponible para pagar premio de $${amount}. Pagar manualmente.`,
@@ -94,7 +98,7 @@ export class OutboundPaymentsService {
         prizeClaimId: claimId,
         userId: claim.userId,
         amount: claim.amount,
-        paymentMethod: claim.paymentMethod!,
+        paymentMethod: claim.paymentMethod,
         paymentDetails: claim.paymentDetails as any,
         walletId: wallet.id,
         walletType: wallet.type,
@@ -105,7 +109,7 @@ export class OutboundPaymentsService {
 
     this.logger.log(
       `OutboundPayment ${payment.id} created for prize ${claimId} ` +
-      `(wallet: ${wallet.label}, amount: $${amount}, confirm: ${requiresConfirm})`,
+        `(wallet: ${wallet.label}, amount: $${amount}, confirm: ${requiresConfirm})`,
     );
 
     // Emit to operators
@@ -178,7 +182,9 @@ export class OutboundPaymentsService {
       },
     });
 
-    this.logger.log(`OutboundPayment ${payment.id} created for withdrawal ${withdrawalId}`);
+    this.logger.log(
+      `OutboundPayment ${payment.id} created for withdrawal ${withdrawalId}`,
+    );
     this.eventEmitter.emit('outbound_payment.created', payment);
 
     if (!requiresConfirm) {
@@ -199,7 +205,9 @@ export class OutboundPaymentsService {
 
     if (!payment) throw new NotFoundException('Payment not found');
     if (payment.status !== 'PENDING') {
-      throw new BadRequestException(`Payment cannot be confirmed in status ${payment.status}`);
+      throw new BadRequestException(
+        `Payment cannot be confirmed in status ${payment.status}`,
+      );
     }
 
     const updated = await this.prisma.outboundPayment.update({
@@ -211,7 +219,9 @@ export class OutboundPaymentsService {
       },
     });
 
-    this.logger.log(`OutboundPayment ${paymentId} confirmed by operator ${operatorId}`);
+    this.logger.log(
+      `OutboundPayment ${paymentId} confirmed by operator ${operatorId}`,
+    );
     this.eventEmitter.emit('outbound_payment.confirmed', updated);
 
     // Create job for the payment extension
@@ -220,14 +230,20 @@ export class OutboundPaymentsService {
     return updated;
   }
 
-  async cancel(paymentId: string, operatorId: string, reason: string): Promise<any> {
+  async cancel(
+    paymentId: string,
+    operatorId: string,
+    reason: string,
+  ): Promise<any> {
     const payment = await this.prisma.outboundPayment.findUnique({
       where: { id: paymentId },
     });
 
     if (!payment) throw new NotFoundException('Payment not found');
     if (['COMPLETED', 'PROCESSING'].includes(payment.status)) {
-      throw new BadRequestException(`Cannot cancel payment in ${payment.status} status`);
+      throw new BadRequestException(
+        `Cannot cancel payment in ${payment.status} status`,
+      );
     }
 
     const updated = await this.prisma.outboundPayment.update({
@@ -238,7 +254,9 @@ export class OutboundPaymentsService {
       },
     });
 
-    this.logger.log(`OutboundPayment ${paymentId} cancelled by ${operatorId}: ${reason}`);
+    this.logger.log(
+      `OutboundPayment ${paymentId} cancelled by ${operatorId}: ${reason}`,
+    );
     this.eventEmitter.emit('outbound_payment.cancelled', updated);
 
     return updated;
@@ -259,7 +277,9 @@ export class OutboundPaymentsService {
       where: { id: payment.walletId },
     });
     if (!wallet?.outboundEnabled) {
-      throw new BadRequestException('Wallet is no longer enabled for outbound payments');
+      throw new BadRequestException(
+        'Wallet is no longer enabled for outbound payments',
+      );
     }
 
     const updated = await this.prisma.outboundPayment.update({
@@ -272,7 +292,9 @@ export class OutboundPaymentsService {
       },
     });
 
-    this.logger.log(`OutboundPayment ${paymentId} retried by operator ${operatorId}`);
+    this.logger.log(
+      `OutboundPayment ${paymentId} retried by operator ${operatorId}`,
+    );
     await this.createJobForPayment(paymentId);
 
     return updated;
@@ -282,7 +304,10 @@ export class OutboundPaymentsService {
   // PAYMENT RESULT HANDLING
   // ==========================================
 
-  async handlePaymentResult(jobId: string, dto: PaymentResultDto): Promise<any> {
+  async handlePaymentResult(
+    jobId: string,
+    dto: PaymentResultDto,
+  ): Promise<any> {
     const payment = await this.prisma.outboundPayment.findUnique({
       where: { jobId },
       include: { prizeClaim: true, withdrawal: true },
@@ -353,9 +378,7 @@ export class OutboundPaymentsService {
         },
       });
 
-      this.logger.error(
-        `OutboundPayment ${payment.id} FAILED: ${dto.error}`,
-      );
+      this.logger.error(`OutboundPayment ${payment.id} FAILED: ${dto.error}`);
 
       this.eventEmitter.emit('outbound_payment.failed', {
         id: payment.id,
@@ -379,10 +402,14 @@ export class OutboundPaymentsService {
 
     if (!wallet) throw new NotFoundException('Wallet not found');
     if (wallet.type !== 'FIWIND') {
-      throw new BadRequestException('Crypto buy only supported on Fiwind wallets');
+      throw new BadRequestException(
+        'Crypto buy only supported on Fiwind wallets',
+      );
     }
     if (!wallet.outboundEnabled) {
-      throw new BadRequestException('Wallet not enabled for outbound operations');
+      throw new BadRequestException(
+        'Wallet not enabled for outbound operations',
+      );
     }
 
     // Create a job directly (no OutboundPayment record needed for crypto)
@@ -398,7 +425,7 @@ export class OutboundPaymentsService {
 
     this.logger.log(
       `BUY_CRYPTO job ${job.id} created: $${dto.amount} ARS → USDT ` +
-      `(wallet: ${wallet.label}, by: ${operatorId || 'auto'})`,
+        `(wallet: ${wallet.label}, by: ${operatorId || 'auto'})`,
     );
 
     this.eventEmitter.emit('crypto_buy.created', {
@@ -417,7 +444,9 @@ export class OutboundPaymentsService {
 
   async findPending() {
     return this.prisma.outboundPayment.findMany({
-      where: { status: { in: ['PENDING', 'CONFIRMED', 'QUEUED', 'PROCESSING'] } },
+      where: {
+        status: { in: ['PENDING', 'CONFIRMED', 'QUEUED', 'PROCESSING'] },
+      },
       include: { prizeClaim: true, withdrawal: true, wallet: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -472,7 +501,10 @@ export class OutboundPaymentsService {
       });
       if (preferred) {
         // Check balance if known
-        if (preferred.outboundBalance === null || Number(preferred.outboundBalance) >= amount) {
+        if (
+          preferred.outboundBalance === null ||
+          Number(preferred.outboundBalance) >= amount
+        ) {
           return preferred;
         }
         this.logger.warn(

@@ -34,6 +34,6 @@ export class WsJwtGuard implements CanActivate {
 
     // Try query param
     const token = client.handshake.auth?.token || client.handshake.query?.token;
-    return token as string || null;
+    return (token as string) || null;
   }
 }

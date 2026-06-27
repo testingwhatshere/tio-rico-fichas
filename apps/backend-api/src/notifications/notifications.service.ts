@@ -36,12 +36,11 @@ export class NotificationsService {
     });
 
     // Push notification (for offline users — Expo handles dedup if app is foreground)
-    this.pushService.sendToUser(
-      dto.userId,
-      dto.title,
-      dto.message,
-      dto.data,
-    ).catch((err) => this.logger.warn(`Push failed for user ${dto.userId}: ${err.message}`));
+    this.pushService
+      .sendToUser(dto.userId, dto.title, dto.message, dto.data)
+      .catch((err) =>
+        this.logger.warn(`Push failed for user ${dto.userId}: ${err.message}`),
+      );
 
     this.logger.log(`Notification sent to user ${dto.userId}: ${dto.title}`);
   }
@@ -80,7 +79,11 @@ export class NotificationsService {
    * Broadcast promo to all users (WebSocket + Push).
    * Returns the number of push recipients.
    */
-  async broadcastPromo(title: string, message: string, data?: Record<string, any>): Promise<number> {
+  async broadcastPromo(
+    title: string,
+    message: string,
+    data?: Record<string, any>,
+  ): Promise<number> {
     // WebSocket to online users
     this.eventsGateway.emitToAll('promo', {
       title,
@@ -90,8 +93,13 @@ export class NotificationsService {
     });
 
     // Push to all users (including offline)
-    const count = await this.pushService.sendToAll(title, message, { type: 'PROMO', ...data });
-    this.logger.log(`Promo broadcast: "${title}" sent to ${count} users via push`);
+    const count = await this.pushService.sendToAll(title, message, {
+      type: 'PROMO',
+      ...data,
+    });
+    this.logger.log(
+      `Promo broadcast: "${title}" sent to ${count} users via push`,
+    );
     return count;
   }
 
@@ -108,7 +116,10 @@ export class NotificationsService {
     status: string,
     details?: Record<string, any>,
   ): Promise<void> {
-    const messages: Record<string, { type: NotificationType; title: string; message: string }> = {
+    const messages: Record<
+      string,
+      { type: NotificationType; title: string; message: string }
+    > = {
       VALIDATING: {
         type: NotificationType.REQUEST_CREATED,
         title: 'Comprobante recibido',
@@ -137,7 +148,8 @@ export class NotificationsService {
       FAILED: {
         type: NotificationType.REQUEST_FAILED,
         title: 'Error',
-        message: 'Hubo un error al procesar tu solicitud. Un operador te contactará.',
+        message:
+          'Hubo un error al procesar tu solicitud. Un operador te contactará.',
       },
       REJECTED: {
         type: NotificationType.REQUEST_REJECTED,
@@ -175,8 +187,7 @@ export class NotificationsService {
     id: string,
     details: Record<string, any>,
   ): Promise<void> {
-    const title =
-      type === 'validation' ? 'Validación fallida' : 'Job fallido';
+    const title = type === 'validation' ? 'Validación fallida' : 'Job fallido';
     const message =
       type === 'validation'
         ? 'Un comprobante requiere revisión manual'
@@ -212,10 +223,7 @@ export class NotificationsService {
   /**
    * Send chat message as system notification
    */
-  async sendChatSystemMessage(
-    chatId: string,
-    content: string,
-  ): Promise<void> {
+  async sendChatSystemMessage(chatId: string, content: string): Promise<void> {
     await this.messagesService.sendSystemMessage(chatId, content);
   }
 }

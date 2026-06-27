@@ -59,19 +59,21 @@ export class SelfMonitorService implements OnModuleInit {
   }
 
   private async checkAll(): Promise<HealthStatus> {
-    const [db, botOnline, noStuckJobs, killSwitchOff, queueHealthy] = await Promise.allSettled([
-      this.checkDatabase(),
-      this.checkBotOnline(),
-      this.checkNoStuckJobs(),
-      this.checkKillSwitch(),
-      this.checkQueueHealth(),
-    ]);
+    const [db, botOnline, noStuckJobs, killSwitchOff, queueHealthy] =
+      await Promise.allSettled([
+        this.checkDatabase(),
+        this.checkBotOnline(),
+        this.checkNoStuckJobs(),
+        this.checkKillSwitch(),
+        this.checkQueueHealth(),
+      ]);
 
     return {
       db: db.status === 'fulfilled' && db.value,
       botOnline: botOnline.status === 'fulfilled' && botOnline.value,
       noStuckJobs: noStuckJobs.status === 'fulfilled' && noStuckJobs.value,
-      killSwitchOff: killSwitchOff.status === 'fulfilled' && killSwitchOff.value,
+      killSwitchOff:
+        killSwitchOff.status === 'fulfilled' && killSwitchOff.value,
       queueHealthy: queueHealthy.status === 'fulfilled' && queueHealthy.value,
     };
   }
@@ -87,11 +89,15 @@ export class SelfMonitorService implements OnModuleInit {
 
   private async checkBotOnline(): Promise<boolean> {
     try {
-      const setting = await this.prisma.setting.findUnique({ where: { key: 'BOT_STATUS' } });
+      const setting = await this.prisma.setting.findUnique({
+        where: { key: 'BOT_STATUS' },
+      });
       if (!setting || setting.value === 'offline') return false;
 
       // Check heartbeat — if last heartbeat > 3 minutes ago, bot is stale
-      const heartbeat = await this.prisma.setting.findUnique({ where: { key: 'BOT_LAST_HEARTBEAT' } });
+      const heartbeat = await this.prisma.setting.findUnique({
+        where: { key: 'BOT_LAST_HEARTBEAT' },
+      });
       if (heartbeat?.value) {
         const lastBeat = new Date(heartbeat.value).getTime();
         const threeMinAgo = Date.now() - 3 * 60 * 1000;
@@ -121,7 +127,9 @@ export class SelfMonitorService implements OnModuleInit {
 
   private async checkKillSwitch(): Promise<boolean> {
     try {
-      const setting = await this.prisma.setting.findUnique({ where: { key: 'KILL_SWITCH' } });
+      const setting = await this.prisma.setting.findUnique({
+        where: { key: 'KILL_SWITCH' },
+      });
       return setting?.value !== 'true';
     } catch {
       return true; // Don't alert on check failure
@@ -131,7 +139,9 @@ export class SelfMonitorService implements OnModuleInit {
   private async checkQueueHealth(): Promise<boolean> {
     try {
       // If more than 20 queued jobs, something might be wrong
-      const queuedCount = await this.prisma.job.count({ where: { status: 'QUEUED' } });
+      const queuedCount = await this.prisma.job.count({
+        where: { status: 'QUEUED' },
+      });
       return queuedCount < 20;
     } catch {
       return false;
@@ -150,11 +160,11 @@ export class SelfMonitorService implements OnModuleInit {
 
   private async handleIssues(issues: string[]) {
     // Only alert on new issues (avoid spam)
-    const newIssues = issues.filter(i => !this.lastAlertedIssues.has(i));
+    const newIssues = issues.filter((i) => !this.lastAlertedIssues.has(i));
 
     if (newIssues.length > 0 || this.consecutiveFailures % 12 === 0) {
       // Alert on new issues, or re-alert every hour (12 * 5min = 60min)
-      const issueMessages = issues.map(i => this.issueToMessage(i));
+      const issueMessages = issues.map((i) => this.issueToMessage(i));
       const message =
         `🚨 <b>ALERTA DE SISTEMA</b>\n\n` +
         issueMessages.join('\n') +
@@ -164,11 +174,13 @@ export class SelfMonitorService implements OnModuleInit {
       this.logger.warn(`Health alert sent: ${issues.join(', ')}`);
     }
 
-    issues.forEach(i => this.lastAlertedIssues.add(i));
+    issues.forEach((i) => this.lastAlertedIssues.add(i));
   }
 
   private async sendRecoveryAlert() {
-    const resolved = Array.from(this.lastAlertedIssues).map(i => this.issueToMessage(i));
+    const resolved = Array.from(this.lastAlertedIssues).map((i) =>
+      this.issueToMessage(i),
+    );
     const message =
       `✅ <b>SISTEMA RECUPERADO</b>\n\n` +
       `Problemas resueltos:\n${resolved.join('\n')}\n\n` +

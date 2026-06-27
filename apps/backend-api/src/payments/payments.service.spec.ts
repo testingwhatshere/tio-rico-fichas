@@ -11,6 +11,7 @@ import { RequestsService } from '../requests/requests.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { SettingsService } from '../settings/settings.service';
 import { ProofValidationService } from './proof-validation.service';
+import { PushService } from '../notifications/push.service';
 import { AppEvent } from '../common/events/app-events';
 
 // Helper to build a mock validation result from ProofValidationService
@@ -95,7 +96,10 @@ describe('PaymentsService', () => {
       updateRequestStatus: jest.fn().mockResolvedValue(undefined),
     };
 
-    uploadsService = {};
+    uploadsService = {
+      // Identity passthrough — the actual transform is unit-tested separately.
+      toDeliverableUrl: jest.fn((url: string) => url),
+    };
 
     settingsService = {
       getSetting: jest.fn().mockImplementation((key: string) => {
@@ -112,6 +116,8 @@ describe('PaymentsService', () => {
       validateProof: jest.fn().mockResolvedValue(buildProofResult()),
     };
 
+    const pushService = { sendToUser: jest.fn().mockResolvedValue(undefined) };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
@@ -122,6 +128,7 @@ describe('PaymentsService', () => {
         { provide: UploadsService, useValue: uploadsService },
         { provide: SettingsService, useValue: settingsService },
         { provide: ProofValidationService, useValue: proofValidationService },
+        { provide: PushService, useValue: pushService },
       ],
     }).compile();
 
@@ -143,10 +150,13 @@ describe('PaymentsService', () => {
       expect(result.error).toBeUndefined();
 
       // Should emit validation started
-      expect(eventsGateway.emitValidationStarted).toHaveBeenCalledWith('user-1', {
-        requestId: 'req-1',
-        status: 'VALIDATING',
-      });
+      expect(eventsGateway.emitValidationStarted).toHaveBeenCalledWith(
+        'user-1',
+        {
+          requestId: 'req-1',
+          status: 'VALIDATING',
+        },
+      );
 
       // Should set validation result
       expect(requestsService.setValidationResult).toHaveBeenCalledWith(
@@ -155,11 +165,14 @@ describe('PaymentsService', () => {
       );
 
       // Should emit completed to user
-      expect(eventsGateway.emitValidationCompleted).toHaveBeenCalledWith('user-1', {
-        requestId: 'req-1',
-        status: 'APPROVED',
-        score: 0.95,
-      });
+      expect(eventsGateway.emitValidationCompleted).toHaveBeenCalledWith(
+        'user-1',
+        {
+          requestId: 'req-1',
+          status: 'APPROVED',
+          score: 0.95,
+        },
+      );
 
       // Should emit VALIDATION_COMPLETED event for job creation
       expect(eventEmitter.emit).toHaveBeenCalledWith(
@@ -238,11 +251,14 @@ describe('PaymentsService', () => {
       const result = await service.validateProof('req-1');
 
       expect(result.valid).toBe(false);
-      expect(requestsService.setValidationResult).toHaveBeenCalledWith('req-1', {
-        valid: false,
-        score: 0,
-        error: 'No se encontr\u00f3 comprobante adjunto',
-      });
+      expect(requestsService.setValidationResult).toHaveBeenCalledWith(
+        'req-1',
+        {
+          valid: false,
+          score: 0,
+          error: 'No se encontr\u00f3 comprobante adjunto',
+        },
+      );
     });
   });
 
@@ -253,7 +269,11 @@ describe('PaymentsService', () => {
     it('should return invalid and emit VALIDATION_FAILED when AI says invalid', async () => {
       prisma.request.findUnique.mockResolvedValue(buildRequest());
       proofValidationService.validateProof.mockResolvedValue(
-        buildProofResult({ isValid: false, confidence: 0.3, reasoning: 'Comprobante borroso' }),
+        buildProofResult({
+          isValid: false,
+          confidence: 0.3,
+          reasoning: 'Comprobante borroso',
+        }),
       );
 
       const result = await service.validateProof('req-1');
@@ -336,7 +356,10 @@ describe('PaymentsService', () => {
 
       // Make validation take 6 seconds (longer than 1ms + 5000ms buffer = 5001ms)
       proofValidationService.validateProof.mockImplementation(
-        () => new Promise((resolve) => setTimeout(() => resolve(buildProofResult()), 6000)),
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve(buildProofResult()), 6000),
+          ),
       );
 
       const result = await service.validateProof('req-1');
@@ -478,7 +501,9 @@ describe('PaymentsService', () => {
       proofValidationService.validateProof.mockResolvedValue(
         buildProofResult({ transactionId: 'TX-12345' }),
       );
-      prisma.request.findFirst.mockRejectedValue(new Error('DB connection lost'));
+      prisma.request.findFirst.mockRejectedValue(
+        new Error('DB connection lost'),
+      );
 
       const result = await service.validateProof('req-1');
 
@@ -515,7 +540,13 @@ describe('PaymentsService', () => {
     });
 
     it('should accept various approved status variants', async () => {
-      const variants = ['aprobada', 'Exitosa', 'completada', 'Acreditada', 'APPROVED'];
+      const variants = [
+        'aprobada',
+        'Exitosa',
+        'completada',
+        'Acreditada',
+        'APPROVED',
+      ];
 
       for (const status of variants) {
         proofValidationService.validateProof.mockResolvedValue(
@@ -539,7 +570,9 @@ describe('PaymentsService', () => {
       oldDate.setDate(oldDate.getDate() - 10); // 10 days ago (window is 7)
       prisma.request.findUnique.mockResolvedValue(buildRequest());
       proofValidationService.validateProof.mockResolvedValue(
-        buildProofResult({ extractedDate: oldDate.toISOString().split('T')[0] }),
+        buildProofResult({
+          extractedDate: oldDate.toISOString().split('T')[0],
+        }),
       );
 
       const result = await service.validateProof('req-1');
@@ -553,7 +586,9 @@ describe('PaymentsService', () => {
       recentDate.setDate(recentDate.getDate() - 3); // 3 days ago
       prisma.request.findUnique.mockResolvedValue(buildRequest());
       proofValidationService.validateProof.mockResolvedValue(
-        buildProofResult({ extractedDate: recentDate.toISOString().split('T')[0] }),
+        buildProofResult({
+          extractedDate: recentDate.toISOString().split('T')[0],
+        }),
       );
 
       const result = await service.validateProof('req-1');
@@ -567,7 +602,9 @@ describe('PaymentsService', () => {
       futureDate.setDate(futureDate.getDate() + 5);
       prisma.request.findUnique.mockResolvedValue(buildRequest());
       proofValidationService.validateProof.mockResolvedValue(
-        buildProofResult({ extractedDate: futureDate.toISOString().split('T')[0] }),
+        buildProofResult({
+          extractedDate: futureDate.toISOString().split('T')[0],
+        }),
       );
 
       const result = await service.validateProof('req-1');
@@ -582,17 +619,22 @@ describe('PaymentsService', () => {
   // Fraud detection: CROSS_USER_SENDER
   // ========================================================
   describe('fraud detection - CROSS_USER_SENDER', () => {
-    it('should flag CROSS_USER_SENDER when senderDniCuit is used by another user', async () => {
+    it('should flag CROSS_USER_SENDER without auto-rejecting (operator reviews)', async () => {
+      // En AR es comun que un familiar pague por el usuario. El flag se mantiene
+      // visible para el operador pero ya NO bloquea automaticamente.
       prisma.request.findUnique.mockResolvedValue(buildRequest());
       proofValidationService.validateProof.mockResolvedValue(
         buildProofResult({ senderDniCuit: '20-12345678-9' }),
       );
-      prisma.$queryRaw.mockResolvedValueOnce([{ id: 'req-x', userId: 'user-2' }]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { id: 'req-x', userId: 'user-2' },
+      ]);
 
       const result = await service.validateProof('req-1');
 
-      expect(result.valid).toBe(false);
+      expect(result.valid).toBe(true);
       expect(result.details?.flags).toContain('CROSS_USER_SENDER');
+      expect(result.details?.fraudFlags).toContain('CROSS_USER_SENDER');
     });
 
     it('should not flag when senderDniCuit is not used by another user', async () => {
@@ -614,7 +656,9 @@ describe('PaymentsService', () => {
   describe('fraud detection - failure rate', () => {
     it('should flag HIGH_FAILURE_RATE when user has 5+ failed validations in 30 days', async () => {
       prisma.request.findUnique.mockResolvedValue(buildRequest());
-      proofValidationService.validateProof.mockResolvedValue(buildProofResult());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult(),
+      );
       prisma.request.count.mockResolvedValue(5);
 
       const result = await service.validateProof('req-1');
@@ -624,7 +668,9 @@ describe('PaymentsService', () => {
 
     it('should flag VERY_HIGH_FAILURE_RATE when user has 10+ failed validations', async () => {
       prisma.request.findUnique.mockResolvedValue(buildRequest());
-      proofValidationService.validateProof.mockResolvedValue(buildProofResult());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult(),
+      );
       prisma.request.count.mockResolvedValue(10);
 
       const result = await service.validateProof('req-1');
@@ -635,7 +681,9 @@ describe('PaymentsService', () => {
 
     it('should not flag when failure count is below 5', async () => {
       prisma.request.findUnique.mockResolvedValue(buildRequest());
-      proofValidationService.validateProof.mockResolvedValue(buildProofResult());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult(),
+      );
       prisma.request.count.mockResolvedValue(4);
 
       const result = await service.validateProof('req-1');
@@ -657,7 +705,8 @@ describe('PaymentsService', () => {
       // Two existing distinct senders + current = 3
       prisma.$queryRaw.mockImplementation((strings: any) => {
         const query = typeof strings === 'string' ? strings : strings[0];
-        if (query && query.includes('senderDniCuit')) return Promise.resolve([]);
+        if (query && query.includes('senderDniCuit'))
+          return Promise.resolve([]);
         if (query && query.includes('senderName'))
           return Promise.resolve([
             { sender_name: 'Ana Lopez' },

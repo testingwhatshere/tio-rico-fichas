@@ -62,8 +62,9 @@ export default function TabsLayout() {
     s.outboundPayments.filter((p: any) => p.status === 'PENDING' || p.status === 'CONFIRMED').length
   );
 
-  // Total badge for "More" tab (prizes + payments + anything else)
-  const moreBadge = (pendingPrizeClaims || 0) + (pendingPayments || 0);
+  // "Más" agrupa lo que no es accionable a diario (payments, jobs, etc.).
+  // Premios subió a tab primaria, así que ya no entra en este badge.
+  const moreBadge = pendingPayments || 0;
 
   return (
     <Tabs
@@ -114,11 +115,11 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="jobs"
+        name="prizes"
         options={{
-          title: 'Jobs',
+          title: 'Premios',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="briefcase-outline" size={size} color={color} />
+            <BadgeIcon name="trophy-outline" size={size} color={color} badge={pendingPrizeClaims} />
           ),
         }}
       />
@@ -133,12 +134,14 @@ export default function TabsLayout() {
       />
 
       {/* ===== HIDDEN TABS (accessible from "Mas" screen) ===== */}
+      <Tabs.Screen name="jobs" options={{ href: null }} />
       <Tabs.Screen name="payments" options={{ href: null }} />
       <Tabs.Screen name="extensions" options={{ href: null }} />
-      <Tabs.Screen name="prizes" options={{ href: null }} />
       <Tabs.Screen name="activity" options={{ href: null }} />
       <Tabs.Screen name="wallets" options={{ href: null }} />
       <Tabs.Screen name="users" options={{ href: null }} />
+      <Tabs.Screen name="preload-users" options={{ href: null }} />
+      <Tabs.Screen name="requests" options={{ href: null }} />
       <Tabs.Screen name="panels" options={{ href: null }} />
       <Tabs.Screen name="settings" options={{ href: null }} />
     </Tabs>

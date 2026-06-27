@@ -6,10 +6,13 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { ModuleRef } from '@nestjs/core';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto, UpdateUserDto } from './dto';
 import { PushService } from '../notifications/push.service';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction, EntityType } from '../audit/dto';
 
 /**
  * Conservative Argentine phone normalizer.
@@ -39,7 +42,62 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pushService: PushService,
+    private readonly auditService: AuditService,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * Returns the panel-game credentials of a user so operators can help during
+   * support (recover lost passwords, verify identity). Every read is audited.
+   * If panelPassword is null, the user has never changed it via the platform —
+   * the UI must display the system default ('123casino') with a "may have changed"
+   * disclaimer. We don't fabricate '123casino' here on purpose.
+   */
+  async getPanelInfoForOperator(
+    targetUserId: string,
+    operatorId: string,
+  ): Promise<{
+    userId: string;
+    savedTargetUsername: string | null;
+    panelPassword: string | null;
+    panelPasswordUpdatedAt: Date | null;
+  }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: {
+        id: true,
+        savedTargetUsername: true,
+        panelPassword: true,
+        panelPasswordUpdatedAt: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    // Audit log — fire and forget; do not block the response on logging failure.
+    this.auditService
+      .log({
+        operatorId,
+        action: AuditAction.USER_PANEL_INFO_VIEWED,
+        entityType: EntityType.USER,
+        entityId: targetUserId,
+        metadata: { hasPanelPassword: user.panelPassword != null },
+      })
+      .catch((err: any) =>
+        this.logger.warn(
+          `Failed to audit USER_PANEL_INFO_VIEWED: ${err.message}`,
+        ),
+      );
+
+    return {
+      userId: user.id,
+      savedTargetUsername: user.savedTargetUsername,
+      panelPassword: user.panelPassword,
+      panelPasswordUpdatedAt: user.panelPasswordUpdatedAt,
+    };
+  }
 
   async findAll(page = 1, limit = 10) {
     const skip = (page - 1) * limit;
@@ -179,7 +237,14 @@ export class UsersService {
       const updatedRequests = await tx.request.updateMany({
         where: {
           userId,
-          status: { in: ['PENDING_PROOF', 'VALIDATING', 'VALIDATION_FAILED', 'APPROVED'] },
+          status: {
+            in: [
+              'PENDING_PROOF',
+              'VALIDATING',
+              'VALIDATION_FAILED',
+              'APPROVED',
+            ],
+          },
         },
         data: { targetUsername: normalizedUsername },
       });
@@ -223,11 +288,21 @@ export class UsersService {
 
     return clients.map((client) => {
       const completed = client.requests || [];
-      const totalLoaded = completed.reduce((sum, r) => sum + Number(r.amount), 0);
+      const totalLoaded = completed.reduce(
+        (sum, r) => sum + Number(r.amount),
+        0,
+      );
       const firstLoadAt = completed[0]?.createdAt || null;
-      const lastLoadAt = completed.length > 0 ? completed[completed.length - 1].createdAt : null;
+      const lastLoadAt =
+        completed.length > 0 ? completed[completed.length - 1].createdAt : null;
       const { requests: _omit, ...rest } = client;
-      return { ...rest, totalLoaded, completedCount: completed.length, firstLoadAt, lastLoadAt };
+      return {
+        ...rest,
+        totalLoaded,
+        completedCount: completed.length,
+        firstLoadAt,
+        lastLoadAt,
+      };
     });
   }
 
@@ -235,7 +310,11 @@ export class UsersService {
    * Toggle a user's active status (blacklist/unblacklist)
    * When deactivated, user cannot create new requests
    */
-  async toggleUserActive(userId: string, isActive: boolean, operatorId: string) {
+  async toggleUserActive(
+    userId: string,
+    isActive: boolean,
+    operatorId: string,
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
@@ -245,7 +324,9 @@ export class UsersService {
     }
 
     if (user.role !== 'CLIENT') {
-      throw new BadRequestException('Solo se pueden bloquear/desbloquear usuarios de tipo CLIENT');
+      throw new BadRequestException(
+        'Solo se pueden bloquear/desbloquear usuarios de tipo CLIENT',
+      );
     }
 
     const updated = await this.prisma.user.update({
@@ -377,7 +458,10 @@ export class UsersService {
     return user?.savedTargetUsername ?? null;
   }
 
-  async setSavedTargetUsername(userId: string, targetUsername: string): Promise<void> {
+  async setSavedTargetUsername(
+    userId: string,
+    targetUsername: string,
+  ): Promise<void> {
     await this.prisma.user.update({
       where: { id: userId },
       data: { savedTargetUsername: targetUsername.toLowerCase().trim() },
@@ -385,12 +469,130 @@ export class UsersService {
   }
 
   /**
+   * Change a user's panel-game username (savedTargetUsername) and, if the user has
+   * a recent FAILED request waiting because of a name conflict, restart discovery
+   * automatically with the new name. The caller is either the user themselves
+   * (from chat-app) or an operator (from operator-panel / mobile).
+   *
+   * Also clears the stale `User.panelId`/`Request.panelId` so discovery starts
+   * fresh — the user might exist in a panel under the new name.
+   */
+  async changeSavedTargetUsernameWithRetry(
+    userId: string,
+    newTargetUsername: string,
+  ): Promise<{
+    success: true;
+    savedTargetUsername: string;
+    retriedRequestId: string | null;
+  }> {
+    const normalized = newTargetUsername.trim().toLowerCase();
+    if (normalized.length < 3 || normalized.length > 20) {
+      throw new BadRequestException(
+        'El nombre debe tener entre 3 y 20 caracteres',
+      );
+    }
+    if (!/^[a-z0-9_]+$/.test(normalized)) {
+      throw new BadRequestException('Solo letras, números y guion bajo');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, savedTargetUsername: true, panelId: true },
+    });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    if (user.savedTargetUsername === normalized) {
+      throw new BadRequestException(
+        'Es el mismo nombre que ya tenés. Probá con otro.',
+      );
+    }
+
+    // Reset the user's panel binding — the new name may belong to a different panel.
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        savedTargetUsername: normalized,
+        panelId: null,
+        // panelPassword stays unchanged — operator/user can update it via password change flow.
+      },
+    });
+
+    this.logger.log(
+      `User ${userId} savedTargetUsername changed to "${normalized}"`,
+    );
+
+    // If there's a recent FAILED request waiting for this user (most likely caused by
+    // the username-taken conflict), restart it. Limit to the last hour to avoid
+    // resurrecting unrelated old failures.
+    const failedRequest = await this.prisma.request.findFirst({
+      where: {
+        userId,
+        status: 'FAILED',
+        createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+
+    let retriedRequestId: string | null = null;
+    if (failedRequest) {
+      try {
+        // Update the request's targetUsername to the new name + reset panelId/status,
+        // then re-trigger discovery via DiscoveryService.
+        await this.prisma.request.update({
+          where: { id: failedRequest.id },
+          data: {
+            targetUsername: normalized,
+            panelId: null,
+            status: 'APPROVED',
+          },
+        });
+        // Also delete any FAILED job linked to this request so re-discovery can
+        // create a fresh one without colliding on the unique constraint.
+        await this.prisma.job
+          .deleteMany({ where: { requestId: failedRequest.id } })
+          .catch(() => {});
+
+        const { DiscoveryService } = require('../discovery/discovery.service');
+        const discoveryService = this.moduleRef.get(DiscoveryService, {
+          strict: false,
+        });
+        await discoveryService.startDiscovery(
+          failedRequest.id,
+          normalized,
+          userId,
+        );
+        retriedRequestId = failedRequest.id;
+        this.logger.log(
+          `Re-triggered discovery for request ${failedRequest.id} with new username "${normalized}"`,
+        );
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to auto-retry request after username change: ${err.message}`,
+        );
+      }
+    }
+
+    return {
+      success: true,
+      savedTargetUsername: normalized,
+      retriedRequestId,
+    };
+  }
+
+  /**
    * Request a password change on the gaming panel.
    * Creates a CHANGE_PASSWORD job for the automation extension to execute.
    */
-  async requestPasswordChange(userId: string, newPassword: string, confirmPassword: string) {
-    if (!newPassword || newPassword.length < 6) {
-      throw new BadRequestException('La contraseña debe tener al menos 6 caracteres');
+  async requestPasswordChange(
+    userId: string,
+    newPassword: string,
+    confirmPassword: string,
+  ) {
+    if (!newPassword || newPassword.length < 8) {
+      throw new BadRequestException(
+        'La contraseña debe tener al menos 8 caracteres',
+      );
     }
     if (newPassword !== confirmPassword) {
       throw new BadRequestException('Las contraseñas no coinciden');
@@ -406,7 +608,9 @@ export class UsersService {
     }
 
     if (!user.savedTargetUsername) {
-      throw new BadRequestException('No tienes un usuario de panel asociado. Primero realiza una carga para vincular tu cuenta.');
+      throw new BadRequestException(
+        'No tienes un usuario de panel asociado. Primero realiza una carga para vincular tu cuenta.',
+      );
     }
 
     // Check for existing pending password change job
@@ -419,7 +623,9 @@ export class UsersService {
     });
 
     if (existingJob) {
-      throw new BadRequestException('Ya tienes un cambio de contraseña en proceso. Espera a que termine.');
+      throw new BadRequestException(
+        'Ya tienes un cambio de contraseña en proceso. Espera a que termine.',
+      );
     }
 
     // Create job for the automation extension
@@ -433,7 +639,9 @@ export class UsersService {
       },
     });
 
-    this.logger.log(`Password change job created: ${job.id} for user ${userId} (panel user: ${user.savedTargetUsername})`);
+    this.logger.log(
+      `Password change job created: ${job.id} for user ${userId} (panel user: ${user.savedTargetUsername})`,
+    );
 
     // Push notification — immediate "received" feedback so the user knows the request
     // landed (the final success/fail push fires later from bot.service.ts when the bot completes).
@@ -444,11 +652,16 @@ export class UsersService {
         'Tu pedido entró en cola. Te avisamos cuando esté procesado.',
         { jobId: job.id, type: 'password_change_queued' },
       )
-      .catch((err: any) => this.logger.warn(`Push (password_change_queued) failed: ${err.message}`));
+      .catch((err: any) =>
+        this.logger.warn(
+          `Push (password_change_queued) failed: ${err.message}`,
+        ),
+      );
 
     return {
       success: true,
-      message: 'Tu cambio de contraseña está en proceso. Te avisaremos cuando esté listo.',
+      message:
+        'Tu cambio de contraseña está en proceso. Te avisaremos cuando esté listo.',
       jobId: job.id,
     };
   }
@@ -460,7 +673,9 @@ export class UsersService {
    */
   async requestCreateUser(targetUsername: string) {
     if (!targetUsername || targetUsername.trim().length < 3) {
-      throw new BadRequestException('El nombre de usuario debe tener al menos 3 caracteres');
+      throw new BadRequestException(
+        'El nombre de usuario debe tener al menos 3 caracteres',
+      );
     }
 
     const normalized = targetUsername.toLowerCase().trim();
@@ -475,7 +690,9 @@ export class UsersService {
     });
 
     if (existingJob) {
-      throw new BadRequestException(`Ya hay una creación de usuario en proceso para "${normalized}".`);
+      throw new BadRequestException(
+        `Ya hay una creación de usuario en proceso para "${normalized}".`,
+      );
     }
 
     const job = await this.prisma.job.create({
@@ -487,7 +704,9 @@ export class UsersService {
       },
     });
 
-    this.logger.log(`Create user job created: ${job.id} for panel user: ${normalized}`);
+    this.logger.log(
+      `Create user job created: ${job.id} for panel user: ${normalized}`,
+    );
 
     return {
       success: true,
@@ -529,15 +748,27 @@ export class UsersService {
       const panelId = (raw.panelId || '').toString().trim() || null;
 
       if (!username || username.length < 3 || username.length > 30) {
-        errors.push({ row, username, error: 'Username inválido (3-30 caracteres)' });
+        errors.push({
+          row,
+          username,
+          error: 'Username inválido (3-30 caracteres)',
+        });
         continue;
       }
       if (!/^[a-z0-9_][a-z0-9_]*$/.test(username)) {
-        errors.push({ row, username, error: 'Username solo letras, números y guión bajo' });
+        errors.push({
+          row,
+          username,
+          error: 'Username solo letras, números y guión bajo',
+        });
         continue;
       }
       if (!phone || !/^\d{7,15}$/.test(phone.replace(/\D/g, ''))) {
-        errors.push({ row, username, error: 'Teléfono inválido (7-15 dígitos)' });
+        errors.push({
+          row,
+          username,
+          error: 'Teléfono inválido (7-15 dígitos)',
+        });
         continue;
       }
 
@@ -547,9 +778,15 @@ export class UsersService {
         const cleanPhone = canonicalArPhone(phone);
 
         // Conflict: phone already used by a different username
-        const phoneOwner = await this.prisma.user.findUnique({ where: { phone: cleanPhone } });
+        const phoneOwner = await this.prisma.user.findUnique({
+          where: { phone: cleanPhone },
+        });
         if (phoneOwner && phoneOwner.username !== username) {
-          errors.push({ row, username, error: `Teléfono ya usado por "${phoneOwner.username}"` });
+          errors.push({
+            row,
+            username,
+            error: `Teléfono ya usado por "${phoneOwner.username}"`,
+          });
           continue;
         }
 
@@ -585,7 +822,11 @@ export class UsersService {
           created.push(username);
         }
       } catch (err: any) {
-        errors.push({ row, username, error: err.message || 'Error desconocido' });
+        errors.push({
+          row,
+          username,
+          error: err.message || 'Error desconocido',
+        });
       }
     }
 

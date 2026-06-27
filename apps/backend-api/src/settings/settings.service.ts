@@ -1,4 +1,11 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService } from '../audit/audit.service';
@@ -64,7 +71,11 @@ export class SettingsService {
     const latestParts = latest.split('-')[0].split('.').map(Number);
     const currentParts = current.split('-')[0].split('.').map(Number);
 
-    for (let i = 0; i < Math.max(latestParts.length, currentParts.length); i++) {
+    for (
+      let i = 0;
+      i < Math.max(latestParts.length, currentParts.length);
+      i++
+    ) {
       const l = latestParts[i] || 0;
       const c = currentParts[i] || 0;
       if (l > c) return true;
@@ -162,40 +173,93 @@ export class SettingsService {
     const settings = await this.getAllSettings();
     const settingsMap = new Map(settings.map((s) => [s.key, s.value]));
 
-    const getValue = (key: string) => settingsMap.get(key) ?? DEFAULT_SETTINGS[key];
+    const getValue = (key: string) =>
+      settingsMap.get(key) ?? DEFAULT_SETTINGS[key];
 
     return {
       killSwitch: getValue('KILL_SWITCH') === 'true',
       botEnabled: getValue('BOT_ENABLED') === 'true',
       botActivityWindowStart: getValue('BOT_ACTIVITY_WINDOW_START'),
       botActivityWindowEnd: getValue('BOT_ACTIVITY_WINDOW_END'),
-      queueCooldownMs: this.clamp(this.safeParseInt(getValue('QUEUE_COOLDOWN_MS'), 30000), 1000, 300000),
-      maxConcurrentJobs: this.clamp(this.safeParseInt(getValue('MAX_CONCURRENT_JOBS'), 1), 1, 1),
-      maxRequestsPerUserPerHour: this.clamp(this.safeParseInt(getValue('MAX_REQUESTS_PER_USER_PER_HOUR'), 10), 1, 100),
-      maxRequestAmount: this.clamp(this.safeParseInt(getValue('MAX_REQUEST_AMOUNT'), 50000), 100, 1000000),
+      queueCooldownMs: this.clamp(
+        this.safeParseInt(getValue('QUEUE_COOLDOWN_MS'), 30000),
+        1000,
+        300000,
+      ),
+      maxConcurrentJobs: this.clamp(
+        this.safeParseInt(getValue('MAX_CONCURRENT_JOBS'), 1),
+        1,
+        1,
+      ),
+      maxRequestsPerUserPerHour: this.clamp(
+        this.safeParseInt(getValue('MAX_REQUESTS_PER_USER_PER_HOUR'), 10),
+        1,
+        100,
+      ),
+      maxRequestAmount: this.clamp(
+        this.safeParseInt(getValue('MAX_REQUEST_AMOUNT'), 50000),
+        100,
+        1000000,
+      ),
       // Validation settings
-      validationThreshold: this.clamp(this.safeParseFloat(getValue('VALIDATION_THRESHOLD'), 0.8), 0.5, 1),
-      validationTimeoutMs: this.clamp(this.safeParseInt(getValue('VALIDATION_TIMEOUT_MS'), 90000), 10000, 300000),
-      validationAmountTolerance: this.clamp(this.safeParseFloat(getValue('VALIDATION_AMOUNT_TOLERANCE'), 0.1), 0.01, 0.5),
-      validationDateWindowDays: this.clamp(this.safeParseInt(getValue('VALIDATION_DATE_WINDOW_DAYS'), 7), 1, 30),
-      validatorHeartbeatIntervalMs: this.clamp(this.safeParseInt(getValue('VALIDATOR_HEARTBEAT_INTERVAL_MS'), 30000), 5000, 120000),
+      validationThreshold: this.clamp(
+        this.safeParseFloat(getValue('VALIDATION_THRESHOLD'), 0.8),
+        0.5,
+        1,
+      ),
+      validationTimeoutMs: this.clamp(
+        this.safeParseInt(getValue('VALIDATION_TIMEOUT_MS'), 90000),
+        10000,
+        300000,
+      ),
+      validationAmountTolerance: this.clamp(
+        this.safeParseFloat(getValue('VALIDATION_AMOUNT_TOLERANCE'), 0.1),
+        0.01,
+        0.5,
+      ),
+      validationDateWindowDays: this.clamp(
+        this.safeParseInt(getValue('VALIDATION_DATE_WINDOW_DAYS'), 7),
+        1,
+        30,
+      ),
+      validatorHeartbeatIntervalMs: this.clamp(
+        this.safeParseInt(getValue('VALIDATOR_HEARTBEAT_INTERVAL_MS'), 30000),
+        5000,
+        120000,
+      ),
       // Chat settings
-      maxChatsPerOperator: this.clamp(this.safeParseInt(getValue('MAX_CHATS_PER_OPERATOR'), 5), 1, 20),
+      maxChatsPerOperator: this.clamp(
+        this.safeParseInt(getValue('MAX_CHATS_PER_OPERATOR'), 5),
+        1,
+        20,
+      ),
       autoAssignChats: getValue('AUTO_ASSIGN_CHATS') === 'true',
       // Support contact
       supportPhoneNumber: getValue('SUPPORT_PHONE_NUMBER') || '',
       // Panel balance alert
-      panelBalanceThreshold: this.safeParseInt(getValue('PANEL_BALANCE_THRESHOLD'), 1000),
+      panelBalanceThreshold: this.safeParseInt(
+        getValue('PANEL_BALANCE_THRESHOLD'),
+        1000,
+      ),
       // Panel for auto-creating new users
       defaultNewUserPanelId: getValue('DEFAULT_NEW_USER_PANEL_ID') || '',
       // Outbound payments
       autoPaymentEnabled: getValue('AUTO_PAYMENT_ENABLED') === 'true',
-      autoPaymentRequiresConfirm: getValue('AUTO_PAYMENT_REQUIRES_CONFIRM') !== 'false', // default true
-      autoPaymentMaxAmount: this.clamp(this.safeParseInt(getValue('AUTO_PAYMENT_MAX_AMOUNT'), 50000), 100, 1000000),
+      autoPaymentRequiresConfirm:
+        getValue('AUTO_PAYMENT_REQUIRES_CONFIRM') !== 'false', // default true
+      autoPaymentMaxAmount: this.clamp(
+        this.safeParseInt(getValue('AUTO_PAYMENT_MAX_AMOUNT'), 50000),
+        100,
+        1000000,
+      ),
       outboundPaymentWalletId: getValue('OUTBOUND_PAYMENT_WALLET_ID') || '',
       // Crypto auto-buy
       cryptoAutoBuyEnabled: getValue('CRYPTO_AUTO_BUY_ENABLED') === 'true',
-      cryptoAutoBuyThreshold: this.clamp(this.safeParseInt(getValue('CRYPTO_AUTO_BUY_THRESHOLD'), 100000), 1000, 10000000),
+      cryptoAutoBuyThreshold: this.clamp(
+        this.safeParseInt(getValue('CRYPTO_AUTO_BUY_THRESHOLD'), 100000),
+        1000,
+        10000000,
+      ),
       cryptoAutoBuyWalletId: getValue('CRYPTO_AUTO_BUY_WALLET_ID') || '',
     };
   }
@@ -216,16 +280,28 @@ export class SettingsService {
       updates.push({ key: 'BOT_ENABLED', value: dto.botEnabled.toString() });
     }
     if (dto.botActivityWindowStart !== undefined) {
-      updates.push({ key: 'BOT_ACTIVITY_WINDOW_START', value: dto.botActivityWindowStart });
+      updates.push({
+        key: 'BOT_ACTIVITY_WINDOW_START',
+        value: dto.botActivityWindowStart,
+      });
     }
     if (dto.botActivityWindowEnd !== undefined) {
-      updates.push({ key: 'BOT_ACTIVITY_WINDOW_END', value: dto.botActivityWindowEnd });
+      updates.push({
+        key: 'BOT_ACTIVITY_WINDOW_END',
+        value: dto.botActivityWindowEnd,
+      });
     }
     if (dto.queueCooldownMs !== undefined) {
-      updates.push({ key: 'QUEUE_COOLDOWN_MS', value: dto.queueCooldownMs.toString() });
+      updates.push({
+        key: 'QUEUE_COOLDOWN_MS',
+        value: dto.queueCooldownMs.toString(),
+      });
     }
     if (dto.maxConcurrentJobs !== undefined) {
-      updates.push({ key: 'MAX_CONCURRENT_JOBS', value: dto.maxConcurrentJobs.toString() });
+      updates.push({
+        key: 'MAX_CONCURRENT_JOBS',
+        value: dto.maxConcurrentJobs.toString(),
+      });
     }
     if (dto.maxRequestsPerUserPerHour !== undefined) {
       updates.push({
@@ -234,66 +310,124 @@ export class SettingsService {
       });
     }
     if (dto.maxRequestAmount !== undefined) {
-      updates.push({ key: 'MAX_REQUEST_AMOUNT', value: dto.maxRequestAmount.toString() });
+      updates.push({
+        key: 'MAX_REQUEST_AMOUNT',
+        value: dto.maxRequestAmount.toString(),
+      });
     }
     if (dto.validationThreshold !== undefined) {
-      updates.push({ key: 'VALIDATION_THRESHOLD', value: dto.validationThreshold.toString() });
+      updates.push({
+        key: 'VALIDATION_THRESHOLD',
+        value: dto.validationThreshold.toString(),
+      });
     }
     if (dto.validationTimeoutMs !== undefined) {
-      updates.push({ key: 'VALIDATION_TIMEOUT_MS', value: dto.validationTimeoutMs.toString() });
+      updates.push({
+        key: 'VALIDATION_TIMEOUT_MS',
+        value: dto.validationTimeoutMs.toString(),
+      });
     }
     if (dto.validationAmountTolerance !== undefined) {
-      updates.push({ key: 'VALIDATION_AMOUNT_TOLERANCE', value: dto.validationAmountTolerance.toString() });
+      updates.push({
+        key: 'VALIDATION_AMOUNT_TOLERANCE',
+        value: dto.validationAmountTolerance.toString(),
+      });
     }
     if (dto.validationDateWindowDays !== undefined) {
-      updates.push({ key: 'VALIDATION_DATE_WINDOW_DAYS', value: dto.validationDateWindowDays.toString() });
+      updates.push({
+        key: 'VALIDATION_DATE_WINDOW_DAYS',
+        value: dto.validationDateWindowDays.toString(),
+      });
     }
     if (dto.validatorHeartbeatIntervalMs !== undefined) {
-      updates.push({ key: 'VALIDATOR_HEARTBEAT_INTERVAL_MS', value: dto.validatorHeartbeatIntervalMs.toString() });
+      updates.push({
+        key: 'VALIDATOR_HEARTBEAT_INTERVAL_MS',
+        value: dto.validatorHeartbeatIntervalMs.toString(),
+      });
     }
     if (dto.maxChatsPerOperator !== undefined) {
-      updates.push({ key: 'MAX_CHATS_PER_OPERATOR', value: dto.maxChatsPerOperator.toString() });
+      updates.push({
+        key: 'MAX_CHATS_PER_OPERATOR',
+        value: dto.maxChatsPerOperator.toString(),
+      });
     }
     if (dto.autoAssignChats !== undefined) {
-      updates.push({ key: 'AUTO_ASSIGN_CHATS', value: dto.autoAssignChats.toString() });
+      updates.push({
+        key: 'AUTO_ASSIGN_CHATS',
+        value: dto.autoAssignChats.toString(),
+      });
     }
     if (dto.supportPhoneNumber !== undefined) {
-      updates.push({ key: 'SUPPORT_PHONE_NUMBER', value: dto.supportPhoneNumber });
+      updates.push({
+        key: 'SUPPORT_PHONE_NUMBER',
+        value: dto.supportPhoneNumber,
+      });
     }
     if (dto.panelBalanceThreshold !== undefined) {
-      updates.push({ key: 'PANEL_BALANCE_THRESHOLD', value: dto.panelBalanceThreshold.toString() });
+      updates.push({
+        key: 'PANEL_BALANCE_THRESHOLD',
+        value: dto.panelBalanceThreshold.toString(),
+      });
     }
     if (dto.defaultNewUserPanelId !== undefined) {
-      updates.push({ key: 'DEFAULT_NEW_USER_PANEL_ID', value: dto.defaultNewUserPanelId });
+      updates.push({
+        key: 'DEFAULT_NEW_USER_PANEL_ID',
+        value: dto.defaultNewUserPanelId,
+      });
     }
     // Outbound payments
     if (dto.autoPaymentEnabled !== undefined) {
-      updates.push({ key: 'AUTO_PAYMENT_ENABLED', value: dto.autoPaymentEnabled.toString() });
+      updates.push({
+        key: 'AUTO_PAYMENT_ENABLED',
+        value: dto.autoPaymentEnabled.toString(),
+      });
     }
     if (dto.autoPaymentRequiresConfirm !== undefined) {
-      updates.push({ key: 'AUTO_PAYMENT_REQUIRES_CONFIRM', value: dto.autoPaymentRequiresConfirm.toString() });
+      updates.push({
+        key: 'AUTO_PAYMENT_REQUIRES_CONFIRM',
+        value: dto.autoPaymentRequiresConfirm.toString(),
+      });
     }
     if (dto.autoPaymentMaxAmount !== undefined) {
-      updates.push({ key: 'AUTO_PAYMENT_MAX_AMOUNT', value: dto.autoPaymentMaxAmount.toString() });
+      updates.push({
+        key: 'AUTO_PAYMENT_MAX_AMOUNT',
+        value: dto.autoPaymentMaxAmount.toString(),
+      });
     }
     if (dto.outboundPaymentWalletId !== undefined) {
-      updates.push({ key: 'OUTBOUND_PAYMENT_WALLET_ID', value: dto.outboundPaymentWalletId });
+      updates.push({
+        key: 'OUTBOUND_PAYMENT_WALLET_ID',
+        value: dto.outboundPaymentWalletId,
+      });
     }
     // Crypto auto-buy
     if (dto.cryptoAutoBuyEnabled !== undefined) {
-      updates.push({ key: 'CRYPTO_AUTO_BUY_ENABLED', value: dto.cryptoAutoBuyEnabled.toString() });
+      updates.push({
+        key: 'CRYPTO_AUTO_BUY_ENABLED',
+        value: dto.cryptoAutoBuyEnabled.toString(),
+      });
     }
     if (dto.cryptoAutoBuyThreshold !== undefined) {
-      updates.push({ key: 'CRYPTO_AUTO_BUY_THRESHOLD', value: dto.cryptoAutoBuyThreshold.toString() });
+      updates.push({
+        key: 'CRYPTO_AUTO_BUY_THRESHOLD',
+        value: dto.cryptoAutoBuyThreshold.toString(),
+      });
     }
     if (dto.cryptoAutoBuyWalletId !== undefined) {
-      updates.push({ key: 'CRYPTO_AUTO_BUY_WALLET_ID', value: dto.cryptoAutoBuyWalletId });
+      updates.push({
+        key: 'CRYPTO_AUTO_BUY_WALLET_ID',
+        value: dto.cryptoAutoBuyWalletId,
+      });
     }
 
     // Guard: no valid fields to update
     if (updates.length === 0) {
-      this.logger.warn('updateSystemSettings called with no recognized fields — payload may have wrong field names');
-      throw new BadRequestException('No se recibieron campos válidos para actualizar');
+      this.logger.warn(
+        'updateSystemSettings called with no recognized fields — payload may have wrong field names',
+      );
+      throw new BadRequestException(
+        'No se recibieron campos válidos para actualizar',
+      );
     }
 
     // Apply all updates atomically
@@ -347,7 +481,9 @@ export class SettingsService {
       await this.setSetting('KILL_SWITCH_REASON', reason, operatorId);
     }
 
-    this.logger.warn(`KILL SWITCH ACTIVATED by ${operatorId}: ${reason || 'No reason provided'}`);
+    this.logger.warn(
+      `KILL SWITCH ACTIVATED by ${operatorId}: ${reason || 'No reason provided'}`,
+    );
 
     // Audit
     await this.auditService.logSystem(
@@ -368,7 +504,9 @@ export class SettingsService {
     try {
       this.botGateway.broadcastKillSwitch(reason || 'Kill switch activated');
     } catch (err) {
-      this.logger.error(`Failed to broadcast kill switch to bots: ${err.message}`);
+      this.logger.error(
+        `Failed to broadcast kill switch to bots: ${err.message}`,
+      );
     }
   }
 

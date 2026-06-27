@@ -13,7 +13,8 @@ export function sanitizeError(error: any): string {
   // Known Prisma error codes → friendly messages
   if (error?.code === 'P2025') return 'Registro no encontrado';
   if (error?.code === 'P2002') return 'Registro duplicado';
-  if (error?.code === 'P2034') return 'Operación en conflicto, intentá de nuevo';
+  if (error?.code === 'P2034')
+    return 'Operación en conflicto, intentá de nuevo';
 
   // Known NestJS HTTP exceptions → pass through their message
   if (

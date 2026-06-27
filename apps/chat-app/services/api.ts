@@ -496,6 +496,22 @@ export const authApi = {
     });
     return response.data;
   },
+
+  /**
+   * Cambia el nombre de usuario del panel del juego (usado cuando la creación
+   * automática falló porque el nombre ya estaba tomado por otro jugador).
+   * El backend resetea el panelId y reintenta el último request FAILED.
+   */
+  changeSavedTargetUsername: async (savedTargetUsername: string): Promise<{
+    success: boolean;
+    savedTargetUsername: string;
+    retriedRequestId: string | null;
+  }> => {
+    const response = await api.post('/users/me/saved-target-username', {
+      savedTargetUsername,
+    });
+    return response.data;
+  },
 };
 
 // =============================================================================
@@ -544,6 +560,19 @@ export const requestsApi = {
    */
   getOne: async (id: string): Promise<Request> => {
     const response = await api.get<Request>(`/requests/${id}`);
+    return {
+      ...response.data,
+      amount: parseAmount(response.data.amount),
+    };
+  },
+
+  /**
+   * Última carga del usuario — la activa o, si no hay, la última terminal de las últimas 6h.
+   * Pareja del endpoint /prize-claims/me/active. Lo usa el home para mostrar el estado.
+   */
+  getMyActive: async (): Promise<Request | null> => {
+    const response = await api.get<Request | null>('/requests/me/active');
+    if (!response.data) return null;
     return {
       ...response.data,
       amount: parseAmount(response.data.amount),

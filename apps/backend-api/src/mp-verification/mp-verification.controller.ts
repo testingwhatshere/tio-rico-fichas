@@ -72,7 +72,10 @@ export class MpVerificationController {
     @Headers('x-wallet-id') walletId: string,
     @Body() body: { walletLabel?: string },
   ) {
-    return this.mpVerificationService.handleSessionExpired(walletId, body?.walletLabel);
+    return this.mpVerificationService.handleSessionExpired(
+      walletId,
+      body?.walletLabel,
+    );
   }
 
   @Post('balance')
@@ -83,7 +86,10 @@ export class MpVerificationController {
     if (!walletId) {
       throw new BadRequestException('x-wallet-id header is required');
     }
-    return this.mpVerificationService.updateWalletBalance(walletId, body.balance);
+    return this.mpVerificationService.updateWalletBalance(
+      walletId,
+      body.balance,
+    );
   }
 
   @Post('transfers')
@@ -91,7 +97,10 @@ export class MpVerificationController {
     @Headers('x-wallet-id') walletId: string,
     @Body() body: { transfers: any[] },
   ) {
-    return this.mpVerificationService.reportIncomingTransfers(walletId, body.transfers);
+    return this.mpVerificationService.reportIncomingTransfers(
+      walletId,
+      body.transfers,
+    );
   }
 
   @Post('screenshot')
@@ -101,9 +110,14 @@ export class MpVerificationController {
     @Body('requestId') requestId: string,
   ) {
     if (!file || !requestId) {
-      throw new BadRequestException('screenshot file and requestId are required');
+      throw new BadRequestException(
+        'screenshot file and requestId are required',
+      );
     }
-    const url = await this.mpVerificationService.saveVerificationScreenshot(requestId, file.buffer);
+    const url = await this.mpVerificationService.saveVerificationScreenshot(
+      requestId,
+      file.buffer,
+    );
     return { url };
   }
 

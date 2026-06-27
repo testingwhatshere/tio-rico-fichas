@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { OutboundPaymentsService } from './outbound-payments.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -69,10 +62,7 @@ export class OutboundPaymentsController {
 
   @Post(':id/retry')
   @Roles('SENIOR_OPERATOR', 'ADMIN')
-  async retry(
-    @Param('id') id: string,
-    @CurrentUser() user: { sub: string },
-  ) {
+  async retry(@Param('id') id: string, @CurrentUser() user: { sub: string }) {
     return this.service.retry(id, user.sub);
   }
 

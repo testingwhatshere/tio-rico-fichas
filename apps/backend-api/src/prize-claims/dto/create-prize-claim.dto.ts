@@ -1,4 +1,11 @@
-import { IsNumber, IsString, IsOptional, Min, IsIn, IsObject } from 'class-validator';
+import {
+  IsNumber,
+  IsString,
+  IsOptional,
+  Min,
+  IsIn,
+  IsObject,
+} from 'class-validator';
 
 export class CreatePrizeClaimDto {
   @IsNumber()

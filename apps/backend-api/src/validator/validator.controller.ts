@@ -108,7 +108,9 @@ export class ValidatorController {
       return { success: true, count: 0 };
     }
 
-    this.logger.debug(`[Validator] Receiving batch of ${body.logs.length} logs`);
+    this.logger.debug(
+      `[Validator] Receiving batch of ${body.logs.length} logs`,
+    );
 
     try {
       await this.prisma.validatorLog.createMany({
@@ -134,9 +136,7 @@ export class ValidatorController {
    */
   @Public()
   @Get('logs')
-  async getLogs(
-    @Headers('x-validator-api-key') apiKey: string,
-  ) {
+  async getLogs(@Headers('x-validator-api-key') apiKey: string) {
     this.validateApiKey(apiKey);
 
     try {

@@ -11,6 +11,19 @@ function invokeWithTimeout(channel, ...args) {
   ]);
 }
 
+// Longer timeout for operator-critical actions whose backend handlers have their own 60s race
+// (approve-failure, reject-failure). Using the shorter generic timeout caused the UI to show
+// "timed out" while the backend was still working, leaving the operator confused.
+const IPC_TIMEOUT_LONG_MS = 65000;
+function invokeWithLongTimeout(channel, ...args) {
+  return Promise.race([
+    ipcRenderer.invoke(channel, ...args),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`IPC call "${channel}" timed out after ${IPC_TIMEOUT_LONG_MS / 1000}s`)), IPC_TIMEOUT_LONG_MS)
+    ),
+  ]);
+}
+
 // Expose protected methods to renderer
 contextBridge.exposeInMainWorld('api', {
   // State
@@ -29,8 +42,8 @@ contextBridge.exposeInMainWorld('api', {
   saveQuickReplies: (replies) => ipcRenderer.invoke('save-quick-replies', replies),
 
   // Failures
-  approveFailure: (failureId, note, approvedAmount) => invokeWithTimeout('approve-failure', { failureId, note, approvedAmount }),
-  rejectFailure: (failureId, reason) => invokeWithTimeout('reject-failure', { failureId, reason }),
+  approveFailure: (failureId, note, approvedAmount) => invokeWithLongTimeout('approve-failure', { failureId, note, approvedAmount }),
+  rejectFailure: (failureId, reason) => invokeWithLongTimeout('reject-failure', { failureId, reason }),
 
   // Chat
   sendMessage: (chatId, content, imageUrl) => invokeWithTimeout('send-message', { chatId, content, imageUrl }),
@@ -39,6 +52,7 @@ contextBridge.exposeInMainWorld('api', {
   getChatMessages: (chatId, cursor) => invokeWithTimeout('get-chat-messages', { chatId, cursor }),
   closeChat: (chatId, reason) => invokeWithTimeout('close-chat', { chatId, reason }),
   sendTyping: (chatId) => ipcRenderer.invoke('send-typing', chatId),
+  getPendingSummary: (chatId) => invokeWithTimeout('get-pending-summary', chatId),
 
   // Jobs
   retryJob: (jobId) => invokeWithTimeout('retry-job', jobId),
@@ -289,9 +303,16 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeAllListeners('messages-read');
   },
 
+  // User panel-game credentials (for support — every read is audited backend-side)
+  getUserPanelInfo: (userId) => ipcRenderer.invoke('get-user-panel-info', userId),
+  setUserTargetUsername: (userId, savedTargetUsername) =>
+    ipcRenderer.invoke('set-user-target-username', userId, savedTargetUsername),
+
   // Prize Claims
   processPrizeClaim: (claimId) => ipcRenderer.invoke('process-prize-claim', claimId),
-  completePrizeClaim: (claimId) => ipcRenderer.invoke('complete-prize-claim', claimId),
+  completePrizeClaim: (claimId, proofUrl, proofType) =>
+    ipcRenderer.invoke('complete-prize-claim', claimId, proofUrl, proofType),
+  pickAndUploadPayoutProof: () => ipcRenderer.invoke('pick-and-upload-payout-proof'),
   rejectPrizeClaim: (claimId, reason) => ipcRenderer.invoke('reject-prize-claim', claimId, reason),
   getPrizeClaims: () => ipcRenderer.invoke('get-prize-claims'),
   confirmOutboundPayment: (paymentId) => ipcRenderer.invoke('confirm-outbound-payment', paymentId),

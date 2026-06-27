@@ -128,7 +128,7 @@ export default function PrizeClaimCard({
       return;
     }
     if (amountNum < 3000) {
-      setError('Mínimo $3.000');
+      setError('El monto mínimo para cobrar es $3.000. No podés cobrar un monto menor.');
       return;
     }
     if (amountNum > MAX_INPUT_AMOUNT) {
@@ -401,7 +401,12 @@ export default function PrizeClaimCard({
       </View>
 
       {/* Error */}
-      {error && <Text style={styles.errorText}>{error}</Text>}
+      {error && (
+        <View style={styles.errorBox}>
+          <Ionicons name="alert-circle" size={18} color={colors.error} style={styles.errorIcon} />
+          <Text style={styles.errorTextBox}>{error}</Text>
+        </View>
+      )}
 
       {/* Submit button */}
       <TouchableOpacity
@@ -611,6 +616,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.error,
     marginBottom: 8,
+  },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(220, 53, 69, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(220, 53, 69, 0.45)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  errorIcon: {
+    marginTop: 1,
+  },
+  errorTextBox: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 19,
+    color: colors.error,
+    fontWeight: '600',
   },
   buttonOuter: {
     borderRadius: 12,

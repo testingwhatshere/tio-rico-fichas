@@ -15,7 +15,11 @@ import { UserRole } from '@prisma/client';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/interfaces/current-user.interface';
-import { CreateUserDto, UpdateUserDto } from './dto';
+import {
+  CreateUserDto,
+  UpdateUserDto,
+  UpdateSavedTargetUsernameDto,
+} from './dto';
 import { UsersService } from './users.service';
 import { BalanceService } from '../balance/balance.service';
 
@@ -28,10 +32,7 @@ export class UsersController {
 
   @Get()
   @Roles(UserRole.ADMIN, UserRole.SENIOR_OPERATOR)
-  async findAll(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-  ) {
+  async findAll(@Query('page') page?: string, @Query('limit') limit?: string) {
     return this.usersService.findAll(
       page ? parseInt(page, 10) : 1,
       limit ? parseInt(limit, 10) : 10,
@@ -42,6 +43,18 @@ export class UsersController {
   @Roles(UserRole.ADMIN, UserRole.SENIOR_OPERATOR)
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.findOne(id);
+  }
+
+  /**
+   * Panel-game credentials for support. OPERATOR-level read; every read audited.
+   */
+  @Get(':id/panel-info')
+  @Roles(UserRole.OPERATOR, UserRole.SENIOR_OPERATOR, UserRole.ADMIN)
+  async getPanelInfo(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.usersService.getPanelInfoForOperator(id, user.sub);
   }
 
   @Post()
@@ -86,10 +99,42 @@ export class UsersController {
   @Post('create-panel-user')
   @Roles(UserRole.ADMIN, UserRole.SENIOR_OPERATOR, UserRole.OPERATOR)
   @HttpCode(HttpStatus.OK)
-  async createPanelUser(
-    @Body() body: { targetUsername: string },
-  ) {
+  async createPanelUser(@Body() body: { targetUsername: string }) {
     return this.usersService.requestCreateUser(body.targetUsername);
+  }
+
+  /**
+   * Client: change own saved gaming-panel username (e.g. after a "username taken"
+   * error). Backend resets the panelId binding and auto-retries the latest FAILED
+   * request — so the chat-app flow continues without the user having to retap.
+   */
+  @Post('me/saved-target-username')
+  @HttpCode(HttpStatus.OK)
+  async updateSavedTargetUsernameSelf(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: UpdateSavedTargetUsernameDto,
+  ) {
+    return this.usersService.changeSavedTargetUsernameWithRetry(
+      user.sub,
+      body.savedTargetUsername,
+    );
+  }
+
+  /**
+   * Operator: change a user's saved gaming-panel username (support flow when the
+   * user can't or won't change it from the app).
+   */
+  @Post(':id/saved-target-username')
+  @Roles(UserRole.OPERATOR, UserRole.SENIOR_OPERATOR, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  async updateSavedTargetUsernameByOperator(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdateSavedTargetUsernameDto,
+  ) {
+    return this.usersService.changeSavedTargetUsernameWithRetry(
+      id,
+      body.savedTargetUsername,
+    );
   }
 
   /**
@@ -165,7 +210,10 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   async bulkImportPreloaded(
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { entries: Array<{ username: string; phone: string; panelId?: string }> },
+    @Body()
+    body: {
+      entries: Array<{ username: string; phone: string; panelId?: string }>;
+    },
   ) {
     return this.usersService.bulkImportPreloaded(body.entries || [], user.sub);
   }

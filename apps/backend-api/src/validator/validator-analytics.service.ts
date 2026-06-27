@@ -20,7 +20,9 @@ export class ValidatorAnalyticsService {
   /**
    * Get comprehensive validation analytics
    */
-  async getValidationAnalytics(days: number = 7): Promise<ValidationAnalyticsDto> {
+  async getValidationAnalytics(
+    days: number = 7,
+  ): Promise<ValidationAnalyticsDto> {
     const toDate = new Date();
     const fromDate = new Date();
     fromDate.setDate(fromDate.getDate() - days);
@@ -134,14 +136,21 @@ export class ValidatorAnalyticsService {
     return Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
   }
 
-  private async getTrends(days: number, fromDate: Date): Promise<ValidationTrendDto[]> {
+  private async getTrends(
+    days: number,
+    fromDate: Date,
+  ): Promise<ValidationTrendDto[]> {
     const trends: ValidationTrendDto[] = [];
     const now = new Date();
 
     for (let i = days - 1; i >= 0; i--) {
       const date = new Date(now);
       date.setDate(date.getDate() - i);
-      const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const startOfDay = new Date(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate(),
+      );
       const endOfDay = new Date(startOfDay);
       endOfDay.setDate(endOfDay.getDate() + 1);
 
@@ -177,7 +186,9 @@ export class ValidatorAnalyticsService {
     return trends;
   }
 
-  private async getTopRejectionReasons(fromDate: Date): Promise<RejectionReasonDto[]> {
+  private async getTopRejectionReasons(
+    fromDate: Date,
+  ): Promise<RejectionReasonDto[]> {
     // Get failed validations with their error messages
     const failedRequests = await this.prisma.request.findMany({
       where: {
@@ -219,7 +230,9 @@ export class ValidatorAnalyticsService {
       .slice(0, 10); // Top 10 reasons
   }
 
-  private async getPaymentMethodBreakdown(fromDate: Date): Promise<PaymentMethodStatsDto[]> {
+  private async getPaymentMethodBreakdown(
+    fromDate: Date,
+  ): Promise<PaymentMethodStatsDto[]> {
     // Get validated requests with payment method info
     const requests = await this.prisma.request.findMany({
       where: {

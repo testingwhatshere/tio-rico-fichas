@@ -35,6 +35,13 @@ describe('JobsService', () => {
       findUnique: jest.Mock;
       update: jest.Mock;
     };
+    user: {
+      findUnique: jest.Mock;
+      update: jest.Mock;
+    };
+    prizeClaim: {
+      findMany: jest.Mock;
+    };
     $transaction: jest.Mock;
   };
   let events: {
@@ -52,6 +59,10 @@ describe('JobsService', () => {
   let botGateway: {
     isAnyBotConnected: jest.Mock;
     pushJobToBot: jest.Mock;
+    getConnectedPanelIds: jest.Mock;
+    isBotConnectedForPanel: jest.Mock;
+    pushJobToPanel: jest.Mock;
+    markPanelIdle: jest.Mock;
   };
   let requestsService: {
     updateRequestStatus: jest.Mock;
@@ -75,6 +86,13 @@ describe('JobsService', () => {
         findUnique: jest.fn(),
         update: jest.fn(),
       },
+      user: {
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
+      prizeClaim: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       $transaction: jest.fn(),
     };
 
@@ -95,6 +113,10 @@ describe('JobsService', () => {
     botGateway = {
       isAnyBotConnected: jest.fn().mockReturnValue(false),
       pushJobToBot: jest.fn().mockReturnValue(true),
+      getConnectedPanelIds: jest.fn().mockReturnValue([]),
+      isBotConnectedForPanel: jest.fn().mockReturnValue(false),
+      pushJobToPanel: jest.fn().mockResolvedValue(true),
+      markPanelIdle: jest.fn(),
     };
 
     requestsService = {
@@ -139,7 +161,11 @@ describe('JobsService', () => {
 
     it('should create a job and emit events on success', async () => {
       prisma.request.findUnique.mockResolvedValue(mockRequest);
-      prisma.job.create.mockResolvedValue({ id: 'job-1', requestId: 'req-1', status: 'QUEUED' });
+      prisma.job.create.mockResolvedValue({
+        id: 'job-1',
+        requestId: 'req-1',
+        status: 'QUEUED',
+      });
 
       // tryDispatchNextJob will be called - set up for "no bot connected" path
       botService.checkKillSwitch.mockResolvedValue({ active: false });
@@ -153,9 +179,18 @@ describe('JobsService', () => {
 
       const result = await service.createJobForRequest('req-1');
 
-      expect(result).toEqual({ id: 'job-1', requestId: 'req-1', status: 'QUEUED' });
+      expect(result).toEqual({
+        id: 'job-1',
+        requestId: 'req-1',
+        status: 'QUEUED',
+      });
       expect(prisma.job.create).toHaveBeenCalledWith({
-        data: { requestId: 'req-1', status: 'QUEUED' },
+        data: expect.objectContaining({
+          requestId: 'req-1',
+          status: 'QUEUED',
+          targetUsername: 'player123',
+          amount: 5000,
+        }),
       });
       expect(events.emitJobQueued).toHaveBeenCalledWith({
         jobId: 'job-1',
@@ -168,13 +203,20 @@ describe('JobsService', () => {
     it('should throw NotFoundException if request does not exist', async () => {
       prisma.request.findUnique.mockResolvedValue(null);
 
-      await expect(service.createJobForRequest('nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.createJobForRequest('nonexistent')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw BadRequestException if request is not APPROVED', async () => {
-      prisma.request.findUnique.mockResolvedValue({ id: 'req-1', status: 'PENDING_PROOF' });
+      prisma.request.findUnique.mockResolvedValue({
+        id: 'req-1',
+        status: 'PENDING_PROOF',
+      });
 
-      await expect(service.createJobForRequest('req-1')).rejects.toThrow(BadRequestException);
+      await expect(service.createJobForRequest('req-1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should return existing job on P2002 unique constraint violation', async () => {
@@ -183,13 +225,19 @@ describe('JobsService', () => {
       uniqueError.code = 'P2002';
       prisma.job.create.mockRejectedValue(uniqueError);
 
-      const existingJob = { id: 'job-existing', requestId: 'req-1', status: 'QUEUED' };
+      const existingJob = {
+        id: 'job-existing',
+        requestId: 'req-1',
+        status: 'QUEUED',
+      };
       prisma.job.findUnique.mockResolvedValue(existingJob);
 
       const result = await service.createJobForRequest('req-1');
 
       expect(result).toEqual(existingJob);
-      expect(prisma.job.findUnique).toHaveBeenCalledWith({ where: { requestId: 'req-1' } });
+      expect(prisma.job.findUnique).toHaveBeenCalledWith({
+        where: { requestId: 'req-1' },
+      });
     });
 
     it('should rethrow non-P2002 errors from job creation', async () => {
@@ -198,19 +246,32 @@ describe('JobsService', () => {
       dbError.code = 'P1001';
       prisma.job.create.mockRejectedValue(dbError);
 
-      await expect(service.createJobForRequest('req-1')).rejects.toThrow('Database connection lost');
+      await expect(service.createJobForRequest('req-1')).rejects.toThrow(
+        'Database connection lost',
+      );
     });
 
     it('should emit dispatch blocked when dispatch fails after job creation', async () => {
       prisma.request.findUnique.mockResolvedValue(mockRequest);
-      prisma.job.create.mockResolvedValue({ id: 'job-1', requestId: 'req-1', status: 'QUEUED' });
+      prisma.job.create.mockResolvedValue({
+        id: 'job-1',
+        requestId: 'req-1',
+        status: 'QUEUED',
+      });
 
       // Kill switch active blocks dispatch
-      botService.checkKillSwitch.mockResolvedValue({ active: true, reason: 'Maintenance' });
+      botService.checkKillSwitch.mockResolvedValue({
+        active: true,
+        reason: 'Maintenance',
+      });
 
       const result = await service.createJobForRequest('req-1');
 
-      expect(result).toEqual({ id: 'job-1', requestId: 'req-1', status: 'QUEUED' });
+      expect(result).toEqual({
+        id: 'job-1',
+        requestId: 'req-1',
+        status: 'QUEUED',
+      });
       expect(events.emitDispatchBlocked).toHaveBeenCalledWith({
         jobId: 'job-1',
         reason: 'Kill switch active: Maintenance',
@@ -222,7 +283,10 @@ describe('JobsService', () => {
 
   describe('tryDispatchNextJob', () => {
     it('should block dispatch when kill switch is active', async () => {
-      botService.checkKillSwitch.mockResolvedValue({ active: true, reason: 'Emergency' });
+      botService.checkKillSwitch.mockResolvedValue({
+        active: true,
+        reason: 'Emergency',
+      });
 
       const result = await service.tryDispatchNextJob();
 
@@ -232,7 +296,10 @@ describe('JobsService', () => {
 
     it('should block dispatch outside activity window', async () => {
       botService.checkKillSwitch.mockResolvedValue({ active: false });
-      botService.checkActivityWindow.mockResolvedValue({ allowed: false, reason: 'Off hours' });
+      botService.checkActivityWindow.mockResolvedValue({
+        allowed: false,
+        reason: 'Off hours',
+      });
 
       const result = await service.tryDispatchNextJob();
 
@@ -243,8 +310,9 @@ describe('JobsService', () => {
     it('should block dispatch when cooldown is active', async () => {
       botService.checkKillSwitch.mockResolvedValue({ active: false });
       botService.checkActivityWindow.mockResolvedValue({ allowed: true });
-      // isCooldownActive: return a recently completed job
-      prisma.job.findFirst.mockResolvedValueOnce({
+      botGateway.getConnectedPanelIds.mockReturnValue(['panel-1']);
+      // isCooldownActive: return a recently completed job (for every panel checked)
+      prisma.job.findFirst.mockResolvedValue({
         status: 'COMPLETED',
         completedAt: new Date(Date.now() - 5000), // 5 seconds ago, within 30s cooldown
       });
@@ -258,10 +326,11 @@ describe('JobsService', () => {
     it('should dispatch successfully when bot is connected', async () => {
       botService.checkKillSwitch.mockResolvedValue({ active: false });
       botService.checkActivityWindow.mockResolvedValue({ allowed: true });
+      botGateway.getConnectedPanelIds.mockReturnValue(['panel-1']);
       // isCooldownActive: no completed jobs
-      prisma.job.findFirst.mockResolvedValueOnce(null);
+      prisma.job.findFirst.mockResolvedValue(null);
 
-      // Transaction claims a job
+      // Transaction claims a job (no panelId → legacy push path)
       const claimedJob = {
         id: 'job-1',
         requestId: 'req-1',
@@ -279,10 +348,22 @@ describe('JobsService', () => {
       expect(botGateway.pushJobToBot).toHaveBeenCalledWith(claimedJob);
     });
 
+    it('should report no bots connected when no panel has a bot', async () => {
+      botService.checkKillSwitch.mockResolvedValue({ active: false });
+      botService.checkActivityWindow.mockResolvedValue({ allowed: true });
+      botGateway.getConnectedPanelIds.mockReturnValue([]);
+
+      const result = await service.tryDispatchNextJob();
+
+      expect(result.dispatched).toBe(false);
+      expect(result.reason).toBe('No bots connected');
+    });
+
     it('should revert job to QUEUED when no bot is connected', async () => {
       botService.checkKillSwitch.mockResolvedValue({ active: false });
       botService.checkActivityWindow.mockResolvedValue({ allowed: true });
-      prisma.job.findFirst.mockResolvedValueOnce(null); // cooldown check
+      botGateway.getConnectedPanelIds.mockReturnValue(['panel-1']);
+      prisma.job.findFirst.mockResolvedValue(null); // cooldown check
 
       const claimedJob = {
         id: 'job-1',
@@ -296,17 +377,18 @@ describe('JobsService', () => {
       const result = await service.tryDispatchNextJob();
 
       expect(result.dispatched).toBe(false);
-      expect(result.reason).toContain('No bot connected');
+      expect(result.reason).toContain('Bot unavailable');
       expect(prisma.job.update).toHaveBeenCalledWith({
         where: { id: 'job-1' },
-        data: { status: 'QUEUED' },
+        data: { status: 'QUEUED', startedAt: null },
       });
     });
 
     it('should handle serialization conflict (P2034) gracefully', async () => {
       botService.checkKillSwitch.mockResolvedValue({ active: false });
       botService.checkActivityWindow.mockResolvedValue({ allowed: true });
-      prisma.job.findFirst.mockResolvedValueOnce(null); // cooldown check
+      botGateway.getConnectedPanelIds.mockReturnValue(['panel-1']);
+      prisma.job.findFirst.mockResolvedValue(null); // cooldown check
 
       const serializationError = new Error('Serialization failure') as any;
       serializationError.code = 'P2034';
@@ -321,45 +403,36 @@ describe('JobsService', () => {
     it('should rethrow non-serialization transaction errors', async () => {
       botService.checkKillSwitch.mockResolvedValue({ active: false });
       botService.checkActivityWindow.mockResolvedValue({ allowed: true });
-      prisma.job.findFirst.mockResolvedValueOnce(null); // cooldown check
+      botGateway.getConnectedPanelIds.mockReturnValue(['panel-1']);
+      prisma.job.findFirst.mockResolvedValue(null); // cooldown check
 
       prisma.$transaction.mockRejectedValue(new Error('Connection lost'));
 
-      await expect(service.tryDispatchNextJob()).rejects.toThrow('Connection lost');
+      await expect(service.tryDispatchNextJob()).rejects.toThrow(
+        'Connection lost',
+      );
     });
 
-    it('should report "Another job is already processing" when transaction returns null and active job exists', async () => {
+    it('should report no dispatchable jobs when the queue is empty or busy', async () => {
       botService.checkKillSwitch.mockResolvedValue({ active: false });
       botService.checkActivityWindow.mockResolvedValue({ allowed: true });
-      prisma.job.findFirst
-        .mockResolvedValueOnce(null) // cooldown check (no completed job)
-        .mockResolvedValueOnce({ id: 'active-job', status: 'PROCESSING' }); // hasActiveJob check
+      botGateway.getConnectedPanelIds.mockReturnValue(['panel-1']);
+      prisma.job.findFirst.mockResolvedValue(null); // cooldown check
+      // Transaction returns null both when another job is PROCESSING and when
+      // there is nothing QUEUED for the panel.
       prisma.$transaction.mockResolvedValue(null);
 
       const result = await service.tryDispatchNextJob();
 
       expect(result.dispatched).toBe(false);
-      expect(result.reason).toBe('Another job is already processing');
-    });
-
-    it('should report "No jobs in queue" when transaction returns null and no active job', async () => {
-      botService.checkKillSwitch.mockResolvedValue({ active: false });
-      botService.checkActivityWindow.mockResolvedValue({ allowed: true });
-      prisma.job.findFirst
-        .mockResolvedValueOnce(null) // cooldown check
-        .mockResolvedValueOnce(null); // hasActiveJob check
-      prisma.$transaction.mockResolvedValue(null);
-
-      const result = await service.tryDispatchNextJob();
-
-      expect(result.dispatched).toBe(false);
-      expect(result.reason).toBe('No jobs in queue');
+      expect(result.reason).toContain('No dispatchable jobs');
     });
 
     it('should revert job when bot is connected but pushJobToBot fails', async () => {
       botService.checkKillSwitch.mockResolvedValue({ active: false });
       botService.checkActivityWindow.mockResolvedValue({ allowed: true });
-      prisma.job.findFirst.mockResolvedValueOnce(null);
+      botGateway.getConnectedPanelIds.mockReturnValue(['panel-1']);
+      prisma.job.findFirst.mockResolvedValue(null);
 
       const claimedJob = {
         id: 'job-1',
@@ -369,14 +442,14 @@ describe('JobsService', () => {
       };
       prisma.$transaction.mockResolvedValue(claimedJob);
       botGateway.isAnyBotConnected.mockReturnValue(true);
-      botGateway.pushJobToBot.mockReturnValue(false); // push failed
+      botGateway.pushJobToBot.mockReturnValue(false); // push failed (no ACK or rejected)
 
       const result = await service.tryDispatchNextJob();
 
       expect(result.dispatched).toBe(false);
       expect(prisma.job.update).toHaveBeenCalledWith({
         where: { id: 'job-1' },
-        data: { status: 'QUEUED' },
+        data: { status: 'QUEUED', startedAt: null },
       });
     });
   });
@@ -412,7 +485,10 @@ describe('JobsService', () => {
       prisma.job.findMany.mockResolvedValue([stuckJob]);
 
       // After cleanup, tryDispatchNextJob is called - block it with kill switch
-      botService.checkKillSwitch.mockResolvedValue({ active: true, reason: 'test' });
+      botService.checkKillSwitch.mockResolvedValue({
+        active: true,
+        reason: 'test',
+      });
 
       await callCheckForStuckJobs(service);
 
@@ -435,14 +511,19 @@ describe('JobsService', () => {
       );
 
       // Events emitted
-      expect(events.emitJobFailed).toHaveBeenCalledWith('user-1', expect.objectContaining({
-        jobId: 'stuck-1',
-        requestId: 'req-1',
-      }));
-      expect(events.emitSystemAlert).toHaveBeenCalledWith(expect.objectContaining({
-        type: 'STUCK_JOB_CLEANED',
-        severity: 'warning',
-      }));
+      expect(events.emitJobFailed).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({
+          jobId: 'stuck-1',
+          requestId: 'req-1',
+        }),
+      );
+      expect(events.emitSystemAlert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'STUCK_JOB_CLEANED',
+          severity: 'warning',
+        }),
+      );
       expect(events.emitDashboardUpdate).toHaveBeenCalled();
     });
 
@@ -453,14 +534,24 @@ describe('JobsService', () => {
           requestId: 'req-1',
           status: 'PROCESSING',
           startedAt: new Date(Date.now() - 10 * 60 * 1000),
-          request: { id: 'req-1', targetUsername: 'p1', amount: 1000, userId: 'u1' },
+          request: {
+            id: 'req-1',
+            targetUsername: 'p1',
+            amount: 1000,
+            userId: 'u1',
+          },
         },
         {
           id: 'stuck-2',
           requestId: 'req-2',
           status: 'PROCESSING',
           startedAt: new Date(Date.now() - 10 * 60 * 1000),
-          request: { id: 'req-2', targetUsername: 'p2', amount: 2000, userId: 'u2' },
+          request: {
+            id: 'req-2',
+            targetUsername: 'p2',
+            amount: 2000,
+            userId: 'u2',
+          },
         },
       ];
       prisma.job.findMany.mockResolvedValue(stuckJobs);
@@ -470,7 +561,10 @@ describe('JobsService', () => {
         .mockRejectedValueOnce(new Error('DB error'))
         .mockResolvedValueOnce({});
 
-      botService.checkKillSwitch.mockResolvedValue({ active: true, reason: 'test' });
+      botService.checkKillSwitch.mockResolvedValue({
+        active: true,
+        reason: 'test',
+      });
 
       await callCheckForStuckJobs(service);
 
@@ -486,13 +580,23 @@ describe('JobsService', () => {
         requestId: 'req-1',
         status: 'PROCESSING',
         startedAt: new Date(Date.now() - 10 * 60 * 1000),
-        request: { id: 'req-1', targetUsername: 'p1', amount: 1000, userId: 'u1' },
+        request: {
+          id: 'req-1',
+          targetUsername: 'p1',
+          amount: 1000,
+          userId: 'u1',
+        },
       };
       prisma.job.findMany.mockResolvedValue([stuckJob]);
       prisma.job.update.mockResolvedValue({});
-      requestsService.updateRequestStatus.mockRejectedValue(new Error('Request update failed'));
+      requestsService.updateRequestStatus.mockRejectedValue(
+        new Error('Request update failed'),
+      );
 
-      botService.checkKillSwitch.mockResolvedValue({ active: true, reason: 'test' });
+      botService.checkKillSwitch.mockResolvedValue({
+        active: true,
+        reason: 'test',
+      });
 
       // Should not throw - error is caught internally
       await callCheckForStuckJobs(service);
@@ -541,7 +645,10 @@ describe('JobsService', () => {
 
   describe('hasActiveJob', () => {
     it('should return true when a PROCESSING job exists', async () => {
-      prisma.job.findFirst.mockResolvedValue({ id: 'job-1', status: 'PROCESSING' });
+      prisma.job.findFirst.mockResolvedValue({
+        id: 'job-1',
+        status: 'PROCESSING',
+      });
 
       expect(await service.hasActiveJob()).toBe(true);
     });
@@ -557,7 +664,10 @@ describe('JobsService', () => {
 
   describe('findOne', () => {
     it('should return job with included request', async () => {
-      const mockJob = { id: 'job-1', request: { user: { id: 'u1', email: 'a@b.com' } } };
+      const mockJob = {
+        id: 'job-1',
+        request: { user: { id: 'u1', email: 'a@b.com' } },
+      };
       prisma.job.findUnique.mockResolvedValue(mockJob);
 
       const result = await service.findOne('job-1');
@@ -568,7 +678,9 @@ describe('JobsService', () => {
     it('should throw NotFoundException when job does not exist', async () => {
       prisma.job.findUnique.mockResolvedValue(null);
 
-      await expect(service.findOne('nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('nonexistent')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -600,7 +712,11 @@ describe('JobsService', () => {
 
   describe('cancelJob', () => {
     it('should cancel a QUEUED job and revert request', async () => {
-      prisma.job.findUnique.mockResolvedValue({ id: 'job-1', status: 'QUEUED', requestId: 'req-1' });
+      prisma.job.findUnique.mockResolvedValue({
+        id: 'job-1',
+        status: 'QUEUED',
+        requestId: 'req-1',
+      });
       prisma.$transaction.mockResolvedValue([]);
 
       const result = await service.cancelJob('job-1');
@@ -613,13 +729,20 @@ describe('JobsService', () => {
     it('should throw NotFoundException for nonexistent job', async () => {
       prisma.job.findUnique.mockResolvedValue(null);
 
-      await expect(service.cancelJob('nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.cancelJob('nonexistent')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw BadRequestException for non-QUEUED job', async () => {
-      prisma.job.findUnique.mockResolvedValue({ id: 'job-1', status: 'PROCESSING' });
+      prisma.job.findUnique.mockResolvedValue({
+        id: 'job-1',
+        status: 'PROCESSING',
+      });
 
-      await expect(service.cancelJob('job-1')).rejects.toThrow(BadRequestException);
+      await expect(service.cancelJob('job-1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -627,26 +750,41 @@ describe('JobsService', () => {
 
   describe('assignOperator', () => {
     it('should assign operator to a FAILED job', async () => {
-      prisma.job.findUnique.mockResolvedValue({ id: 'job-1', status: 'FAILED', request: {} });
+      prisma.job.findUnique.mockResolvedValue({
+        id: 'job-1',
+        status: 'FAILED',
+        request: {},
+      });
       const updatedJob = { id: 'job-1', assignedOperatorId: 'op-1' };
       prisma.job.update.mockResolvedValue(updatedJob);
 
       const result = await service.assignOperator('job-1', 'op-1');
 
       expect(result).toEqual(updatedJob);
-      expect(events.emitToOperators).toHaveBeenCalledWith('job:assigned', { jobId: 'job-1', operatorId: 'op-1' });
+      expect(events.emitToOperators).toHaveBeenCalledWith('job:assigned', {
+        jobId: 'job-1',
+        operatorId: 'op-1',
+      });
     });
 
     it('should throw NotFoundException for nonexistent job', async () => {
       prisma.job.findUnique.mockResolvedValue(null);
 
-      await expect(service.assignOperator('nonexistent', 'op-1')).rejects.toThrow(NotFoundException);
+      await expect(
+        service.assignOperator('nonexistent', 'op-1'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('should throw BadRequestException for non-FAILED job', async () => {
-      prisma.job.findUnique.mockResolvedValue({ id: 'job-1', status: 'COMPLETED', request: {} });
+      prisma.job.findUnique.mockResolvedValue({
+        id: 'job-1',
+        status: 'COMPLETED',
+        request: {},
+      });
 
-      await expect(service.assignOperator('job-1', 'op-1')).rejects.toThrow(BadRequestException);
+      await expect(service.assignOperator('job-1', 'op-1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -654,7 +792,10 @@ describe('JobsService', () => {
 
   describe('onJobCompleted', () => {
     it('should schedule next dispatch after cooldown', async () => {
-      botService.checkKillSwitch.mockResolvedValue({ active: true, reason: 'test' });
+      botService.checkKillSwitch.mockResolvedValue({
+        active: true,
+        reason: 'test',
+      });
 
       await service.onJobCompleted('job-1');
 
@@ -676,7 +817,10 @@ describe('JobsService', () => {
 
   describe('onBotConnected', () => {
     it('should attempt to dispatch queued jobs', async () => {
-      botService.checkKillSwitch.mockResolvedValue({ active: true, reason: 'test' });
+      botService.checkKillSwitch.mockResolvedValue({
+        active: true,
+        reason: 'test',
+      });
 
       await service.onBotConnected();
 
@@ -689,10 +833,10 @@ describe('JobsService', () => {
   describe('getStats', () => {
     it('should return aggregated job statistics', async () => {
       prisma.job.count
-        .mockResolvedValueOnce(2)   // queued
-        .mockResolvedValueOnce(1)   // processing
-        .mockResolvedValueOnce(50)  // completed
-        .mockResolvedValueOnce(5)   // failed
+        .mockResolvedValueOnce(2) // queued
+        .mockResolvedValueOnce(1) // processing
+        .mockResolvedValueOnce(50) // completed
+        .mockResolvedValueOnce(5) // failed
         .mockResolvedValueOnce(10); // todayCompleted
 
       prisma.job.findMany.mockResolvedValue([
@@ -727,8 +871,8 @@ describe('JobsService', () => {
   describe('getQueueInfo', () => {
     it('should return queue counts and cooldown status', async () => {
       prisma.job.count
-        .mockResolvedValueOnce(3)   // waiting
-        .mockResolvedValueOnce(1)   // active
+        .mockResolvedValueOnce(3) // waiting
+        .mockResolvedValueOnce(1) // active
         .mockResolvedValueOnce(100) // completed
         .mockResolvedValueOnce(10); // failed
 
@@ -753,13 +897,21 @@ describe('JobsService', () => {
     it('should throw NotFoundException for nonexistent job', async () => {
       prisma.job.findUnique.mockResolvedValue(null);
 
-      await expect(service.retryJob('nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.retryJob('nonexistent')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw BadRequestException for non-FAILED job', async () => {
-      prisma.job.findUnique.mockResolvedValue({ id: 'job-1', status: 'QUEUED', request: {} });
+      prisma.job.findUnique.mockResolvedValue({
+        id: 'job-1',
+        status: 'QUEUED',
+        request: {},
+      });
 
-      await expect(service.retryJob('job-1')).rejects.toThrow(BadRequestException);
+      await expect(service.retryJob('job-1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -774,22 +926,38 @@ describe('JobsService', () => {
         amount: 5000,
       };
       prisma.request.findUnique.mockResolvedValue(mockRequest);
-      prisma.job.create.mockResolvedValue({ id: 'job-1', requestId: 'req-1', status: 'QUEUED' });
+      prisma.job.create.mockResolvedValue({
+        id: 'job-1',
+        requestId: 'req-1',
+        status: 'QUEUED',
+      });
 
       // tryDispatchNextJob blocked by kill switch for simplicity
-      botService.checkKillSwitch.mockResolvedValue({ active: true, reason: 'test' });
+      botService.checkKillSwitch.mockResolvedValue({
+        active: true,
+        reason: 'test',
+      });
 
-      await service.handleValidationCompleted({ requestId: 'req-1', score: 0.95 });
+      await service.handleValidationCompleted({
+        requestId: 'req-1',
+        score: 0.95,
+      });
 
       expect(prisma.job.create).toHaveBeenCalledWith({
-        data: { requestId: 'req-1', status: 'QUEUED' },
+        data: expect.objectContaining({
+          requestId: 'req-1',
+          status: 'QUEUED',
+        }),
       });
     });
 
     it('should emit system alert to operators when job creation fails', async () => {
       prisma.request.findUnique.mockResolvedValue(null); // triggers NotFoundException
 
-      await service.handleValidationCompleted({ requestId: 'req-1', score: 0.95 });
+      await service.handleValidationCompleted({
+        requestId: 'req-1',
+        score: 0.95,
+      });
 
       expect(events.emitToOperators).toHaveBeenCalledWith('system:alert', {
         type: 'JOB_CREATION_FAILED',

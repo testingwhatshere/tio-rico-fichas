@@ -1,4 +1,10 @@
-import { IsString, IsOptional, MinLength, MaxLength, Matches } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  MinLength,
+  MaxLength,
+  Matches,
+} from 'class-validator';
 
 /**
  * DTO for client-only authentication (username + phone).
@@ -11,10 +17,15 @@ import { IsString, IsOptional, MinLength, MaxLength, Matches } from 'class-valid
  */
 export class ClientAuthDto {
   @IsString()
-  @MinLength(3, { message: 'El nombre de usuario debe tener al menos 3 caracteres' })
-  @MaxLength(30, { message: 'El nombre de usuario debe tener máximo 30 caracteres' })
+  @MinLength(3, {
+    message: 'El nombre de usuario debe tener al menos 3 caracteres',
+  })
+  @MaxLength(30, {
+    message: 'El nombre de usuario debe tener máximo 30 caracteres',
+  })
   @Matches(/^[a-zA-Z][a-zA-Z0-9_]*$/, {
-    message: 'El nombre de usuario debe comenzar con una letra y solo contener letras, números y guiones bajos',
+    message:
+      'El nombre de usuario debe comenzar con una letra y solo contener letras, números y guiones bajos',
   })
   username: string;
 

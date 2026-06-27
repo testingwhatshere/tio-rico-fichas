@@ -19,7 +19,10 @@ import { PaymentsService } from '../payments/payments.service';
 import { MessagesService } from '../messages/messages.service';
 import { LoggingService } from '../logging/logging.service';
 import { AppEvent } from '../common/events/app-events';
-import type { MpVerificationNeededEvent, ValidationCompletedEvent } from '../common/events/app-events';
+import type {
+  MpVerificationNeededEvent,
+  ValidationCompletedEvent,
+} from '../common/events/app-events';
 import {
   MpVerificationConfirmDto,
   MpUnmatchedTransferDto,
@@ -89,13 +92,17 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
       this.scheduleDailyReport();
     }, msUntil);
 
-    this.logger.log(`Daily report scheduled in ${Math.round(msUntil / 60000)} minutes`);
+    this.logger.log(
+      `Daily report scheduled in ${Math.round(msUntil / 60000)} minutes`,
+    );
   }
 
   /**
    * Get requests pending MP verification for a specific wallet
    */
-  async getPendingForWallet(walletId: string): Promise<PendingVerificationResponseDto[]> {
+  async getPendingForWallet(
+    walletId: string,
+  ): Promise<PendingVerificationResponseDto[]> {
     const requests = await this.prisma.request.findMany({
       where: {
         status: 'PENDING_MP_VERIFICATION',
@@ -184,7 +191,8 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
           where: { id: dto.requestId },
           data: {
             status: 'VALIDATION_FAILED',
-            validationError: 'Discrepancia de monto: el monto real en MP no coincide con el comprobante subido.',
+            validationError:
+              'Discrepancia de monto: el monto real en MP no coincide con el comprobante subido.',
           },
         });
         this.operatorGateway.emitToAll('validation_failed', {
@@ -211,56 +219,58 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
     const now = new Date();
 
     // 4. Create MpVerification record + update request in a transaction
-    const [mpVerification, updatedRequest] = await this.prisma.$transaction(async (tx) => {
-      const verification = await tx.mpVerification.create({
-        data: {
-          walletId,
-          operationNumber: dto.operationNumber,
-          senderName: dto.senderName,
-          senderBank: dto.senderBank,
-          senderCbu: dto.senderCbu,
-          senderCuit: dto.senderCuit,
-          amount: dto.amount,
-          transactionDate: new Date(dto.transactionDate),
-          transactionTime: dto.transactionTime,
-          identificationCode: dto.identificationCode,
-          channel: dto.channel,
-          mpActivityUrl: dto.mpActivityUrl,
-          status: dto.status,
-          requestId: dto.requestId,
-          matchedAt: now,
-        },
-      });
-
-      const updated = await tx.request.update({
-        where: { id: dto.requestId },
-        data: {
-          status: 'APPROVED',
-          mpVerified: true,
-          mpOperationNumber: dto.operationNumber,
-          mpVerifiedAt: now,
-          mpVerifiedByWalletId: walletId,
-          approvedAt: now,
-        },
-      });
-
-      await tx.requestStatusHistory.create({
-        data: {
-          requestId: dto.requestId,
-          status: 'APPROVED',
-          changedBy: 'mp-verifier',
-          metadata: {
-            mpVerification: true,
+    const [mpVerification, updatedRequest] = await this.prisma.$transaction(
+      async (tx) => {
+        const verification = await tx.mpVerification.create({
+          data: {
+            walletId,
             operationNumber: dto.operationNumber,
             senderName: dto.senderName,
+            senderBank: dto.senderBank,
+            senderCbu: dto.senderCbu,
+            senderCuit: dto.senderCuit,
             amount: dto.amount,
-            walletId,
+            transactionDate: new Date(dto.transactionDate),
+            transactionTime: dto.transactionTime,
+            identificationCode: dto.identificationCode,
+            channel: dto.channel,
+            mpActivityUrl: dto.mpActivityUrl,
+            status: dto.status,
+            requestId: dto.requestId,
+            matchedAt: now,
           },
-        },
-      });
+        });
 
-      return [verification, updated];
-    });
+        const updated = await tx.request.update({
+          where: { id: dto.requestId },
+          data: {
+            status: 'APPROVED',
+            mpVerified: true,
+            mpOperationNumber: dto.operationNumber,
+            mpVerifiedAt: now,
+            mpVerifiedByWalletId: walletId,
+            approvedAt: now,
+          },
+        });
+
+        await tx.requestStatusHistory.create({
+          data: {
+            requestId: dto.requestId,
+            status: 'APPROVED',
+            changedBy: 'mp-verifier',
+            metadata: {
+              mpVerification: true,
+              operationNumber: dto.operationNumber,
+              senderName: dto.senderName,
+              amount: dto.amount,
+              walletId,
+            },
+          },
+        });
+
+        return [verification, updated];
+      },
+    );
 
     this.logger.log(
       `MP verification confirmed for request ${dto.requestId} — operation #${dto.operationNumber}`,
@@ -278,14 +288,19 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
     this.eventsGateway.emitDashboardUpdate();
 
     // 6. Wallet accumulation (was deferred from setValidationResult)
-    this.paymentsService.accumulateAndCheckRotation(walletId, Number(updatedRequest.amount))
+    this.paymentsService
+      .accumulateAndCheckRotation(walletId, Number(updatedRequest.amount))
       .then((result) => {
         if (result?.rotated) {
-          this.logger.log(`Wallet rotated after MP verification for request ${dto.requestId}`);
+          this.logger.log(
+            `Wallet rotated after MP verification for request ${dto.requestId}`,
+          );
         }
       })
       .catch((err) => {
-        this.logger.error(`Wallet accumulation failed after MP verification: ${err.message}`);
+        this.logger.error(
+          `Wallet accumulation failed after MP verification: ${err.message}`,
+        );
       });
 
     // 7. Feature 2: Check reconciliation flags and alert if mismatches
@@ -294,12 +309,14 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `Reconciliation flags for request ${dto.requestId}: ${reconciliation.flags.join(', ')}`,
       );
-      this.telegramService.alertReconciliationMismatch(
-        dto.requestId,
-        reconciliation.flags,
-        reconciliation.aiExtracted,
-        reconciliation.mpActual,
-      ).catch(() => {});
+      this.telegramService
+        .alertReconciliationMismatch(
+          dto.requestId,
+          reconciliation.flags,
+          reconciliation.aiExtracted,
+          reconciliation.mpActual,
+        )
+        .catch(() => {});
     }
 
     // 8. Feature 3: Push notification to user
@@ -408,7 +425,9 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
         }
         return sum;
       }, 0);
-      avgVerificationMinutes = Math.round(totalMs / recentVerifications.length / 60000);
+      avgVerificationMinutes = Math.round(
+        totalMs / recentVerifications.length / 60000,
+      );
     }
 
     const oldestPendingMinutes = oldestPending
@@ -466,7 +485,9 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
     );
 
     for (const request of stuckRequests) {
-      const minutesWaiting = Math.round((Date.now() - request.createdAt.getTime()) / 60000);
+      const minutesWaiting = Math.round(
+        (Date.now() - request.createdAt.getTime()) / 60000,
+      );
 
       // Alert operators
       this.operatorGateway.emitToAll('mp_verification_timeout', {
@@ -485,7 +506,9 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
           select: { status: true },
         });
         if (current?.status !== 'PENDING_MP_VERIFICATION') {
-          this.logger.log(`Request ${request.id} already moved from PENDING_MP_VERIFICATION — skipping timeout`);
+          this.logger.log(
+            `Request ${request.id} already moved from PENDING_MP_VERIFICATION — skipping timeout`,
+          );
           continue;
         }
 
@@ -515,9 +538,13 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
           reason: 'mp_verification_timeout',
         });
 
-        this.logger.log(`Request ${request.id} moved to VALIDATION_FAILED due to MP verification timeout (${minutesWaiting}min)`);
+        this.logger.log(
+          `Request ${request.id} moved to VALIDATION_FAILED due to MP verification timeout (${minutesWaiting}min)`,
+        );
       } catch (err: any) {
-        this.logger.error(`Failed to timeout request ${request.id}: ${err.message}`);
+        this.logger.error(
+          `Failed to timeout request ${request.id}: ${err.message}`,
+        );
       }
     }
   }
@@ -525,7 +552,12 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
   /**
    * Feature 2: Check for duplicate transfers (same sender + amount within short window)
    */
-  async checkDuplicateTransfer(walletId: string, senderName: string, amount: number, date: string) {
+  async checkDuplicateTransfer(
+    walletId: string,
+    senderName: string,
+    amount: number,
+    date: string,
+  ) {
     const windowMs = 30 * 60 * 1000; // 30 minute window
     const transferDate = new Date(date);
     const windowStart = new Date(transferDate.getTime() - windowMs);
@@ -544,13 +576,15 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `Possible duplicate: ${senderName} $${amount} - ${duplicates.length} similar transfer(s) within 30min`,
       );
-      this.telegramService.send(
-        `🔄 <b>POSIBLE PAGO DUPLICADO</b>\n\n` +
-        `Remitente: ${senderName}\n` +
-        `Monto: <b>$${amount.toLocaleString('es-AR')}</b>\n` +
-        `Se detectaron ${duplicates.length + 1} transferencias similares en los ultimos 30 minutos.\n\n` +
-        `Verificar que no sea un doble cobro.`,
-      ).catch(() => {});
+      this.telegramService
+        .send(
+          `🔄 <b>POSIBLE PAGO DUPLICADO</b>\n\n` +
+            `Remitente: ${senderName}\n` +
+            `Monto: <b>$${amount.toLocaleString('es-AR')}</b>\n` +
+            `Se detectaron ${duplicates.length + 1} transferencias similares en los ultimos 30 minutos.\n\n` +
+            `Verificar que no sea un doble cobro.`,
+        )
+        .catch(() => {});
 
       return { isDuplicate: true, count: duplicates.length + 1 };
     }
@@ -577,24 +611,33 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
         data: { requestId, status: 'APPROVED' },
       });
     } catch (err: any) {
-      this.logger.warn(`Push notification failed for request ${requestId}: ${err.message}`);
+      this.logger.warn(
+        `Push notification failed for request ${requestId}: ${err.message}`,
+      );
     }
   }
 
   /**
    * Feature 5: Save verification screenshot to Cloudinary
    */
-  async saveVerificationScreenshot(requestId: string, screenshotBuffer: Buffer): Promise<string | null> {
+  async saveVerificationScreenshot(
+    requestId: string,
+    screenshotBuffer: Buffer,
+  ): Promise<string | null> {
     try {
       const path = await this.loggingService.saveScreenshot({
         filename: `mp-verification-${requestId}.png`,
         buffer: screenshotBuffer,
         category: 'mp_verification',
       });
-      this.logger.log(`Verification screenshot saved for request ${requestId}: ${path}`);
+      this.logger.log(
+        `Verification screenshot saved for request ${requestId}: ${path}`,
+      );
       return path;
     } catch (err: any) {
-      this.logger.warn(`Failed to save verification screenshot: ${err.message}`);
+      this.logger.warn(
+        `Failed to save verification screenshot: ${err.message}`,
+      );
       return null;
     }
   }
@@ -604,10 +647,15 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
    */
   checkUnusualAmount(amount: number): boolean {
     // Common amounts (configurable later)
-    const commonAmounts = [500, 1000, 2000, 3000, 5000, 7000, 10000, 15000, 20000, 25000, 30000, 50000, 100000];
+    const commonAmounts = [
+      500, 1000, 2000, 3000, 5000, 7000, 10000, 15000, 20000, 25000, 30000,
+      50000, 100000,
+    ];
     const tolerance = 0.05; // 5% tolerance
 
-    const isCommon = commonAmounts.some((ca) => Math.abs(amount - ca) / ca <= tolerance);
+    const isCommon = commonAmounts.some(
+      (ca) => Math.abs(amount - ca) / ca <= tolerance,
+    );
     return !isCommon;
   }
 
@@ -635,18 +683,23 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
     ]);
 
     const walletSummary = wallets
-      .map((w) => `  ${w.label}: $${Number(w.accumulatedAmount).toLocaleString('es-AR')}`)
+      .map(
+        (w) =>
+          `  ${w.label}: $${Number(w.accumulatedAmount).toLocaleString('es-AR')}`,
+      )
       .join('\n');
 
     await this.telegramService.send(
       `📊 <b>REPORTE DIARIO MP</b>\n\n` +
-      `✅ Verificados hoy: <b>${verified}</b>\n` +
-      `❓ Sin match: ${unmatched}\n` +
-      `⏳ Pendientes ahora: ${pendingNow}\n\n` +
-      `💰 Billeteras:\n${walletSummary || '  Sin billeteras configuradas'}`,
+        `✅ Verificados hoy: <b>${verified}</b>\n` +
+        `❓ Sin match: ${unmatched}\n` +
+        `⏳ Pendientes ahora: ${pendingNow}\n\n` +
+        `💰 Billeteras:\n${walletSummary || '  Sin billeteras configuradas'}`,
     );
 
-    this.logger.log(`Daily report sent: ${verified} verified, ${unmatched} unmatched`);
+    this.logger.log(
+      `Daily report sent: ${verified} verified, ${unmatched} unmatched`,
+    );
   }
 
   /**
@@ -685,21 +738,30 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
 
       // Feature 2: Check for duplicates
       if (t.senderName && t.amount && t.date) {
-        this.checkDuplicateTransfer(walletId, t.senderName, t.amount, t.date).catch(() => {});
+        this.checkDuplicateTransfer(
+          walletId,
+          t.senderName,
+          t.amount,
+          t.date,
+        ).catch(() => {});
       }
 
       // Feature 6: Check for unusual amounts
       if (t.amount && this.checkUnusualAmount(t.amount)) {
-        this.telegramService.send(
-          `💡 <b>MONTO INUSUAL</b>\n\n` +
-          `Remitente: ${t.senderName || 'Desconocido'}\n` +
-          `Monto: <b>$${t.amount.toLocaleString('es-AR')}</b>\n` +
-          `No coincide con los montos habituales. Verificar.`,
-        ).catch(() => {});
+        this.telegramService
+          .send(
+            `💡 <b>MONTO INUSUAL</b>\n\n` +
+              `Remitente: ${t.senderName || 'Desconocido'}\n` +
+              `Monto: <b>$${t.amount.toLocaleString('es-AR')}</b>\n` +
+              `No coincide con los montos habituales. Verificar.`,
+          )
+          .catch(() => {});
       }
     }
 
-    this.logger.log(`Reported ${transfers.length} new transfer(s) for wallet ${walletId}`);
+    this.logger.log(
+      `Reported ${transfers.length} new transfer(s) for wallet ${walletId}`,
+    );
     return { reported: transfers.length };
   }
 
@@ -714,7 +776,11 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
 
     // Fuzzy match: normalize and compare tokens
     const normalize = (s: string) =>
-      s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+      s
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
 
     const nameNorm = normalize(accountName);
 
@@ -722,16 +788,22 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
       const holderNorm = normalize(wallet.holderName);
       // Check if the MP account name is a substring of holder name or vice versa
       if (holderNorm.includes(nameNorm) || nameNorm.includes(holderNorm)) {
-        this.logger.log(`Auto-detected wallet: "${accountName}" → ${wallet.label} (${wallet.id})`);
+        this.logger.log(
+          `Auto-detected wallet: "${accountName}" → ${wallet.label} (${wallet.id})`,
+        );
         return { walletId: wallet.id, walletLabel: wallet.label };
       }
 
       // Token match: at least one significant word matches
       const nameTokens = nameNorm.split(' ').filter((t) => t.length > 2);
       const holderTokens = holderNorm.split(' ').filter((t) => t.length > 2);
-      const hasMatch = nameTokens.some((nt) => holderTokens.some((ht) => ht.includes(nt) || nt.includes(ht)));
+      const hasMatch = nameTokens.some((nt) =>
+        holderTokens.some((ht) => ht.includes(nt) || nt.includes(ht)),
+      );
       if (hasMatch) {
-        this.logger.log(`Auto-detected wallet (token match): "${accountName}" → ${wallet.label} (${wallet.id})`);
+        this.logger.log(
+          `Auto-detected wallet (token match): "${accountName}" → ${wallet.label} (${wallet.id})`,
+        );
         return { walletId: wallet.id, walletLabel: wallet.label };
       }
     }
@@ -744,7 +816,9 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
    * Handle MP session expired report from extension
    */
   async handleSessionExpired(walletId: string, walletLabel?: string) {
-    this.logger.warn(`MP session expired for wallet ${walletId} (${walletLabel || 'unknown'})`);
+    this.logger.warn(
+      `MP session expired for wallet ${walletId} (${walletLabel || 'unknown'})`,
+    );
 
     // Alert operators via WebSocket
     this.operatorGateway.emitToAll('mp_session_expired', {
@@ -778,7 +852,9 @@ export class MpVerificationService implements OnModuleInit, OnModuleDestroy {
         );
       }
     } catch (err: any) {
-      this.logger.error(`Failed to send system message for request ${requestId}: ${err.message}`);
+      this.logger.error(
+        `Failed to send system message for request ${requestId}: ${err.message}`,
+      );
     }
   }
 }

@@ -100,7 +100,14 @@ export class BalanceService {
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: {
-        request: { select: { id: true, status: true, targetUsername: true, amount: true } },
+        request: {
+          select: {
+            id: true,
+            status: true,
+            targetUsername: true,
+            amount: true,
+          },
+        },
       },
     });
   }

@@ -18,10 +18,12 @@ import { TelegramService } from '../notifications/telegram.service';
 @WebSocketGateway({
   namespace: '/mp-verifier',
   cors: { origin: '*', credentials: false },
-  pingInterval: 90000,   // 90s — Chrome MV3 service workers can suspend for 30-60s
-  pingTimeout: 45000,    // 45s — generous for suspended service workers
+  pingInterval: 90000, // 90s — Chrome MV3 service workers can suspend for 30-60s
+  pingTimeout: 45000, // 45s — generous for suspended service workers
 })
-export class MpVerificationGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
+export class MpVerificationGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
+{
   @WebSocketServer()
   server: Server;
 
@@ -50,20 +52,24 @@ export class MpVerificationGateway implements OnGatewayConnection, OnGatewayDisc
   ) {}
 
   onModuleDestroy() {
-    this.disconnectTimers.forEach(timer => clearTimeout(timer));
+    this.disconnectTimers.forEach((timer) => clearTimeout(timer));
     this.disconnectTimers.clear();
   }
 
   handleConnection(client: Socket) {
-    const apiKey = (client.handshake.query?.apiKey as string) ||
+    const apiKey =
+      (client.handshake.query?.apiKey as string) ||
       (client.handshake.auth?.apiKey as string);
-    const walletId = (client.handshake.query?.walletId as string) ||
+    const walletId =
+      (client.handshake.query?.walletId as string) ||
       (client.handshake.auth?.walletId as string);
 
     // Validate API key
     const expectedKey = process.env.BOT_API_KEY;
     if (!expectedKey || apiKey !== expectedKey) {
-      this.logger.warn(`MP verifier rejected: invalid API key from ${client.id}`);
+      this.logger.warn(
+        `MP verifier rejected: invalid API key from ${client.id}`,
+      );
       client.disconnect(true);
       return;
     }
@@ -79,7 +85,9 @@ export class MpVerificationGateway implements OnGatewayConnection, OnGatewayDisc
     if (pendingDisconnect) {
       clearTimeout(pendingDisconnect);
       this.disconnectTimers.delete(walletId);
-      this.logger.log(`MP verifier reconnected during debounce: wallet=${walletId}`);
+      this.logger.log(
+        `MP verifier reconnected during debounce: wallet=${walletId}`,
+      );
     }
 
     // Track connection
@@ -89,7 +97,9 @@ export class MpVerificationGateway implements OnGatewayConnection, OnGatewayDisc
     this.connectedVerifiers.get(walletId)!.set(client.id, client);
     this.socketToWallet.set(client.id, walletId);
 
-    this.logger.log(`MP verifier connected: wallet=${walletId}, socket=${client.id}`);
+    this.logger.log(
+      `MP verifier connected: wallet=${walletId}, socket=${client.id}`,
+    );
 
     // Notify operators
     this.operatorGateway.emitToAll('mp_verifier_status', {
@@ -117,7 +127,9 @@ export class MpVerificationGateway implements OnGatewayConnection, OnGatewayDisc
       walletSockets.delete(client.id);
     }
 
-    this.logger.log(`MP verifier socket disconnected: wallet=${walletId}, socket=${client.id}`);
+    this.logger.log(
+      `MP verifier socket disconnected: wallet=${walletId}, socket=${client.id}`,
+    );
 
     // If other sockets remain for this wallet, no further action
     if (walletSockets && walletSockets.size > 0) return;
@@ -127,37 +139,44 @@ export class MpVerificationGateway implements OnGatewayConnection, OnGatewayDisc
     const existing = this.disconnectTimers.get(walletId);
     if (existing) clearTimeout(existing);
 
-    this.disconnectTimers.set(walletId, setTimeout(() => {
-      this.disconnectTimers.delete(walletId);
-      // Verify wallet didn't reconnect during debounce
-      const current = this.connectedVerifiers.get(walletId);
-      if (!current || current.size === 0) {
-        this.connectedVerifiers.delete(walletId);
-        this.operatorGateway.emitToAll('mp_verifier_status', {
-          walletId,
-          connected: false,
-          connectedCount: 0,
-        });
+    this.disconnectTimers.set(
+      walletId,
+      setTimeout(() => {
+        this.disconnectTimers.delete(walletId);
+        // Verify wallet didn't reconnect during debounce
+        const current = this.connectedVerifiers.get(walletId);
+        if (!current || current.size === 0) {
+          this.connectedVerifiers.delete(walletId);
+          this.operatorGateway.emitToAll('mp_verifier_status', {
+            walletId,
+            connected: false,
+            connectedCount: 0,
+          });
 
-        // Emit offline heartbeat to operators
-        const offlineHealth = {
-          extensionId: walletId,
-          type: 'mp-verifier',
-          status: 'offline',
-          panelId: null,
-          walletId,
-          receivedAt: new Date().toISOString(),
-        };
-        this.extensionHealth.set(walletId, offlineHealth);
-        this.operatorGateway.emitToAll('extension:heartbeat', offlineHealth);
+          // Emit offline heartbeat to operators
+          const offlineHealth = {
+            extensionId: walletId,
+            type: 'mp-verifier',
+            status: 'offline',
+            panelId: null,
+            walletId,
+            receivedAt: new Date().toISOString(),
+          };
+          this.extensionHealth.set(walletId, offlineHealth);
+          this.operatorGateway.emitToAll('extension:heartbeat', offlineHealth);
 
-        // Telegram alert (with internal cooldown so flapping doesn't spam) — EX11.
-        const walletType = this.walletTypes.get(walletId) || 'verifier';
-        this.telegram.alertVerifierOffline(walletId, walletType).catch(() => {});
+          // Telegram alert (with internal cooldown so flapping doesn't spam) — EX11.
+          const walletType = this.walletTypes.get(walletId) || 'verifier';
+          this.telegram
+            .alertVerifierOffline(walletId, walletType)
+            .catch(() => {});
 
-        this.logger.log(`MP verifier offline (after 120s debounce): wallet=${walletId}`);
-      }
-    }, 120000));
+          this.logger.log(
+            `MP verifier offline (after 120s debounce): wallet=${walletId}`,
+          );
+        }
+      }, 120000),
+    );
   }
 
   @SubscribeMessage('heartbeat')
@@ -190,11 +209,21 @@ export class MpVerificationGateway implements OnGatewayConnection, OnGatewayDisc
    */
   @SubscribeMessage('session_expired')
   handleSessionExpired(client: Socket, data?: any) {
-    const walletId = this.socketToWallet.get(client.id) || (data?.walletId ?? 'unknown');
-    const walletType = this.walletTypes.get(walletId) || data?.type || 'verifier';
-    this.logger.warn(`Session expired reported by verifier: wallet=${walletId}`);
-    this.operatorGateway.emitToAll('mp_session_expired', { walletId, type: walletType, at: new Date().toISOString() });
-    this.telegram.alertVerifierSessionExpired(walletId, walletType).catch(() => {});
+    const walletId =
+      this.socketToWallet.get(client.id) || (data?.walletId ?? 'unknown');
+    const walletType =
+      this.walletTypes.get(walletId) || data?.type || 'verifier';
+    this.logger.warn(
+      `Session expired reported by verifier: wallet=${walletId}`,
+    );
+    this.operatorGateway.emitToAll('mp_session_expired', {
+      walletId,
+      type: walletType,
+      at: new Date().toISOString(),
+    });
+    this.telegram
+      .alertVerifierSessionExpired(walletId, walletType)
+      .catch(() => {});
   }
 
   /**
@@ -202,8 +231,10 @@ export class MpVerificationGateway implements OnGatewayConnection, OnGatewayDisc
    */
   @SubscribeMessage('transfer_detected')
   handleTransferDetected(client: Socket, data?: any) {
-    const walletId = this.socketToWallet.get(client.id) || (data?.walletId ?? 'unknown');
-    if (walletId && walletId !== 'unknown') this.lastTransferAt.set(walletId, Date.now());
+    const walletId =
+      this.socketToWallet.get(client.id) || (data?.walletId ?? 'unknown');
+    if (walletId && walletId !== 'unknown')
+      this.lastTransferAt.set(walletId, Date.now());
   }
 
   // EX12: every 30 minutes, alert about wallets that have been online for >6h without
@@ -220,22 +251,34 @@ export class MpVerificationGateway implements OnGatewayConnection, OnGatewayDisc
       if (elapsed < STALE_MS) continue;
       const hours = Math.round(elapsed / (60 * 60 * 1000));
       const walletType = this.walletTypes.get(walletId) || 'verifier';
-      this.logger.warn(`Canary: wallet ${walletId} (${walletType}) has not detected a transfer in ${hours}h`);
+      this.logger.warn(
+        `Canary: wallet ${walletId} (${walletType}) has not detected a transfer in ${hours}h`,
+      );
       this.operatorGateway.emitToAll('system_alert', {
         type: 'verifier_stale',
         message: `Verifier ${walletId} (${walletType}): ${hours}h sin transfers detectadas`,
         severity: 'warning',
         timestamp: new Date().toISOString(),
       });
-      this.telegram.alertVerifierStale(walletId, walletType, hours).catch(() => {});
+      this.telegram
+        .alertVerifierStale(walletId, walletType, hours)
+        .catch(() => {});
     }
   }
 
   // EX11: daily report at 23:55 ART (= 02:55 UTC next day; cron runs in UTC).
   @Cron('55 2 * * *', { timeZone: 'America/Argentina/Buenos_Aires' })
   async sendDailySummary() {
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
-    const walletReports: Array<{ walletId: string; walletType: string; transfersDetected: number; offlineMinutes: number; lastSeenAt?: string | null }> = [];
+    const today = new Date().toLocaleDateString('en-CA', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+    });
+    const walletReports: Array<{
+      walletId: string;
+      walletType: string;
+      transfersDetected: number;
+      offlineMinutes: number;
+      lastSeenAt?: string | null;
+    }> = [];
     for (const walletId of this.walletTypes.keys()) {
       const walletType = this.walletTypes.get(walletId) || 'verifier';
       const lastTransfer = this.lastTransferAt.get(walletId);
@@ -243,7 +286,10 @@ export class MpVerificationGateway implements OnGatewayConnection, OnGatewayDisc
         walletId,
         walletType,
         // We don't currently keep a per-day counter — just show whether it saw anything today.
-        transfersDetected: lastTransfer && (Date.now() - lastTransfer) < 24 * 60 * 60 * 1000 ? 1 : 0,
+        transfersDetected:
+          lastTransfer && Date.now() - lastTransfer < 24 * 60 * 60 * 1000
+            ? 1
+            : 0,
         offlineMinutes: 0, // future: aggregate disconnect timer durations
         lastSeenAt: lastTransfer ? new Date(lastTransfer).toISOString() : null,
       });

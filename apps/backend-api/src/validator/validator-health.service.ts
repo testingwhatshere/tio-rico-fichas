@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ValidatorGateway } from './validator.gateway';
 import { SettingsService } from '../settings/settings.service';
 import { EventsGateway } from '../events/events.gateway';
@@ -15,7 +20,8 @@ export class ValidatorHealthService implements OnModuleInit, OnModuleDestroy {
   private disconnectedAlertSent = false;
 
   private readonly CHECK_INTERVAL_MS = VALIDATOR_HEALTH_CHECK_MS;
-  private readonly DISCONNECT_ALERT_THRESHOLD_MS = VALIDATOR_DISCONNECT_ALERT_MS;
+  private readonly DISCONNECT_ALERT_THRESHOLD_MS =
+    VALIDATOR_DISCONNECT_ALERT_MS;
 
   constructor(
     private readonly validatorGateway: ValidatorGateway,
@@ -57,9 +63,13 @@ export class ValidatorHealthService implements OnModuleInit, OnModuleDestroy {
     } else {
       // Check if disconnected for too long
       if (this.lastConnectedTime) {
-        const disconnectedDuration = Date.now() - this.lastConnectedTime.getTime();
+        const disconnectedDuration =
+          Date.now() - this.lastConnectedTime.getTime();
 
-        if (disconnectedDuration > this.DISCONNECT_ALERT_THRESHOLD_MS && !this.disconnectedAlertSent) {
+        if (
+          disconnectedDuration > this.DISCONNECT_ALERT_THRESHOLD_MS &&
+          !this.disconnectedAlertSent
+        ) {
           this.sendDisconnectedAlert(disconnectedDuration);
           this.disconnectedAlertSent = true;
         }
@@ -69,7 +79,9 @@ export class ValidatorHealthService implements OnModuleInit, OnModuleDestroy {
 
   private sendDisconnectedAlert(disconnectedDurationMs: number) {
     const minutes = Math.floor(disconnectedDurationMs / 60000);
-    this.logger.warn(`Validator disconnected for ${minutes} minutes - alerting operators`);
+    this.logger.warn(
+      `Validator disconnected for ${minutes} minutes - alerting operators`,
+    );
 
     // Send alert to all connected operators
     this.eventsGateway.emitSystemAlert({
@@ -93,7 +105,9 @@ export class ValidatorHealthService implements OnModuleInit, OnModuleDestroy {
 
     let disconnectedMinutes: number | null = null;
     if (!isConnected && this.lastConnectedTime) {
-      disconnectedMinutes = Math.floor((Date.now() - this.lastConnectedTime.getTime()) / 60000);
+      disconnectedMinutes = Math.floor(
+        (Date.now() - this.lastConnectedTime.getTime()) / 60000,
+      );
     }
 
     return {

@@ -8,7 +8,15 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
-import { Logger, Inject, forwardRef, ForbiddenException, UnauthorizedException, UsePipes, ValidationPipe } from '@nestjs/common';
+import {
+  Logger,
+  Inject,
+  forwardRef,
+  ForbiddenException,
+  UnauthorizedException,
+  UsePipes,
+  ValidationPipe,
+} from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
@@ -88,13 +96,17 @@ export class ChatsGateway
         );
       } else {
         // Reject unauthenticated connections
-        this.logger.warn(`[/chats] Rejecting unauthenticated client: ${client.id}`);
+        this.logger.warn(
+          `[/chats] Rejecting unauthenticated client: ${client.id}`,
+        );
         client.emit('unauthorized', 'Authentication required');
         client.disconnect();
         return;
       }
     } catch (error) {
-      this.logger.warn(`[/chats] Client connection failed: ${client.id} - ${error.message}`);
+      this.logger.warn(
+        `[/chats] Client connection failed: ${client.id} - ${error.message}`,
+      );
       client.emit('unauthorized', 'Invalid token');
       client.disconnect();
     }
@@ -111,7 +123,8 @@ export class ChatsGateway
       return authHeader.substring(7);
     }
     return (
-      (client.handshake.auth?.token || client.handshake.query?.token) as string || null
+      ((client.handshake.auth?.token ||
+        client.handshake.query?.token) as string) || null
     );
   }
 
@@ -127,7 +140,13 @@ export class ChatsGateway
   @SubscribeMessage('send_message')
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { requestId?: string; content: string; chatId?: string; imageUrl?: string },
+    @MessageBody()
+    data: {
+      requestId?: string;
+      content: string;
+      chatId?: string;
+      imageUrl?: string;
+    },
   ): Promise<any> {
     const user = client.data.user;
     if (!user) {
@@ -145,7 +164,9 @@ export class ChatsGateway
           user.sub,
           user.role,
         );
-        this.logger.debug(`[/chats] Resolved chatId ${chatId} from requestId ${data.requestId}`);
+        this.logger.debug(
+          `[/chats] Resolved chatId ${chatId} from requestId ${data.requestId}`,
+        );
       }
 
       // Also check if the provided "chatId" might actually be a requestId
@@ -153,15 +174,19 @@ export class ChatsGateway
       if (chatId && !data.requestId) {
         try {
           // Try to get or create chat from the ID (treating it as requestId)
-          const resolvedChatId = await this.requestsService.getOrCreateRequestChat(
-            chatId,
-            user.sub,
-            user.role,
-          );
+          const resolvedChatId =
+            await this.requestsService.getOrCreateRequestChat(
+              chatId,
+              user.sub,
+              user.role,
+            );
           chatId = resolvedChatId;
         } catch (e) {
           // Re-throw authorization errors; only suppress NotFoundException
-          if (e instanceof ForbiddenException || e instanceof UnauthorizedException) {
+          if (
+            e instanceof ForbiddenException ||
+            e instanceof UnauthorizedException
+          ) {
             throw e;
           }
           // If it fails for other reasons, the chatId is probably a real chat ID, continue
@@ -169,13 +194,19 @@ export class ChatsGateway
       }
 
       if (!chatId) {
-        this.logger.warn(`[/chats] send_message without chatId from user ${user.sub}`);
+        this.logger.warn(
+          `[/chats] send_message without chatId from user ${user.sub}`,
+        );
         return { error: 'chatId or requestId is required' };
       }
 
       const message = await this.messagesService.sendMessage(
         user.sub,
-        { chatId, content: data.content, ...(data.imageUrl && { imageUrl: data.imageUrl }) },
+        {
+          chatId,
+          content: data.content,
+          ...(data.imageUrl && { imageUrl: data.imageUrl }),
+        },
         user.role,
       );
 
@@ -191,9 +222,7 @@ export class ChatsGateway
    * Used by WhatsApp extension which needs a chat BEFORE creating a request.
    */
   @SubscribeMessage('create_or_get_chat')
-  async handleCreateOrGetChat(
-    @ConnectedSocket() client: Socket,
-  ): Promise<any> {
+  async handleCreateOrGetChat(@ConnectedSocket() client: Socket): Promise<any> {
     const user = client.data.user;
     if (!user) return { error: 'Unauthorized' };
 
@@ -208,16 +237,25 @@ export class ChatsGateway
         chat = await this.prisma.chat.create({
           data: { userId: user.sub, status: 'OPEN' },
         });
-        this.logger.log(`[/chats] Created new chat ${chat.id} for user ${user.sub}`);
+        this.logger.log(
+          `[/chats] Created new chat ${chat.id} for user ${user.sub}`,
+        );
 
         // Notify operators of new chat
         try {
           // @ts-ignore — dynamic import to avoid circular dependency
           const { OperatorGateway } = await import('./operator.gateway');
-          const operatorGateway = this.moduleRef.get(OperatorGateway, { strict: false });
-          operatorGateway.emitToAll('chat:new', { chatId: chat.id, userId: user.sub });
+          const operatorGateway = this.moduleRef.get(OperatorGateway, {
+            strict: false,
+          });
+          operatorGateway.emitToAll('chat:new', {
+            chatId: chat.id,
+            userId: user.sub,
+          });
         } catch (e) {
-          this.logger.warn(`[/chats] Could not notify operators of new chat: ${e.message}`);
+          this.logger.warn(
+            `[/chats] Could not notify operators of new chat: ${e.message}`,
+          );
         }
       }
 
@@ -225,7 +263,9 @@ export class ChatsGateway
       client.join(`chat:${chat.id}`);
       return { success: true, chatId: chat.id };
     } catch (error) {
-      this.logger.error(`[/chats] Error in create_or_get_chat: ${error.message}`);
+      this.logger.error(
+        `[/chats] Error in create_or_get_chat: ${error.message}`,
+      );
       return { error: sanitizeError(error) };
     }
   }
@@ -244,20 +284,26 @@ export class ChatsGateway
     }
 
     // Operators can join any chat; clients must own the chat
-    const isOperator = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(user.role);
+    const isOperator = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(
+      user.role,
+    );
     if (!isOperator) {
       const chat = await this.prisma.chat.findUnique({
         where: { id: data.chatId },
         select: { userId: true },
       });
       if (!chat || chat.userId !== user.sub) {
-        this.logger.warn(`[/chats] Client ${client.id} (user: ${user.sub}) denied join to chat:${data.chatId}`);
+        this.logger.warn(
+          `[/chats] Client ${client.id} (user: ${user.sub}) denied join to chat:${data.chatId}`,
+        );
         return { success: false, error: 'Access denied' };
       }
     }
 
     client.join(`chat:${data.chatId}`);
-    this.logger.debug(`[/chats] Client ${client.id} joined chat:${data.chatId}`);
+    this.logger.debug(
+      `[/chats] Client ${client.id} joined chat:${data.chatId}`,
+    );
     return { success: true };
   }
 
@@ -297,7 +343,8 @@ export class ChatsGateway
   @SubscribeMessage('prize_claim:set_payment')
   async handlePrizeClaimSetPayment(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: {
+    @MessageBody()
+    data: {
       claimId: string;
       userId: string;
       paymentMethod: string;
@@ -310,8 +357,12 @@ export class ChatsGateway
     }
 
     try {
-      const { PrizeClaimsService } = require('../prize-claims/prize-claims.service');
-      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, { strict: false });
+      const {
+        PrizeClaimsService,
+      } = require('../prize-claims/prize-claims.service');
+      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, {
+        strict: false,
+      });
 
       await prizeClaimsService.setPaymentDetails(data.claimId, user.sub, {
         paymentMethod: data.paymentMethod,
@@ -331,7 +382,8 @@ export class ChatsGateway
   @SubscribeMessage('prize_claim:create_unified')
   async handlePrizeClaimCreateUnified(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: {
+    @MessageBody()
+    data: {
       amount: number;
       paymentMethod: string;
       paymentDetails: { cbu?: string; alias?: string; accountHolder: string };
@@ -343,8 +395,12 @@ export class ChatsGateway
     }
 
     try {
-      const { PrizeClaimsService } = require('../prize-claims/prize-claims.service');
-      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, { strict: false });
+      const {
+        PrizeClaimsService,
+      } = require('../prize-claims/prize-claims.service');
+      const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, {
+        strict: false,
+      });
 
       // Get the user's chat ID for the claim record
       const { ChatsService } = require('../chats/chats.service');

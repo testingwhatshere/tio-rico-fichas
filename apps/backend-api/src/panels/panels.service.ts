@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePanelDto } from './dto/create-panel.dto';
 import { UpdatePanelDto } from './dto/update-panel.dto';
@@ -18,7 +23,9 @@ export class PanelsService {
       return panel;
     } catch (error: any) {
       if (error.code === 'P2002') {
-        throw new ConflictException(`Panel with name "${dto.name}" already exists`);
+        throw new ConflictException(
+          `Panel with name "${dto.name}" already exists`,
+        );
       }
       throw error;
     }
@@ -66,7 +73,9 @@ export class PanelsService {
       return panel;
     } catch (error: any) {
       if (error.code === 'P2002') {
-        throw new ConflictException(`Panel with name "${dto.name}" already exists`);
+        throw new ConflictException(
+          `Panel with name "${dto.name}" already exists`,
+        );
       }
       throw error;
     }

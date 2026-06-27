@@ -81,7 +81,11 @@ export class UploadsController {
     @CurrentUser() user: { sub: string; role: string },
     @Res() res: Response,
   ) {
-    const file = await this.uploadsService.getFileWithAuth(id, user.sub, user.role);
+    const file = await this.uploadsService.getFileWithAuth(
+      id,
+      user.sub,
+      user.role,
+    );
     res.redirect(file.cloudinaryUrl);
   }
 
@@ -96,13 +100,28 @@ export class UploadsController {
     return { url: uploaded.cloudinaryUrl };
   }
 
+  /**
+   * Operador sube el comprobante de la transferencia que le hizo al usuario al cobrar un premio.
+   * Acepta imagen o PDF (mismo allowlist que el upload de proofs del chat-app). El URL devuelto
+   * es el que después se pasa a `operator:complete_prize_claim` para marcar el claim como pagado.
+   */
+  @Post('operator/payout-proof')
+  @Public()
+  @UseGuards(OperatorApiKeyGuard)
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadPayoutProofForOperator(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<{ url: string; type: 'image' | 'pdf' }> {
+    const uploaded = await this.uploadsService.uploadFile(file, 'operator');
+    const type: 'image' | 'pdf' =
+      uploaded.mimeType === 'application/pdf' ? 'pdf' : 'image';
+    return { url: uploaded.cloudinaryUrl, type };
+  }
+
   @Get('operator/:id')
   @Public()
   @UseGuards(OperatorApiKeyGuard)
-  async getFileForOperator(
-    @Param('id') id: string,
-    @Res() res: Response,
-  ) {
+  async getFileForOperator(@Param('id') id: string, @Res() res: Response) {
     const file = await this.uploadsService.getFile(id);
     res.redirect(file.cloudinaryUrl);
   }

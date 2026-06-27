@@ -1,4 +1,5 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, nativeImage, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, nativeImage, shell, dialog } = require('electron');
+const fsPromises = require('fs/promises');
 const path = require('path');
 const fs = require('fs');
 const { io } = require('socket.io-client');
@@ -1322,8 +1323,8 @@ function openQrPairingWindow() {
   // Pre-fill backendUrl + apiKey from the operator's saved config so the operator only needs to
   // type walletId + walletType for each new phone.
   const params = new URLSearchParams({
-    backendUrl: store?.backendUrl || '',
-    apiKey: store?.apiKey || '',
+    backendUrl: state.config?.backendUrl || '',
+    apiKey: state.config?.apiKey || '',
   }).toString();
   qrPairingWindow.loadFile(path.join(__dirname, 'qr-pairing.html'), { search: params });
   qrPairingWindow.on('closed', () => { qrPairingWindow = null; });
@@ -1425,7 +1426,10 @@ function emitWithTimeout(event, data, timeoutMs = 30000) {
     }
     const timer = setTimeout(() => {
       console.warn(`[Main] Socket emit '${event}' timed out after ${timeoutMs / 1000}s`);
-      resolve({ success: false, error: 'Operación en proceso, puede tardar unos segundos más...' });
+      resolve({
+        success: false,
+        error: `Sin respuesta del backend tras ${timeoutMs / 1000}s. Probá de nuevo en unos segundos o revisá la conexión.`,
+      });
     }, timeoutMs);
     socket.emit(event, data, (response) => {
       clearTimeout(timer);
@@ -1435,7 +1439,9 @@ function emitWithTimeout(event, data, timeoutMs = 30000) {
 }
 
 ipcMain.handle('approve-failure', async (event, { failureId, note, approvedAmount }) => {
-  const response = await emitWithTimeout('approve_failure', { failureId, note, approvedAmount });
+  // approve hace transacción Serializable + accumulation + job creation + dispatch,
+  // que puede tardar más de 30s en picos. Subimos timeout para no abortar prematuramente.
+  const response = await emitWithTimeout('approve_failure', { failureId, note, approvedAmount }, 60000);
   if (response && response.success) {
     const failure = store.failures.find(f => f.id === failureId);
     if (failure) {
@@ -1601,6 +1607,10 @@ ipcMain.handle('mark-chat-read', async (event, chatId) => {
 
 ipcMain.handle('get-chat-messages', async (event, { chatId, cursor }) => {
   return emitWithTimeout('get_chat_messages', { chatId, cursor });
+});
+
+ipcMain.handle('get-pending-summary', async (event, chatId) => {
+  return emitWithTimeout('get_pending_summary', { chatId });
 });
 
 ipcMain.handle('close-chat', async (event, { chatId, reason }) => {
@@ -1923,8 +1933,87 @@ ipcMain.handle('process-prize-claim', async (event, claimId) => {
   return emitWithTimeout('operator:process_prize_claim', { claimId });
 });
 
-ipcMain.handle('complete-prize-claim', async (event, claimId) => {
-  return emitWithTimeout('operator:complete_prize_claim', { claimId });
+ipcMain.handle('complete-prize-claim', async (event, claimId, proofUrl, proofType) => {
+  return emitWithTimeout('operator:complete_prize_claim', { claimId, proofUrl, proofType });
+});
+
+// Abre un file picker (imagen o PDF) y sube el comprobante al backend.
+// Devuelve { url, type } listo para pasarle a operator:complete_prize_claim.
+// Si el operador cancela el diálogo, devuelve { cancelled: true }.
+ipcMain.handle('pick-and-upload-payout-proof', async () => {
+  if (!state.config?.backendUrl || !state.config?.apiKey) {
+    return { error: 'Operator panel no está configurado (backend URL / API key).' };
+  }
+
+  const result = await dialog.showOpenDialog({
+    title: 'Adjuntá el comprobante de la transferencia',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Comprobante (imagen o PDF)', extensions: ['png', 'jpg', 'jpeg', 'webp', 'heic', 'pdf'] },
+      { name: 'Imagen', extensions: ['png', 'jpg', 'jpeg', 'webp', 'heic'] },
+      { name: 'PDF', extensions: ['pdf'] },
+    ],
+  });
+
+  if (result.canceled || !result.filePaths?.[0]) {
+    return { cancelled: true };
+  }
+
+  const filePath = result.filePaths[0];
+  let fileBuffer;
+  try {
+    fileBuffer = await fsPromises.readFile(filePath);
+  } catch (err) {
+    return { error: `No pude leer el archivo: ${err.message}` };
+  }
+
+  if (fileBuffer.length === 0) {
+    return { error: 'El archivo está vacío.' };
+  }
+  if (fileBuffer.length > 10 * 1024 * 1024) {
+    return { error: 'El archivo supera 10 MB.' };
+  }
+
+  const filename = filePath.split(/[\\/]/).pop() || 'comprobante.bin';
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  const mimeMap = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    webp: 'image/webp',
+    heic: 'image/heic',
+    pdf: 'application/pdf',
+  };
+  const mimeType = mimeMap[ext] || 'application/octet-stream';
+
+  try {
+    const boundary = '----PayoutProofBoundary' + Date.now().toString(16);
+    const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${mimeType}\r\n\r\n`;
+    const footer = `\r\n--${boundary}--\r\n`;
+    const body = Buffer.concat([Buffer.from(header), fileBuffer, Buffer.from(footer)]);
+
+    const url = `${state.config.backendUrl}/api/uploads/operator/payout-proof`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'X-Operator-API-Key': state.config.apiKey,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      },
+      body,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      console.error('[Main] payout-proof upload failed:', response.status, text);
+      return { error: `Upload falló (HTTP ${response.status}). ${text || ''}`.trim() };
+    }
+
+    const data = await response.json();
+    return { url: data.url, type: data.type };
+  } catch (error) {
+    console.error('[Main] pick-and-upload-payout-proof error:', error);
+    return { error: error.message };
+  }
 });
 
 ipcMain.handle('reject-prize-claim', async (event, claimId, reason) => {
@@ -1933,6 +2022,14 @@ ipcMain.handle('reject-prize-claim', async (event, claimId, reason) => {
 
 ipcMain.handle('get-prize-claims', async () => {
   return emitWithTimeout('get_prize_claims', {});
+});
+
+ipcMain.handle('get-user-panel-info', async (event, userId) => {
+  return emitWithTimeout('operator:get_user_panel_info', { userId });
+});
+
+ipcMain.handle('set-user-target-username', async (event, userId, savedTargetUsername) => {
+  return emitWithTimeout('operator:set_user_target_username', { userId, savedTargetUsername });
 });
 
 ipcMain.handle('confirm-outbound-payment', async (event, paymentId) => {

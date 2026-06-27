@@ -45,6 +45,17 @@ export class RequestsController {
     return this.requestsService.findAllByUser(user.sub);
   }
 
+  /**
+   * Returns the user's currently in-progress load request, or — if none — the latest
+   * terminal request within the last 6 hours so the home banner can show "Carga
+   * completada / rechazada / validación fallida" right after the final status change.
+   */
+  @Get('me/active')
+  async getMyActive(@CurrentUser() user: { sub: string }) {
+    const current = await this.requestsService.findCurrentForUser(user.sub);
+    return current || null;
+  }
+
   // ==========================================
   // OPERATOR STATIC ROUTES (must come before :id)
   // ==========================================
@@ -133,20 +144,28 @@ export class RequestsController {
    * New clients should use POST /uploads/sign-proof + direct Cloudinary + POST :id/proof/confirm.
    */
   @Post(':id/proof')
-  @UseInterceptors(FileInterceptor('file', {
-    limits: {
-      fileSize: FILE_SIZE_LIMIT_BYTES,
-    },
-    fileFilter: (_req, file, cb) => {
-      if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
-        cb(null, true);
-      } else {
-        cb(new BadRequestException(
-          `Tipo de archivo no permitido: ${file.mimetype}. Permitidos: imágenes (PNG, JPG, HEIC, etc.) y PDF`,
-        ), false);
-      }
-    },
-  }))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: FILE_SIZE_LIMIT_BYTES,
+      },
+      fileFilter: (_req, file, cb) => {
+        if (
+          file.mimetype.startsWith('image/') ||
+          file.mimetype === 'application/pdf'
+        ) {
+          cb(null, true);
+        } else {
+          cb(
+            new BadRequestException(
+              `Tipo de archivo no permitido: ${file.mimetype}. Permitidos: imágenes (PNG, JPG, HEIC, etc.) y PDF`,
+            ),
+            false,
+          );
+        }
+      },
+    }),
+  )
   async uploadProof(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
@@ -201,10 +220,7 @@ export class RequestsController {
   }
 
   @Delete(':id')
-  async cancel(
-    @Param('id') id: string,
-    @CurrentUser() user: { sub: string },
-  ) {
+  async cancel(@Param('id') id: string, @CurrentUser() user: { sub: string }) {
     return this.requestsService.cancel(id, user.sub);
   }
 
@@ -223,7 +239,11 @@ export class RequestsController {
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ) {
-    const chatId = await this.requestsService.getOrCreateRequestChat(id, user.sub, user.role);
+    const chatId = await this.requestsService.getOrCreateRequestChat(
+      id,
+      user.sub,
+      user.role,
+    );
     return this.messagesService.getMessages(chatId, user.sub, user.role, {
       limit: limit ? parseInt(limit) : undefined,
       cursor,
@@ -240,8 +260,16 @@ export class RequestsController {
     @CurrentUser() user: { sub: string; role: string },
     @Body('content') content: string,
   ) {
-    const chatId = await this.requestsService.getOrCreateRequestChat(id, user.sub, user.role);
-    return this.messagesService.sendMessage(user.sub, { chatId, content }, user.role);
+    const chatId = await this.requestsService.getOrCreateRequestChat(
+      id,
+      user.sub,
+      user.role,
+    );
+    return this.messagesService.sendMessage(
+      user.sub,
+      { chatId, content },
+      user.role,
+    );
   }
 
   /**
@@ -253,7 +281,10 @@ export class RequestsController {
     @Param('id') id: string,
     @CurrentUser() user: { sub: string },
   ) {
-    const timeline = await this.requestsService.getRequestTimeline(id, user.sub);
+    const timeline = await this.requestsService.getRequestTimeline(
+      id,
+      user.sub,
+    );
     return { timeline };
   }
 }

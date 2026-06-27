@@ -32,7 +32,12 @@ export class MessagesController {
     @Query() query: GetMessagesQueryDto,
     @Request() req: any,
   ) {
-    return this.messagesService.getMessages(chatId, req.user.sub, req.user.role, query);
+    return this.messagesService.getMessages(
+      chatId,
+      req.user.sub,
+      req.user.role,
+      query,
+    );
   }
 
   /**
@@ -60,7 +65,12 @@ export class MessagesController {
     @Body() body: { isTyping: boolean },
     @Request() req: any,
   ) {
-    this.messagesService.emitTyping(chatId, req.user.sub, req.user.role, body.isTyping);
+    this.messagesService.emitTyping(
+      chatId,
+      req.user.sub,
+      req.user.role,
+      body.isTyping,
+    );
     return { success: true };
   }
 

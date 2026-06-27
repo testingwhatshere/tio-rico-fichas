@@ -5,10 +5,7 @@ import { BotModule } from '../bot/bot.module';
 import { JobsModule } from '../jobs/jobs.module';
 
 @Module({
-  imports: [
-    forwardRef(() => BotModule),
-    forwardRef(() => JobsModule),
-  ],
+  imports: [forwardRef(() => BotModule), forwardRef(() => JobsModule)],
   controllers: [StatusController],
   providers: [StatusService],
   exports: [StatusService],

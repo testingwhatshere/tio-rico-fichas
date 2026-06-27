@@ -9,9 +9,21 @@ import { EventsModule } from '../events/events.module';
 
 @Global()
 @Module({
-  imports: [ConfigModule, forwardRef(() => SettingsModule), forwardRef(() => EventsModule)],
+  imports: [
+    ConfigModule,
+    forwardRef(() => SettingsModule),
+    forwardRef(() => EventsModule),
+  ],
   controllers: [ValidatorController],
-  providers: [ValidatorGateway, ValidatorAnalyticsService, ValidatorHealthService],
-  exports: [ValidatorGateway, ValidatorAnalyticsService, ValidatorHealthService],
+  providers: [
+    ValidatorGateway,
+    ValidatorAnalyticsService,
+    ValidatorHealthService,
+  ],
+  exports: [
+    ValidatorGateway,
+    ValidatorAnalyticsService,
+    ValidatorHealthService,
+  ],
 })
 export class ValidatorModule {}

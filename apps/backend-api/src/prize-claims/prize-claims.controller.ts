@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { PrizeClaimsService } from './prize-claims.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -23,7 +16,12 @@ export class PrizeClaimsController {
   @Roles('CLIENT')
   async create(
     @CurrentUser() user: { sub: string },
-    @Body() body: { amount: number; paymentMethod: string; paymentDetails: { cbu?: string; alias?: string; accountHolder: string } },
+    @Body()
+    body: {
+      amount: number;
+      paymentMethod: string;
+      paymentDetails: { cbu?: string; alias?: string; accountHolder: string };
+    },
   ) {
     return this.prizeClaimsService.createWithPayment(user.sub, {
       amount: body.amount,
@@ -68,10 +66,7 @@ export class PrizeClaimsController {
 
   @Post(':id/process')
   @Roles('SENIOR_OPERATOR', 'ADMIN')
-  async process(
-    @Param('id') id: string,
-    @CurrentUser() user: { sub: string },
-  ) {
+  async process(@Param('id') id: string, @CurrentUser() user: { sub: string }) {
     return this.prizeClaimsService.process(id, user.sub);
   }
 
@@ -80,8 +75,12 @@ export class PrizeClaimsController {
   async complete(
     @Param('id') id: string,
     @CurrentUser() user: { sub: string },
+    @Body() body: { proofUrl: string; proofType?: 'image' | 'pdf' },
   ) {
-    return this.prizeClaimsService.complete(id, user.sub);
+    return this.prizeClaimsService.complete(id, user.sub, {
+      proofUrl: body?.proofUrl,
+      proofType: body?.proofType,
+    });
   }
 
   @Post(':id/reject')

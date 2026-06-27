@@ -46,9 +46,11 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // socketId → panelId (reverse lookup)
   private socketToPanelId: Map<string, string> = new Map();
   // Per-panel disconnect debounce timers
-  private disconnectTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private disconnectTimers: Map<string, ReturnType<typeof setTimeout>> =
+    new Map();
   // Per-panel reconnect-dispatch timers (dedup multiple SW reconnects in <3s)
-  private reconnectDispatchTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private reconnectDispatchTimers: Map<string, ReturnType<typeof setTimeout>> =
+    new Map();
   // Track which panels have a busy bot (processing a job)
   private busyPanels: Set<string> = new Set();
   // Enriched heartbeat data per extension
@@ -64,7 +66,9 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const key = this.configService.get<string>('BOT_API_KEY');
     if (!key) {
-      throw new Error('BOT_API_KEY environment variable is required but not set.');
+      throw new Error(
+        'BOT_API_KEY environment variable is required but not set.',
+      );
     }
     this.expectedApiKey = key;
 
@@ -91,14 +95,18 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
     }
     if (cleaned > 0) {
-      this.logger.log(`Zombie cleanup: removed ${cleaned} dead socket(s). Active: ${this.getTotalBotCount()} bot(s)`);
+      this.logger.log(
+        `Zombie cleanup: removed ${cleaned} dead socket(s). Active: ${this.getTotalBotCount()} bot(s)`,
+      );
     }
   }
 
   private getOperatorGateway(): OperatorGateway | null {
     if (!this.operatorGateway) {
       try {
-        this.operatorGateway = this.moduleRef.get(OperatorGateway, { strict: false });
+        this.operatorGateway = this.moduleRef.get(OperatorGateway, {
+          strict: false,
+        });
       } catch {
         this.logger.warn('OperatorGateway not available for bot status events');
       }
@@ -109,7 +117,11 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
   /**
    * Emit per-panel bot status to operators
    */
-  private emitBotStatusToOperators(panelId: string, connected: boolean, botId: string) {
+  private emitBotStatusToOperators(
+    panelId: string,
+    connected: boolean,
+    botId: string,
+  ) {
     const opGateway = this.getOperatorGateway();
     if (opGateway) {
       opGateway.emitToAll('bot_status', {
@@ -144,23 +156,32 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // Extract panelId
     const panelId =
-      client.handshake.auth?.panelId ||
-      client.handshake.query?.panelId;
+      client.handshake.auth?.panelId || client.handshake.query?.panelId;
 
     if (!panelId) {
-      this.logger.warn(`Bot ${client.id} connected without panelId — rejecting`);
-      client.emit('error', { message: 'panelId is required. Configure it in extension options.' });
+      this.logger.warn(
+        `Bot ${client.id} connected without panelId — rejecting`,
+      );
+      client.emit('error', {
+        message: 'panelId is required. Configure it in extension options.',
+      });
       client.disconnect();
       return;
     }
 
     // Validate panel exists
     try {
-      const panelsService = this.moduleRef.get(PanelsService, { strict: false });
+      const panelsService = this.moduleRef.get(PanelsService, {
+        strict: false,
+      });
       const isValid = await panelsService.validatePanelId(panelId);
       if (!isValid) {
-        this.logger.warn(`Bot ${client.id} has invalid/inactive panelId: ${panelId}`);
-        client.emit('error', { message: `Panel ${panelId} not found or inactive` });
+        this.logger.warn(
+          `Bot ${client.id} has invalid/inactive panelId: ${panelId}`,
+        );
+        client.emit('error', {
+          message: `Panel ${panelId} not found or inactive`,
+        });
         client.disconnect();
         return;
       }
@@ -197,7 +218,9 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       timestamp: new Date().toISOString(),
     });
 
-    this.logger.log(`Total bots connected: ${this.getTotalBotCount()} across ${this.connectedBots.size} panel(s)`);
+    this.logger.log(
+      `Total bots connected: ${this.getTotalBotCount()} across ${this.connectedBots.size} panel(s)`,
+    );
 
     // Try to dispatch queued jobs for this panel
     this.tryPushQueuedJobOnReconnect(panelId);
@@ -217,12 +240,18 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const jobsService = this.moduleRef.get(JobsService, { strict: false });
         const result = await jobsService.tryDispatchNextJob(panelId);
         if (result.dispatched) {
-          this.logger.log(`Dispatched queued job to reconnected bot for panel ${panelId}`);
+          this.logger.log(
+            `Dispatched queued job to reconnected bot for panel ${panelId}`,
+          );
         } else {
-          this.logger.debug(`Reconnect dispatch for panel ${panelId}: ${result.reason}`);
+          this.logger.debug(
+            `Reconnect dispatch for panel ${panelId}: ${result.reason}`,
+          );
         }
       } catch (e) {
-        this.logger.warn(`Failed to dispatch on reconnect for panel ${panelId}: ${e.message}`);
+        this.logger.warn(
+          `Failed to dispatch on reconnect for panel ${panelId}: ${e.message}`,
+        );
       }
     }, 3000);
 
@@ -234,7 +263,9 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
    */
   handleDisconnect(client: Socket) {
     const panelId = this.socketToPanelId.get(client.id);
-    this.logger.log(`Bot disconnected: ${client.id} (panel: ${panelId || 'unknown'})`);
+    this.logger.log(
+      `Bot disconnected: ${client.id} (panel: ${panelId || 'unknown'})`,
+    );
 
     // Clean up maps
     this.socketToPanelId.delete(client.id);
@@ -261,46 +292,59 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const existingTimer = this.disconnectTimers.get(panelId);
     if (existingTimer) clearTimeout(existingTimer);
 
-    this.disconnectTimers.set(panelId, setTimeout(() => {
-      this.disconnectTimers.delete(panelId);
-      if (!this.isBotConnectedForPanel(panelId)) {
-        this.logger.warn(`Bot offline confirmed for panel ${panelId}`);
-        this.emitBotStatusToOperators(panelId, false, client.id);
+    this.disconnectTimers.set(
+      panelId,
+      setTimeout(() => {
+        this.disconnectTimers.delete(panelId);
+        if (!this.isBotConnectedForPanel(panelId)) {
+          this.logger.warn(`Bot offline confirmed for panel ${panelId}`);
+          this.emitBotStatusToOperators(panelId, false, client.id);
 
-        // Emit offline heartbeat to operators
-        const offlineHealth = {
-          extensionId: panelId,
-          type: 'automation',
-          status: 'offline',
-          panelId,
-          receivedAt: new Date().toISOString(),
-        };
-        this.extensionHealth.set(panelId, offlineHealth);
-        const opGw = this.getOperatorGateway();
-        if (opGw) {
-          opGw.emitToAll('extension:heartbeat', offlineHealth);
+          // Emit offline heartbeat to operators
+          const offlineHealth = {
+            extensionId: panelId,
+            type: 'automation',
+            status: 'offline',
+            panelId,
+            receivedAt: new Date().toISOString(),
+          };
+          this.extensionHealth.set(panelId, offlineHealth);
+          const opGw = this.getOperatorGateway();
+          if (opGw) {
+            opGw.emitToAll('extension:heartbeat', offlineHealth);
+          }
+
+          // Telegram alert
+          try {
+            const {
+              TelegramService,
+            } = require('../notifications/telegram.service');
+            const telegram = this.moduleRef.get(TelegramService, {
+              strict: false,
+            });
+            telegram
+              ?.alertBotDisconnected?.()
+              .catch((e) =>
+                this.logger.warn(
+                  `Telegram bot disconnect alert failed: ${e.message}`,
+                ),
+              );
+          } catch (err) {
+            this.logger.warn(
+              `Failed to send bot disconnect Telegram alert: ${err?.message || err}`,
+            );
+          }
         }
+      }, BotGateway.DISCONNECT_DEBOUNCE_MS),
+    );
 
-        // Telegram alert
-        try {
-          const { TelegramService } = require('../notifications/telegram.service');
-          const telegram = this.moduleRef.get(TelegramService, { strict: false });
-          telegram?.alertBotDisconnected?.().catch((e) => this.logger.warn(`Telegram bot disconnect alert failed: ${e.message}`));
-        } catch (err) {
-          this.logger.warn(`Failed to send bot disconnect Telegram alert: ${err?.message || err}`);
-        }
-
-      }
-    }, BotGateway.DISCONNECT_DEBOUNCE_MS));
-
-    this.logger.log(`Panel ${panelId} disconnect debounced — waiting ${BotGateway.DISCONNECT_DEBOUNCE_MS / 1000}s`);
+    this.logger.log(
+      `Panel ${panelId} disconnect debounced — waiting ${BotGateway.DISCONNECT_DEBOUNCE_MS / 1000}s`,
+    );
   }
 
   @SubscribeMessage('heartbeat')
-  handleHeartbeat(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleHeartbeat(@MessageBody() data: any, @ConnectedSocket() client: Socket) {
     this.logger.debug(`Heartbeat from bot ${client.id}`);
     client.emit('heartbeat_ack', { timestamp: new Date().toISOString() });
 
@@ -351,8 +395,11 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: any,
   ) {
-    const panelId = (client.handshake.query?.panelId as string) || data?.panelId || 'unknown';
-    this.logger.warn(`Circuit breaker activated for panel ${panelId}: ${data?.errors} errors`);
+    const panelId =
+      (client.handshake.query?.panelId as string) || data?.panelId || 'unknown';
+    this.logger.warn(
+      `Circuit breaker activated for panel ${panelId}: ${data?.errors} errors`,
+    );
 
     // Update extension health
     const health = this.extensionHealth.get(panelId);
@@ -379,7 +426,9 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: any,
   ) {
     const panelId = (client.handshake.query?.panelId as string) || 'unknown';
-    this.logger.log(`Selector health for ${panelId}: ${data?.matched}/${data?.total} OK, ${data?.failed} failed`);
+    this.logger.log(
+      `Selector health for ${panelId}: ${data?.matched}/${data?.total} OK, ${data?.failed} failed`,
+    );
 
     // Update extension health with selector data
     const health = this.extensionHealth.get(panelId);
@@ -418,7 +467,10 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: any,
   ) {
-    const panelId = (client.handshake.query?.panelId as string) || data?.metadata?.panelId || 'unknown';
+    const panelId =
+      (client.handshake.query?.panelId as string) ||
+      data?.metadata?.panelId ||
+      'unknown';
     // Forward to operators (no storage, just relay)
     const opGateway = this.getOperatorGateway();
     if (opGateway) {
@@ -436,7 +488,9 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
   resetCircuitBreakerForPanel(panelId: string): boolean {
     const panelBots = this.connectedBots.get(panelId);
     if (!panelBots || panelBots.size === 0) {
-      this.logger.warn(`Cannot reset circuit breaker — no bot connected for panel ${panelId}`);
+      this.logger.warn(
+        `Cannot reset circuit breaker — no bot connected for panel ${panelId}`,
+      );
       return false;
     }
 
@@ -458,10 +512,7 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('job_status')
-  handleJobStatus(
-    @MessageBody() data: any,
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleJobStatus(@MessageBody() data: any, @ConnectedSocket() client: Socket) {
     this.logger.log(`Job status from bot ${client.id}:`, data);
     client.emit('job_status_ack', { received: true });
   }
@@ -489,7 +540,9 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // the panel was active and then the panel got disabled — we don't want jobs
     // landing on a panel an operator just marked inactive.
     try {
-      const panelsService = this.moduleRef.get(PanelsService, { strict: false });
+      const panelsService = this.moduleRef.get(PanelsService, {
+        strict: false,
+      });
       const stillValid = await panelsService.validatePanelId(panelId);
       if (!stillValid) {
         this.logger.warn(
@@ -498,7 +551,9 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return false;
       }
     } catch (e: any) {
-      this.logger.error(`pushJobToPanel: validate failed for ${panelId}: ${e.message}`);
+      this.logger.error(
+        `pushJobToPanel: validate failed for ${panelId}: ${e.message}`,
+      );
       // Graceful degradation: if the panel service is down, fall through and try to dispatch.
     }
 
@@ -506,34 +561,64 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Sending to multiple bots would cause duplicate execution on the panel.
     for (const [botId, bot] of panelBots) {
       if (bot.connected) {
-        this.logger.log(`Pushing job ${job.id} to bot ${botId} (panel ${panelId}), waiting for ACK...`);
+        this.logger.log(
+          `Pushing job ${job.id} to bot ${botId} (panel ${panelId}), waiting for ACK...`,
+        );
         try {
-          const acked = await new Promise<boolean>((resolve) => {
+          const ackResult = await new Promise<{
+            acked: boolean;
+            rejected?: boolean;
+            reason?: string;
+          }>((resolve) => {
             const timer = setTimeout(() => {
-              this.logger.warn(`Job ${job.id} ACK timeout from bot ${botId} after ${ACK_TIMEOUT_MS}ms`);
-              resolve(false);
+              this.logger.warn(
+                `Job ${job.id} ACK timeout from bot ${botId} after ${ACK_TIMEOUT_MS}ms`,
+              );
+              resolve({ acked: false });
             }, ACK_TIMEOUT_MS);
 
             bot.emit('new_job', job, (ack: any) => {
               clearTimeout(timer);
-              this.logger.log(`Job ${job.id} ACKed by bot ${botId}: ${JSON.stringify(ack)}`);
-              resolve(true);
+              this.logger.log(
+                `Job ${job.id} ACKed by bot ${botId}: ${JSON.stringify(ack)}`,
+              );
+              // Bot can reject in the ACK (busy/cooldown/wrong panel) so the
+              // job reverts to QUEUED instead of dying as a 5min-stuck job.
+              // Legacy bots don't send `accepted` — absence means accepted.
+              if (ack && ack.accepted === false) {
+                resolve({ acked: true, rejected: true, reason: ack.reason });
+              } else {
+                resolve({ acked: true });
+              }
             });
           });
 
-          if (acked) {
+          if (ackResult.rejected) {
+            this.logger.warn(
+              `Job ${job.id} rejected by bot ${botId} (${ackResult.reason || 'no reason'}) — will re-queue`,
+            );
+            return false;
+          }
+
+          if (ackResult.acked) {
             this.markPanelBusy(panelId);
             return true;
           }
           // ACK timeout — bot may have disconnected, try next bot
-          this.logger.warn(`Bot ${botId} did not ACK job ${job.id}, trying next bot...`);
+          this.logger.warn(
+            `Bot ${botId} did not ACK job ${job.id}, trying next bot...`,
+          );
         } catch (err) {
-          this.logger.error(`Error pushing job ${job.id} to bot ${botId}: ${err.message}`);
+          this.logger.error(
+            `Error pushing job ${job.id} to bot ${botId}: ${err.message}`,
+          );
         }
       }
     }
 
-    this.logger.warn(`All bots for panel ${panelId} failed to ACK job ${job.id}`);
+    this.logger.warn(
+      `All bots for panel ${panelId} failed to ACK job ${job.id}`,
+    );
     return false;
   }
 
@@ -562,16 +647,31 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
   /**
    * Send search_user to all IDLE panel bots.
    * Returns list of panelIds that received the request.
+   * If excludePanelId is given (e.g. re-discovery after a panel reported NOT_FOUND),
+   * that panel is skipped to avoid asking it again.
    */
-  pushDiscoveryToIdlePanels(taskId: string, targetUsername: string): string[] {
+  pushDiscoveryToIdlePanels(
+    taskId: string,
+    targetUsername: string,
+    excludePanelId?: string,
+  ): string[] {
     const sentTo: string[] = [];
 
     for (const [panelId, panelBots] of this.connectedBots) {
       if (panelBots.size === 0) continue;
 
+      if (excludePanelId && panelId === excludePanelId) {
+        this.logger.log(
+          `Skipping discovery for panel ${panelId} — excluded (already reported NOT_FOUND)`,
+        );
+        continue;
+      }
+
       // Skip busy panels — don't interrupt active jobs
       if (this.busyPanels.has(panelId)) {
-        this.logger.log(`Skipping discovery for panel ${panelId} — bot is busy`);
+        this.logger.log(
+          `Skipping discovery for panel ${panelId} — bot is busy`,
+        );
         continue;
       }
 
@@ -588,20 +688,28 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       for (const deadId of deadSocketIds) {
         panelBots.delete(deadId);
-        this.logger.warn(`Cleaned up zombie socket ${deadId} for panel ${panelId} during discovery`);
+        this.logger.warn(
+          `Cleaned up zombie socket ${deadId} for panel ${panelId} during discovery`,
+        );
       }
       if (!bot) {
-        this.logger.warn(`No live sockets for panel ${panelId} after zombie cleanup`);
+        this.logger.warn(
+          `No live sockets for panel ${panelId} after zombie cleanup`,
+        );
         continue;
       }
 
       bot.emit('search_user', { taskId, targetUsername });
       sentTo.push(panelId);
-      this.logger.log(`Sent search_user to panel ${panelId} for "${targetUsername}" (task ${taskId})`);
+      this.logger.log(
+        `Sent search_user to panel ${panelId} for "${targetUsername}" (task ${taskId})`,
+      );
     }
 
     if (sentTo.length === 0) {
-      this.logger.warn(`No idle bots available for discovery of "${targetUsername}"`);
+      this.logger.warn(
+        `No idle bots available for discovery of "${targetUsername}"`,
+      );
     }
 
     return sentTo;
@@ -615,10 +723,15 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * Send create_user command to a specific panel's bot.
    * Used when discovery finds user doesn't exist on any panel.
    */
-  pushCreateUserToPanel(panelId: string, data: { taskId: string; targetUsername: string }): boolean {
+  pushCreateUserToPanel(
+    panelId: string,
+    data: { taskId: string; targetUsername: string },
+  ): boolean {
     const panelBots = this.connectedBots.get(panelId);
     if (!panelBots || panelBots.size === 0) {
-      this.logger.warn(`No bot connected for panel ${panelId} — cannot create user`);
+      this.logger.warn(
+        `No bot connected for panel ${panelId} — cannot create user`,
+      );
       return false;
     }
 
@@ -641,15 +754,21 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
     for (const deadId of deadIds) {
       panelBots.delete(deadId);
-      this.logger.warn(`Cleaned up zombie socket ${deadId} for panel ${panelId} during create_user`);
+      this.logger.warn(
+        `Cleaned up zombie socket ${deadId} for panel ${panelId} during create_user`,
+      );
     }
     if (!bot) {
-      this.logger.warn(`No live sockets for panel ${panelId} after zombie cleanup — cannot create user`);
+      this.logger.warn(
+        `No live sockets for panel ${panelId} after zombie cleanup — cannot create user`,
+      );
       return false;
     }
 
     bot.emit('create_user', data);
-    this.logger.log(`Sent create_user to panel ${panelId} for "${data.targetUsername}" (task ${data.taskId})`);
+    this.logger.log(
+      `Sent create_user to panel ${panelId} for "${data.targetUsername}" (task ${data.taskId})`,
+    );
     return true;
   }
 
@@ -661,7 +780,7 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     for (const [panelId, panelBots] of this.connectedBots) {
       if (panelBots.size > 0) allActive.push(panelId);
     }
-    return allActive.filter(id => !checkedPanelIds.includes(id));
+    return allActive.filter((id) => !checkedPanelIds.includes(id));
   }
 
   // ==========================================
@@ -669,7 +788,13 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // ==========================================
 
   // Pending balance check resolvers (panelId → resolve function)
-  private pendingBalanceChecks = new Map<string, { resolve: (balance: number | null) => void; timer: ReturnType<typeof setTimeout> }>();
+  private pendingBalanceChecks = new Map<
+    string,
+    {
+      resolve: (balance: number | null) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
 
   /**
    * WebSocket fallback for discovery results (when HTTP endpoint fails).
@@ -677,18 +802,52 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
    */
   @SubscribeMessage('discovery_result')
   async handleDiscoveryResultWs(
-    @MessageBody() data: { taskId: string; panelId?: string; found: boolean; error?: string },
+    @MessageBody()
+    data: {
+      taskId: string;
+      panelId?: string;
+      found: boolean;
+      error?: string;
+      matched?: number;
+      totalRows?: number;
+      paginationVisible?: boolean;
+      pageInfoText?: string;
+      reason?: string;
+    },
     @ConnectedSocket() client: Socket,
   ) {
-    const panelId = data.panelId || (client.handshake?.query?.panelId as string) || (client.handshake?.auth?.panelId as string) || 'default';
-    this.logger.log(`[WS Fallback] Discovery result from panel ${panelId}: found=${data.found} (task ${data.taskId})`);
+    const panelId =
+      data.panelId ||
+      (client.handshake?.query?.panelId as string) ||
+      (client.handshake?.auth?.panelId as string) ||
+      'default';
+    this.logger.log(
+      `[WS Fallback] Discovery result from panel ${panelId}: found=${data.found} (task ${data.taskId})`,
+    );
 
     try {
       const { DiscoveryService } = require('../discovery/discovery.service');
-      const discoveryService = this.moduleRef.get(DiscoveryService, { strict: false });
-      await discoveryService.handleDiscoveryResult(data.taskId, panelId, data.found, false, data.error);
+      const discoveryService = this.moduleRef.get(DiscoveryService, {
+        strict: false,
+      });
+      await discoveryService.handleDiscoveryResult(
+        data.taskId,
+        panelId,
+        data.found,
+        false,
+        data.error,
+        {
+          matched: data.matched,
+          totalRows: data.totalRows,
+          paginationVisible: data.paginationVisible,
+          pageInfoText: data.pageInfoText,
+          reason: data.reason,
+        },
+      );
     } catch (err: any) {
-      this.logger.error(`[WS Fallback] Failed to process discovery result: ${err.message}`);
+      this.logger.error(
+        `[WS Fallback] Failed to process discovery result: ${err.message}`,
+      );
     }
   }
 
@@ -697,18 +856,41 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
    */
   @SubscribeMessage('create_user_result')
   async handleCreateUserResultWs(
-    @MessageBody() data: { taskId: string; panelId?: string; success: boolean; targetUsername?: string; password?: string; error?: string },
+    @MessageBody()
+    data: {
+      taskId: string;
+      panelId?: string;
+      success: boolean;
+      targetUsername?: string;
+      password?: string;
+      error?: string;
+    },
     @ConnectedSocket() client: Socket,
   ) {
-    const panelId = data.panelId || (client.handshake?.query?.panelId as string) || (client.handshake?.auth?.panelId as string) || 'default';
-    this.logger.log(`[WS Fallback] Create user result from panel ${panelId}: success=${data.success} (task ${data.taskId})`);
+    const panelId =
+      data.panelId ||
+      (client.handshake?.query?.panelId as string) ||
+      (client.handshake?.auth?.panelId as string) ||
+      'default';
+    this.logger.log(
+      `[WS Fallback] Create user result from panel ${panelId}: success=${data.success} (task ${data.taskId})`,
+    );
 
     try {
       const { DiscoveryService } = require('../discovery/discovery.service');
-      const discoveryService = this.moduleRef.get(DiscoveryService, { strict: false });
-      await discoveryService.handleUserCreationResult(data.taskId, panelId, data.success, data.error);
+      const discoveryService = this.moduleRef.get(DiscoveryService, {
+        strict: false,
+      });
+      await discoveryService.handleUserCreationResult(
+        data.taskId,
+        panelId,
+        data.success,
+        data.error,
+      );
     } catch (err: any) {
-      this.logger.error(`[WS Fallback] Failed to process create user result: ${err.message}`);
+      this.logger.error(
+        `[WS Fallback] Failed to process create user result: ${err.message}`,
+      );
     }
   }
 
@@ -717,7 +899,11 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: any,
     @ConnectedSocket() client: Socket,
   ) {
-    const panelId = (client.handshake?.query?.panelId as string) || (client.handshake?.auth?.panelId as string) || data?.panelId || 'default';
+    const panelId =
+      (client.handshake?.query?.panelId as string) ||
+      (client.handshake?.auth?.panelId as string) ||
+      data?.panelId ||
+      'default';
     this.logger.log(`Balance result from panel ${panelId}: ${data?.balance}`);
 
     const pending = this.pendingBalanceChecks.get(panelId);
@@ -732,7 +918,10 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * Send check_balance to a specific panel's bot.
    * Returns a Promise that resolves with the balance or rejects on timeout.
    */
-  checkPanelBalance(panelId: string, timeoutMs = 10000): Promise<number | null> {
+  checkPanelBalance(
+    panelId: string,
+    timeoutMs = 10000,
+  ): Promise<number | null> {
     const panelBots = this.connectedBots.get(panelId);
     if (!panelBots || panelBots.size === 0) {
       return Promise.reject(new Error(`No bot connected for panel ${panelId}`));
@@ -834,7 +1023,9 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (socket.connected) return true;
       // Cleanup zombie
       panelBots.delete(socketId);
-      this.logger.warn(`Cleaned up zombie socket ${socketId} for panel ${panelId} in isBotConnectedForPanel`);
+      this.logger.warn(
+        `Cleaned up zombie socket ${socketId} for panel ${panelId} in isBotConnectedForPanel`,
+      );
     }
     return false;
   }

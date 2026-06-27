@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BotService, JobProgress } from '../bot/bot.service';
 import { JobsService } from '../jobs/jobs.service';
@@ -51,13 +57,15 @@ export class StatusService {
       amount: Number(request.amount),
       createdAt: request.createdAt,
       updatedAt: request.updatedAt,
-      job: request.job ? {
-        id: request.job.id,
-        status: request.job.status,
-        startedAt: request.job.startedAt,
-        completedAt: request.job.completedAt,
-        progress,
-      } : null,
+      job: request.job
+        ? {
+            id: request.job.id,
+            status: request.job.status,
+            startedAt: request.job.startedAt,
+            completedAt: request.job.completedAt,
+            progress,
+          }
+        : null,
     };
   }
 
@@ -98,7 +106,11 @@ export class StatusService {
       requestId: job.requestId,
       status: job.status,
       targetUsername: job.targetUsername || job.request?.targetUsername || '',
-      amount: job.amount ? Number(job.amount) : (job.request ? Number(job.request.amount) : 0),
+      amount: job.amount
+        ? Number(job.amount)
+        : job.request
+          ? Number(job.request.amount)
+          : 0,
       createdAt: job.createdAt,
       startedAt: job.startedAt,
       completedAt: job.completedAt,
@@ -138,11 +150,13 @@ export class StatusService {
         targetUsername: r.targetUsername,
         amount: Number(r.amount),
         createdAt: r.createdAt,
-        job: r.job ? {
-          id: r.job.id,
-          status: r.job.status,
-          progress,
-        } : null,
+        job: r.job
+          ? {
+              id: r.job.id,
+              status: r.job.status,
+              progress,
+            }
+          : null,
       };
     });
   }
@@ -154,19 +168,24 @@ export class StatusService {
     const queueStatus = await this.jobsService.getQueueStatus();
 
     // Get counts
-    const [activeJobs, queuedJobs, pendingRequests, failedToday] = await Promise.all([
-      this.prisma.job.count({ where: { status: 'PROCESSING' } }),
-      this.prisma.job.count({ where: { status: 'QUEUED' } }),
-      this.prisma.request.count({
-        where: { status: { in: ['PENDING_PROOF', 'VALIDATING', 'VALIDATION_FAILED'] } },
-      }),
-      this.prisma.job.count({
-        where: {
-          status: 'FAILED',
-          completedAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
-        },
-      }),
-    ]);
+    const [activeJobs, queuedJobs, pendingRequests, failedToday] =
+      await Promise.all([
+        this.prisma.job.count({ where: { status: 'PROCESSING' } }),
+        this.prisma.job.count({ where: { status: 'QUEUED' } }),
+        this.prisma.request.count({
+          where: {
+            status: {
+              in: ['PENDING_PROOF', 'VALIDATING', 'VALIDATION_FAILED'],
+            },
+          },
+        }),
+        this.prisma.job.count({
+          where: {
+            status: 'FAILED',
+            completedAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+          },
+        }),
+      ]);
 
     return {
       bot: {

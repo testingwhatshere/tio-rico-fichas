@@ -1,4 +1,10 @@
-import { Injectable, BadRequestException, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
@@ -56,7 +62,9 @@ export class UploadsService {
       this.cloudName = match[3];
       this.logger.log(`Cloudinary configured: cloud=${this.cloudName}`);
     } else {
-      this.logger.warn('CLOUDINARY_URL not found or invalid — signed uploads will not work');
+      this.logger.warn(
+        'CLOUDINARY_URL not found or invalid — signed uploads will not work',
+      );
       this.apiKey = '';
       this.apiSecret = '';
       this.cloudName = '';
@@ -75,7 +83,9 @@ export class UploadsService {
     mimeType: string,
   ): Promise<SignedUploadParams> {
     if (!this.apiSecret) {
-      throw new BadRequestException('Cloudinary not configured for signed uploads');
+      throw new BadRequestException(
+        'Cloudinary not configured for signed uploads',
+      );
     }
 
     // Validate file size
@@ -87,7 +97,10 @@ export class UploadsService {
     }
 
     // Validate MIME type
-    if (!mimeType.startsWith('image/') && !this.allowedMimeTypes.includes(mimeType)) {
+    if (
+      !mimeType.startsWith('image/') &&
+      !this.allowedMimeTypes.includes(mimeType)
+    ) {
       throw new BadRequestException(
         `Tipo de archivo no permitido: ${mimeType}. Permitidos: imagenes y PDF`,
       );
@@ -137,8 +150,12 @@ export class UploadsService {
     const timestamp = Math.round(Date.now() / 1000);
     const publicId = uuidv4();
     const folder = 'proofs';
-    // PDFs must use 'raw' resource_type in Cloudinary; images use 'image'
-    const resourceType = mimeType === 'application/pdf' ? 'raw' : 'image';
+    // Always upload as 'image' — Cloudinary accepts PDFs as multi-page image assets.
+    // Uploading as 'raw' triggered Cloudinary's "Restricted media types" 401 on delivery
+    // because PDF/ZIP raw delivery is disabled by default. As 'image' + transformation
+    // (f_jpg,pg_1 at delivery time via toDeliverableUrl) Cloudinary returns a JPG of the
+    // first page, which is never blocked by that setting.
+    const resourceType = 'image';
 
     // resource_type goes in the URL, NOT in signed params — including it causes signature mismatch (401)
     const paramsToSign: Record<string, any> = {
@@ -147,9 +164,14 @@ export class UploadsService {
       public_id: publicId,
     };
 
-    const signature = cloudinary.utils.api_sign_request(paramsToSign, this.apiSecret);
+    const signature = cloudinary.utils.api_sign_request(
+      paramsToSign,
+      this.apiSecret,
+    );
 
-    this.logger.log(`Signed upload generated for request=${requestId}, publicId=${publicId}, resourceType=${resourceType}`);
+    this.logger.log(
+      `Signed upload generated for request=${requestId}, publicId=${publicId}, resourceType=${resourceType}`,
+    );
 
     return {
       signature,
@@ -181,19 +203,26 @@ export class UploadsService {
       throw new BadRequestException('File size exceeds 10MB limit');
     }
 
-    if (!file.mimetype.startsWith('image/') && !this.allowedMimeTypes.includes(file.mimetype)) {
+    if (
+      !file.mimetype.startsWith('image/') &&
+      !this.allowedMimeTypes.includes(file.mimetype)
+    ) {
       throw new BadRequestException(
         `Invalid file type: ${file.mimetype}. Allowed: images and PDF`,
       );
     }
 
-    this.logger.log(`Uploading file: type=${file.mimetype}, size=${file.size}, name=${file.originalname}`);
+    this.logger.log(
+      `Uploading file: type=${file.mimetype}, size=${file.size}, name=${file.originalname}`,
+    );
 
     const hash = createHash('sha256').update(file.buffer).digest('hex');
     const id = uuidv4();
 
     const result = await new Promise<UploadApiResponse>((resolve, reject) => {
-      const resourceType = file.mimetype === 'application/pdf' ? 'raw' : 'image';
+      // Always 'image' — see comment in generateSignedUploadParams. Cloudinary
+      // accepts PDFs as multi-page image assets and we apply f_jpg,pg_1 in delivery.
+      const resourceType = 'image';
       const stream = cloudinary.uploader.upload_stream(
         {
           folder: 'proofs',
@@ -222,7 +251,9 @@ export class UploadsService {
     };
 
     this.files.set(id, uploadedFile);
-    this.logger.log(`File uploaded to Cloudinary: ${result.secure_url} (id: ${id})`);
+    this.logger.log(
+      `File uploaded to Cloudinary: ${result.secure_url} (id: ${id})`,
+    );
 
     return uploadedFile;
   }
@@ -248,7 +279,9 @@ export class UploadsService {
     userRole: string,
   ): Promise<UploadedFile> {
     const file = await this.getFile(idOrUrl);
-    const isOperator = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(userRole);
+    const isOperator = ['OPERATOR', 'SENIOR_OPERATOR', 'ADMIN'].includes(
+      userRole,
+    );
     if (!isOperator && file.userId && file.userId !== userId) {
       throw new ForbiddenException('You do not have access to this file');
     }
@@ -265,7 +298,9 @@ export class UploadsService {
     }
     const response = await fetch(url);
     if (!response.ok) {
-      throw new NotFoundException(`Failed to download file from URL: HTTP ${response.status}`);
+      throw new NotFoundException(
+        `Failed to download file from URL: HTTP ${response.status}`,
+      );
     }
     return Buffer.from(await response.arrayBuffer());
   }
@@ -277,7 +312,8 @@ export class UploadsService {
     const file = this.files.get(id);
     if (file) {
       try {
-        const resourceType = file.mimeType === 'application/pdf' ? 'raw' : 'image';
+        const resourceType =
+          file.mimeType === 'application/pdf' ? 'raw' : 'image';
         await cloudinary.uploader.destroy(file.cloudinaryPublicId, {
           resource_type: resourceType,
         });
@@ -291,9 +327,14 @@ export class UploadsService {
   /**
    * Delete a file from Cloudinary by its public ID directly
    */
-  async deleteByPublicId(publicId: string, resourceType: 'image' | 'raw' = 'image'): Promise<void> {
+  async deleteByPublicId(
+    publicId: string,
+    resourceType: 'image' | 'raw' = 'image',
+  ): Promise<void> {
     try {
-      await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+      await cloudinary.uploader.destroy(publicId, {
+        resource_type: resourceType,
+      });
     } catch (err) {
       this.logger.warn(`Failed to delete from Cloudinary: ${err.message}`);
     }
@@ -310,5 +351,35 @@ export class UploadsService {
       return idOrUrl.split('/').pop() || idOrUrl;
     }
     return idOrUrl;
+  }
+
+  /**
+   * Normalize a Cloudinary URL so PDFs are delivered as a JPG of the first page.
+   * Cloudinary's "Restricted media types" setting blocks delivery of raw PDFs (returns 401),
+   * but allows transformation results. Inserting `f_jpg,pg_1` after `/upload/` makes
+   * Cloudinary render the PDF's first page as JPEG, which always succeeds.
+   *
+   * Idempotent: if the URL already contains the transformation, it's returned unchanged.
+   * For non-PDF URLs or non-Cloudinary URLs, returns the input as-is.
+   */
+  toDeliverableUrl(url: string, mimeType?: string): string {
+    if (!url || typeof url !== 'string') return url;
+    if (!url.includes('res.cloudinary.com')) return url;
+
+    const isPdf =
+      mimeType === 'application/pdf' ||
+      url.toLowerCase().endsWith('.pdf') ||
+      url.includes('/raw/upload/');
+    if (!isPdf) return url;
+
+    if (url.includes('/f_jpg,pg_1/') || url.includes('/pg_1,f_jpg/')) {
+      return url;
+    }
+
+    // Legacy assets uploaded with resource_type='raw' need both the resource_type swap
+    // AND the transformation; assets uploaded as 'image' just need the transformation.
+    let out = url.replace('/raw/upload/', '/image/upload/');
+    out = out.replace('/image/upload/', '/image/upload/f_jpg,pg_1/');
+    return out;
   }
 }

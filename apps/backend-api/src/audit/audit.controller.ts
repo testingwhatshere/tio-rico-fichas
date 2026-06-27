@@ -32,10 +32,7 @@ export class AuditController {
    */
   @Get('stats')
   @Roles('SENIOR_OPERATOR', 'ADMIN')
-  async getActionStats(
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-  ) {
+  async getActionStats(@Query('from') from?: string, @Query('to') to?: string) {
     const fromDate = from ? new Date(from) : undefined;
     const toDate = to ? new Date(to) : undefined;
     return this.auditService.getActionStats(fromDate, toDate);

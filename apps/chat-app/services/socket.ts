@@ -294,7 +294,12 @@ export const connectSocket = (token: string) => {
       status: 'COMPLETED',
     });
     notifyBrowser('Fichas cargadas!', 'Tus fichas ya estan en tu cuenta.', { requestId: data.requestId });
-    // (Internal balance tracking removed — real balance is on the gaming panel.)
+    // Native alert para que el usuario lo vea aunque no este en la pantalla del chat.
+    const { Alert } = require('react-native');
+    Alert.alert(
+      '¡Fichas cargadas! 🎰',
+      'Tus fichas ya estan en tu cuenta. ¡A jugar!',
+    );
   });
 
   socket.on('job:failed', (data: JobEvent) => {
@@ -303,6 +308,11 @@ export const connectSocket = (token: string) => {
       status: 'FAILED',
     });
     notifyBrowser('Error en la carga', 'Hubo un problema. Un operador va a revisarlo.', { requestId: data.requestId });
+    const { Alert } = require('react-native');
+    Alert.alert(
+      'Error al cargar fichas',
+      'Tuvimos un problema cargando tus fichas. Un operador ya esta revisando tu caso.',
+    );
   });
 
   // ==========================================
@@ -353,6 +363,29 @@ export const connectSocket = (token: string) => {
       'Premio Pagado!',
       data.message || 'Tu premio fue transferido a tu cuenta.',
     );
+  });
+
+  // Global handler para prize_claim:status_update — useSocketHandlers solo se monta
+  // dentro de /chat, asi que si el usuario esta en otra pantalla cuando el operador
+  // aprueba/rechaza/completa el premio, el mensaje se perderia. Aca lo mostramos como
+  // Alert nativo para que siempre lo vea, este donde este en la app.
+  socket.on('prize_claim:status_update', (data: { claimId: string; status: string; message?: string; reason?: string; amount?: number }) => {
+    console.log('[Socket] Prize claim status update:', data);
+    if (!data.message) return;
+    // Solo notificamos los estados finales/relevantes para evitar spam de pasos intermedios
+    // (VERIFYING_CHIPS, etc. ya muestran progreso dentro del chat).
+    const visibleStatuses = ['COMPLETED', 'REJECTED', 'APPROVED', 'VERIFICATION_FAILED', 'FAILED', 'PAID'];
+    if (!visibleStatuses.includes(data.status)) return;
+    const { Alert } = require('react-native');
+    const title =
+      data.status === 'COMPLETED' || data.status === 'PAID'
+        ? '¡Premio cobrado!'
+        : data.status === 'REJECTED'
+        ? 'Pedido de cobro rechazado'
+        : data.status === 'APPROVED'
+        ? 'Pedido de cobro aprobado'
+        : 'Actualizacion de tu cobro';
+    Alert.alert(title, data.message);
   });
 
   // ==========================================

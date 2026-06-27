@@ -113,6 +113,37 @@ export class ApiClient {
   }
 
   /**
+   * Report that the target username was not found on this panel.
+   * Backend will invalidate User.panelId, mark job FAILED with rediscovery marker,
+   * and re-run discovery across other panels.
+   * Maps to: POST /bot/jobs/:jobId/user-not-found
+   */
+  static async reportUserNotFoundOnPanel(config, jobId, targetUsername) {
+    try {
+      const response = await ApiClient.fetchWithTimeout(`${config.backendUrl}/api/bot/jobs/${jobId}/user-not-found`, {
+        method: 'POST',
+        headers: ApiClient.getHeaders(config),
+        body: JSON.stringify({
+          targetUsername,
+          panelId: config.panelId || null,
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        console.error('[ApiClient] Failed to report user-not-found:', response.status, response.statusText, body);
+        return null;
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('[ApiClient] user-not-found report failed:', error.message);
+      return null;
+    }
+  }
+
+  /**
    * Report job progress to backend
    * Maps to: POST /bot/jobs/:jobId/progress
    */
