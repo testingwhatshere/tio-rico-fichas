@@ -1,0 +1,299 @@
+/* ============================================================
+   Tío Rico · Panel del dueño
+   Paño de casino oscuro + oro. Fraunces para las cifras,
+   Archivo para todo lo demás.
+   ============================================================ */
+
+:root {
+  --bg: #0c1310;
+  --card: #131d17;
+  --card-2: #182620;
+  --line: #24352b;
+  --ivory: #ede7d8;
+  --muted: #8ea396;
+  --gold: #d8b26c;
+  --gold-bright: #ecca8a;
+  --win: #7fd6a0;
+  --loss: #e08976;
+  --display: 'Fraunces', Georgia, serif;
+  --body: 'Archivo', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { color-scheme: dark; }
+
+body {
+  background:
+    radial-gradient(1100px 500px at 70% -10%, rgba(216, 178, 108, 0.05), transparent 60%),
+    var(--bg);
+  color: var(--ivory);
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.5;
+  min-height: 100vh;
+  padding: 0 clamp(16px, 4vw, 48px) 40px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- ficha de casino (marca de sección) ---------- */
+.chip {
+  display: inline-block;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--gold-bright), var(--gold) 55%, #a5834a);
+  position: relative;
+  flex: none;
+}
+.chip::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(12, 19, 16, 0.65);
+}
+.chip.sm { width: 13px; height: 13px; }
+.chip.sm::after { inset: 2px; border-width: 1px; }
+
+/* ---------- header ---------- */
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 0 8px;
+}
+
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand h1 {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 24px;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+}
+.brand-sub {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.ranges {
+  display: flex;
+  gap: 4px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px;
+}
+.ranges button {
+  font-family: var(--body);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
+}
+.ranges button:hover { color: var(--ivory); }
+.ranges button.active {
+  background: var(--gold);
+  color: #1a140a;
+  font-weight: 600;
+}
+.ranges button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--gold-bright);
+  outline-offset: 2px;
+}
+
+/* ---------- asiento del período (hero) ---------- */
+.ledger {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px clamp(24px, 6vw, 96px);
+  align-items: flex-end;
+  padding: clamp(24px, 5vw, 48px) 4px clamp(28px, 5vw, 52px);
+  border-bottom: 1px solid var(--line);
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  margin-bottom: 6px;
+}
+
+.ledger-amount {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: clamp(46px, 9vw, 92px);
+  line-height: 1;
+  color: var(--gold-bright);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-sub {
+  color: var(--muted);
+  font-size: 15px;
+  margin-top: 10px;
+}
+.ledger-sub strong { color: var(--ivory); font-weight: 600; }
+
+.ledger-side { display: grid; gap: 10px; min-width: 240px; }
+.ledger-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 24px;
+  border-bottom: 1px dashed var(--line);
+  padding-bottom: 8px;
+}
+.ledger-row dt { color: var(--muted); font-size: 13px; }
+.ledger-row dd {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.win { color: var(--win); }
+.loss { color: var(--loss); }
+
+/* ---------- grilla de cards ---------- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+  padding-top: 20px;
+}
+
+.card {
+  background: linear-gradient(170deg, var(--card-2), var(--card) 45%);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px 20px 20px;
+  min-width: 0;
+}
+.card.wide { grid-column: 1 / -1; }
+
+.card h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--body);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: 16px;
+}
+.card h2 small {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.chart-box { position: relative; height: 260px; }
+.chart-box.short { height: 190px; }
+
+/* ---------- cargas por panel ---------- */
+.paneles { display: grid; gap: 14px; }
+.panel-row { display: grid; gap: 5px; }
+.panel-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.panel-top .nombre { font-weight: 600; font-size: 14px; }
+.panel-top .monto {
+  font-family: var(--display);
+  color: var(--gold-bright);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+.panel-bar {
+  height: 8px;
+  border-radius: 99px;
+  background: rgba(36, 53, 43, 0.8);
+  overflow: hidden;
+}
+.panel-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #a5834a, var(--gold-bright));
+  width: 0;
+  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.panel-note { color: var(--muted); font-size: 12px; }
+.vacio { color: var(--muted); font-size: 14px; padding: 12px 0; }
+
+/* ---------- stats (premios / jugadores) ---------- */
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 14px;
+}
+.stats > div { display: grid; align-content: start; gap: 2px; }
+.stats dt { color: var(--muted); font-size: 12.5px; }
+.stats dd {
+  font-family: var(--display);
+  font-size: 26px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.stat-note { color: var(--muted); font-size: 12px; }
+
+/* ---------- tabla mensual ---------- */
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; min-width: 560px; }
+th, td { text-align: right; padding: 9px 12px; font-variant-numeric: tabular-nums; }
+th:first-child, td:first-child { text-align: left; }
+thead th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--line);
+}
+tbody tr { border-bottom: 1px dashed var(--line); }
+tbody tr:last-child { border-bottom: none; }
+tbody tr.actual { background: rgba(216, 178, 108, 0.06); }
+td.entro { color: var(--gold-bright); font-family: var(--display); font-size: 16px; }
+
+/* ---------- footer ---------- */
+footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 12.5px;
+  padding: 26px 4px 0;
+}
+
+/* ---------- estados ---------- */
+#app.loading .grid, #app.loading .ledger { opacity: 0.45; }
+.grid, .ledger { transition: opacity 0.25s; }
+
+@media (max-width: 640px) {
+  .ledger-side { min-width: 100%; }
+  .stats dd { font-size: 22px; }
+  .ranges { width: 100%; justify-content: space-between; overflow-x: auto; }
+  .ranges button { padding: 7px 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

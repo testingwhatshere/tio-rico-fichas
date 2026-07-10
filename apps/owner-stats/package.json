@@ -1,0 +1,14 @@
+{
+  "name": "owner-stats",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Panel de KPIs de negocio para el dueño de la plataforma. Solo lectura contra la DB.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  }
+}
