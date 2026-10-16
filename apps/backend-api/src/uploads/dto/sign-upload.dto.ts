@@ -1,4 +1,11 @@
-import { IsString, IsNumber, IsPositive, Max } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsPositive,
+  Max,
+  IsOptional,
+  IsBoolean,
+} from 'class-validator';
 
 export class SignUploadDto {
   @IsString()
@@ -25,4 +32,13 @@ export class ConfirmProofUploadDto {
 
   @IsString()
   fileHash: string;
+
+  /**
+   * El cliente sabe mostrarle al jugador "transferiste de mas, ¿lo cargamos?".
+   * Solo lo manda el chat web; el APK no lo tiene y su carga sigue yendo al
+   * operador como siempre.
+   */
+  @IsOptional()
+  @IsBoolean()
+  canConfirmOverpaid?: boolean;
 }

@@ -26,7 +26,7 @@ import { withCache } from '@/services/cache';
 // =============================================================================
 
 /** Base URL del backend API desde variables de entorno */
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://tiorico-api.onrender.com/api';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://tiorico-api-axfb.onrender.com/api';
 
 /** Timeout para requests en milisegundos */
 const API_TIMEOUT = parseInt(process.env.EXPO_PUBLIC_API_TIMEOUT || '30000', 10);
@@ -683,10 +683,27 @@ export const requestsApi = {
         cloudinaryUrl: secureUrl,
         cloudinaryPublicId: publicId,
         fileHash,
+        // Solo el chat web sabe preguntarle al jugador si carga lo que
+        // transfirio de mas. El APK sigue mandando esos casos al operador.
+        ...(Platform.OS === 'web' ? { canConfirmOverpaid: true } : {}),
       },
     );
 
     return confirmResponse.data;
+  },
+
+  /**
+   * Responde "transferiste de mas, ¿cargamos el monto del comprobante?".
+   */
+  respondOverpaidOffer: async (
+    requestId: string,
+    accept: boolean,
+  ): Promise<{ requestId: string; status: string }> => {
+    const response = await api.post<{ requestId: string; status: string }>(
+      `/requests/${requestId}/overpaid-offer`,
+      { accept },
+    );
+    return response.data;
   },
 
   /**

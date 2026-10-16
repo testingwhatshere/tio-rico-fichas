@@ -1,5 +1,13 @@
 // Options Page Logic - Glassmorphism Design
 
+// Paneles de producción (tabla Panel en DB — fijos, no van a cambiar).
+// El dropdown se popula SIEMPRE desde acá; loadPanels() solo refresca best-effort.
+const FALLBACK_PANELS = [
+  { id: '6a6a6b21-c731-47cb-98a1-21777edb965e', name: 'Panel A', isActive: true },
+  { id: '9751125e-32d7-4137-ac52-bdffb7e3296d', name: 'Panel B', isActive: true },
+  { id: '345666ee-1994-493b-b426-436f4037512c', name: 'Panel C', isActive: true },
+];
+
 // HTML escape utility to prevent XSS when injecting dynamic values into innerHTML
 function escapeHtml(str) {
   if (!str) return '';
@@ -11,8 +19,59 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+/**
+ * Deja un campo a la vista pero sin poder editarse, con una nota al pie.
+ * Se usa en las builds por-panel, donde estos valores vienen del codigo.
+ */
+function lockField(id) {
+  // Todo entre try/catch: esto es cosmetico, y si fallara cortaria el resto del
+  // arranque de Opciones — que es donde se cargan las credenciales del panel.
+  // Que se vea feo es tolerable; que no se pueda configurar el panel, no.
+  try {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.readOnly = true;
+    el.tabIndex = -1;
+    el.style.opacity = '0.6';
+    el.style.cursor = 'not-allowed';
+    el.title = 'Fijo en esta instalacion — no hace falta tocarlo';
+    const cont = el.parentElement;
+    if (cont && !cont.querySelector('.locked-note')) {
+      const note = document.createElement('p');
+      note.className = 'locked-note';
+      note.textContent = 'Viene configurado. No hace falta cambiarlo.';
+      note.style.cssText = 'font-size:11px;color:#a78bfa;margin-top:4px;';
+      cont.appendChild(note);
+    }
+  } catch (err) {
+    console.warn('[Options] No se pudo fijar el campo', id, err);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   await loadSettings();
+  // Populate the panel dropdown right away from the baked-in list so it never
+  // depends on the backend being reachable; loadPanels() refreshes it later.
+  const panelSelect = document.getElementById('panel-id');
+  if (globalThis.PANEL_LOCK?.id) {
+    // Build bloqueada a un panel: mostrarlo fijo, sin posibilidad de cambiarlo
+    const lock = globalThis.PANEL_LOCK;
+    renderPanelOptions(panelSelect, [{ id: lock.id, name: lock.name || lock.id, isActive: true }], lock.id);
+    panelSelect.disabled = true;
+    // La direccion del servidor y la clave tambien vienen fijas del build. El
+    // service worker las pisa igual, pero mientras siguieran editables la
+    // operadora podia cambiarlas creyendo que asi arreglaba algo — y de hecho
+    // fue lo que paso al mudar el backend: se guardo el panel vacio y la
+    // extension quedo rechazada en loop sin cargar una sola ficha.
+    //
+    // readOnly y no disabled: un campo deshabilitado no viaja en el FormData
+    // del submit y se guardaria vacio, que es exactamente el bug que estamos
+    // tratando de evitar.
+    lockField('backend-url');
+    lockField('api-key');
+  } else {
+    renderPanelOptions(panelSelect, FALLBACK_PANELS, panelSelect.dataset.savedValue || '');
+  }
   await loadNotificationSettings();
   await loadPanelProfile();
   setupEventListeners();
@@ -43,7 +102,8 @@ async function loadSettings() {
 function populateForm(config) {
   document.getElementById('backend-url').value = config.backendUrl || '';
   document.getElementById('api-key').value = config.apiKey || '';
-  // panelId is now a <select> — set value after panels are loaded, store for later
+  // panelId is a <select>: store the saved value; the dropdown itself is
+  // rendered from FALLBACK_PANELS right after loadSettings() in DOMContentLoaded.
   document.getElementById('panel-id').dataset.savedValue = config.panelId || '';
   document.getElementById('panel-url').value = config.panelUrl || '';
   if (document.getElementById('panelProfileUrl')) {
@@ -51,10 +111,12 @@ function populateForm(config) {
   }
   document.getElementById('panel-username').value = config.panelUsername || '';
   document.getElementById('panel-password').value = config.panelPassword || '';
-  const MIN_ALLOWED_DELAY = 1000;
+  // Piso bajado de 1000ms: el trabajo real del bot son 1-3s y el resto era espera
+  // fabricada. Se mantiene un minimo distinto de cero para que nunca sea instantaneo.
+  const MIN_ALLOWED_DELAY = 200;
   const MAX_ALLOWED_DELAY = 15000;
-  const minDelay = Math.max(MIN_ALLOWED_DELAY, Math.min(MAX_ALLOWED_DELAY, config.minDelay ?? 2000));
-  const maxDelay = Math.max(MIN_ALLOWED_DELAY, Math.min(MAX_ALLOWED_DELAY, config.maxDelay ?? 7000));
+  const minDelay = Math.max(MIN_ALLOWED_DELAY, Math.min(MAX_ALLOWED_DELAY, config.minDelay ?? 400));
+  const maxDelay = Math.max(MIN_ALLOWED_DELAY, Math.min(MAX_ALLOWED_DELAY, config.maxDelay ?? 1200));
   document.getElementById('min-delay').value = minDelay;
   document.getElementById('max-delay').value = Math.max(minDelay, maxDelay);
   document.getElementById('debug-mode').checked = config.debugMode || false;
@@ -127,10 +189,21 @@ async function saveSettings() {
       return;
     }
 
+    // Never silently wipe a previously saved panelId: if the select is empty
+    // (panel list failed to load / user didn't touch it), keep the saved value.
+    // In a locked build, PANEL_LOCK always wins (a disabled <select> is not
+    // included in FormData).
+    const panelSelect = document.getElementById('panel-id');
+    const selectedPanelId = formData.get('panelId') || '';
+    const savedPanelId = panelSelect.dataset.savedValue || '';
+    if (!globalThis.PANEL_LOCK?.id && !selectedPanelId && savedPanelId) {
+      showToast('No se seleccionó panel — se mantiene el panel guardado', 'warning');
+    }
+
     const config = {
       backendUrl: formData.get('backendUrl'),
       apiKey: formData.get('apiKey'),
-      panelId: formData.get('panelId') || '',
+      panelId: globalThis.PANEL_LOCK?.id || selectedPanelId || savedPanelId,
       panelUrl: formData.get('panelUrl'),
       panelProfileUrl: document.getElementById('panelProfileUrl')?.value?.trim() || '',
       panelUsername: formData.get('panelUsername'),
@@ -147,7 +220,7 @@ async function saveSettings() {
     }
 
     // Enforce absolute bounds (Golden Rule #1: slower than human)
-    const MIN_ALLOWED_DELAY = 1000;  // 1 second minimum
+    const MIN_ALLOWED_DELAY = 200;   // 200ms minimo: nunca instantaneo
     const MAX_ALLOWED_DELAY = 15000; // 15 seconds maximum
     if (config.minDelay < MIN_ALLOWED_DELAY || config.maxDelay > MAX_ALLOWED_DELAY) {
       showToast(
@@ -159,6 +232,7 @@ async function saveSettings() {
 
     // Save to storage (critical — persists even if SW is suspended)
     await chrome.storage.local.set({ config });
+    panelSelect.dataset.savedValue = config.panelId;
     showToast('Configuración guardada exitosamente', 'success');
     updateStatus();
 
@@ -299,8 +373,42 @@ function updateStatusIcon(type, success) {
   }
 }
 
+// Render the panel <option> list and restore the selected value
+function renderPanelOptions(selectEl, panels, savedValue) {
+  selectEl.innerHTML = '<option value="" style="background:#1e1b4b;color:#a78bfa;">Seleccionar panel...</option>';
+
+  for (const panel of panels) {
+    const opt = document.createElement('option');
+    opt.value = panel.id;
+    opt.textContent = escapeHtml(panel.name);
+    opt.style.cssText = 'background:#1e1b4b;color:white;';
+    if (!panel.isActive) {
+      opt.textContent += ' [inactivo]';
+      opt.style.color = '#6b7280';
+    }
+    selectEl.appendChild(opt);
+  }
+
+  // Never drop a saved panelId even if it's not in the list — losing it here
+  // would let a later save wipe the config.
+  if (savedValue) {
+    selectEl.value = savedValue;
+    if (selectEl.value !== savedValue) {
+      const opt = document.createElement('option');
+      opt.value = savedValue;
+      opt.textContent = savedValue + ' (guardado)';
+      opt.style.cssText = 'background:#1e1b4b;color:white;';
+      selectEl.appendChild(opt);
+      selectEl.value = savedValue;
+    }
+  }
+}
+
 // Fetch available panels from backend and populate the dropdown
 async function loadPanels() {
+  // Locked build: the panel is fixed, nothing to refresh
+  if (globalThis.PANEL_LOCK?.id) return;
+
   const backendUrl = document.getElementById('backend-url').value;
   const apiKey = document.getElementById('api-key').value;
   const selectEl = document.getElementById('panel-id');
@@ -317,25 +425,11 @@ async function loadPanels() {
 
     if (!response.ok) return;
     const panels = await response.json();
+    if (!Array.isArray(panels) || panels.length === 0) return;
 
-    // Keep first default option, clear the rest
-    const savedValue = selectEl.dataset.savedValue || selectEl.value || '';
-    selectEl.innerHTML = '<option value="" style="background:#1e1b4b;color:#a78bfa;">Seleccionar panel...</option>';
-
-    for (const panel of panels) {
-      const opt = document.createElement('option');
-      opt.value = panel.id;
-      opt.textContent = escapeHtml(panel.name);
-      opt.style.cssText = 'background:#1e1b4b;color:white;';
-      if (!panel.isActive) {
-        opt.textContent += ' [inactivo]';
-        opt.style.color = '#6b7280';
-      }
-      selectEl.appendChild(opt);
-    }
-
-    // Restore saved value
-    if (savedValue) selectEl.value = savedValue;
+    // Preserve an in-progress (unsaved) selection over the stored one
+    const savedValue = selectEl.value || selectEl.dataset.savedValue || '';
+    renderPanelOptions(selectEl, panels, savedValue);
   } catch (e) {
     console.warn('Could not load panels:', e.message);
   } finally {

@@ -1,4 +1,5 @@
 // Service Worker - Main orchestrator for the automation bot
+import '../shared/panel-lock.js';
 import { ApiClient } from './api-client.js';
 import { JobProcessor } from './job-processor.js';
 
@@ -26,10 +27,18 @@ let state = {
   lastJobCompletedAt: 0,       // Cooldown tracking
   consecutiveJobErrors: 0,      // Consecutive job failures for heartbeat reporting
   circuitBreakerActive: false,  // Circuit breaker: pause after repeated failures
+  recentJobErrors: [],          // Motivos de las últimas fallas: el freno los muestra al operador
   processedJobIds: new Map(),  // Duplicate job detection (jobId → timestamp)
+  claimingJobIds: new Set(),   // Synchronous in-flight claim guard (anti double-dispatch race)
   lastWsMessageTime: 0,        // Track last WS message for zombie detection
   wsConnectionTimer: null,     // Timeout for WS connection phase
   wsReconnectAttempts: 0,
+  instanceId: null,            // Id estable de esta instalación (ver ensureInstanceId)
+  panelTabId: null,            // Pestaña del panel (para el heartbeat)
+  lastKnownUrl: '',            // Última URL del panel vista
+  sessionValid: undefined,     // Último estado de login visto (undefined = no se sabe)
+  lastChallengeAlertAt: 0,     // Throttle del aviso de desafío (captcha/Cloudflare)
+  flushingFailedReports: false,
   notificationSettings: {
     jobStarted: true,
     jobCompleted: true,
@@ -137,6 +146,60 @@ async function persistFailedReport(jobId, result) {
   }
 }
 
+// Reenvía los resultados que quedaron guardados por no poder reportarse. Es el
+// resultado de una operación que YA pasó (no se repite nada en el panel); el
+// backend lo aplica si el job sigue abierto, lo ignora si ya estaba cerrado, y
+// si era un éxito de un job dado por fallido avisa al operador para que no lo
+// reintente.
+async function flushFailedReports() {
+  if (state.flushingFailedReports || !state.config?.backendUrl) return;
+  state.flushingFailedReports = true;
+  try {
+    const stored = await chrome.storage.local.get(['failedReports']);
+    const pending = stored.failedReports || [];
+    if (pending.length === 0) return;
+    const remaining = [];
+    for (const report of pending) {
+      try {
+        await ApiClient.reportJobResult(state.config, report.jobId, report.result);
+        persistLog('INFO', 'JOB', `Resultado reenviado tras reconexión: ${report.jobId}`, { jobId: report.jobId });
+      } catch (err) {
+        remaining.push(report);
+      }
+    }
+    await chrome.storage.local.set({ failedReports: remaining });
+  } finally {
+    state.flushingFailedReports = false;
+  }
+}
+
+// Id estable de esta instalación de la extensión. El backend lo usa para que una
+// carga la ejecute una sola instancia aunque dos Chrome tengan el mismo panel.
+async function ensureInstanceId() {
+  if (state.instanceId) return state.instanceId;
+  const stored = await chrome.storage.local.get(['instanceId']);
+  let id = stored.instanceId;
+  if (!id) {
+    id = crypto.randomUUID();
+    await chrome.storage.local.set({ instanceId: id });
+  }
+  state.instanceId = id;
+  return id;
+}
+
+// Avisa (como mucho cada 10 min) que el panel muestra un desafío de verificación.
+// Sólo avisa: lo resuelve una persona en esta PC.
+function reportPanelChallenge(challenge, url) {
+  const now = Date.now();
+  if (now - state.lastChallengeAlertAt < 10 * 60 * 1000) return;
+  state.lastChallengeAlertAt = now;
+  persistLog('ERROR', 'PANEL', `El panel muestra un desafío de verificación (${challenge})`, { url });
+  showNotification('Verificación en el panel', `El panel pide verificar que sos humano (${challenge}). Resolvelo en esta pestaña para que el bot siga cargando.`, 'error');
+  if (state.websocket?.readyState === WebSocket.OPEN) {
+    state.websocket.send('42/bot,' + JSON.stringify(['extension:panel_challenge', { challenge, url: url || '' }]));
+  }
+}
+
 // Persist a structured log entry to chrome.storage.local for the logs page (ring buffer, max 200)
 async function persistLog(level, category, message, data = null) {
   try {
@@ -229,6 +292,7 @@ chrome.runtime.onStartup.addListener(async () => {
   // Only try to connect if config is present
   if (state.config?.backendUrl && state.config?.apiKey) {
     await initializeConnection();
+    await openPanelTabIfMissing();
   } else {
     console.log('[ServiceWorker] Backend not configured yet - please configure in options page');
     state.status = 'IDLE';
@@ -243,9 +307,12 @@ chrome.storage.onChanged.addListener(async (changes, namespace) => {
     console.log('[ServiceWorker] Config changed in storage, reloading...');
     await loadConfig();
 
-    // If backend URL or API key changed, reconnect (debounced)
+    // If backend URL, API key or panelId changed, reconnect (debounced).
+    // panelId matters: it travels in the WS handshake, so a stale connection
+    // (or a reject loop for missing panelId) must be re-established with it.
     if (changes.config.newValue?.backendUrl !== changes.config.oldValue?.backendUrl ||
-        changes.config.newValue?.apiKey !== changes.config.oldValue?.apiKey) {
+        changes.config.newValue?.apiKey !== changes.config.oldValue?.apiKey ||
+        changes.config.newValue?.panelId !== changes.config.oldValue?.panelId) {
       if (configChangeDebounceTimer) clearTimeout(configChangeDebounceTimer);
       configChangeDebounceTimer = setTimeout(async () => {
         configChangeDebounceTimer = null;
@@ -278,9 +345,23 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     }
 
     console.log('[ServiceWorker] Panel page detected:', tab.url);
+    state.panelTabId = tabId;
+    state.lastKnownUrl = tab.url;
+
+    // Durante una carga (o si ya hay un login en curso) la sesión la maneja la
+    // carga misma: acá no se loguea ni se navega, para no pisarla.
+    const ocupado = () => isBusy() || JobProcessor.isLoginInFlight();
+    if (ocupado()) {
+      console.log('[ServiceWorker] Auto-login skipped: job or login in progress');
+      return;
+    }
 
     // Wait for Nuxt.js SPA to hydrate (DOM might not be ready immediately)
     await new Promise(resolve => setTimeout(resolve, 3000));
+    if (ocupado()) {
+      console.log('[ServiceWorker] Auto-login skipped: job or login started meanwhile');
+      return;
+    }
 
     console.log('[ServiceWorker] Checking login status...');
 
@@ -303,26 +384,34 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
     console.log('[ServiceWorker] Login status result:', loginStatus[0]?.result);
     const isLoggedIn = loginStatus[0]?.result?.isLoggedIn;
+    const challenge = loginStatus[0]?.result?.challenge;
+    state.sessionValid = !!isLoggedIn;
+
+    if (challenge) {
+      // Un desafío no se intenta resolver ni se loguea encima: se avisa.
+      reportPanelChallenge(challenge, tab.url);
+      return;
+    }
 
     if (!isLoggedIn && state.config?.panelUsername && state.config?.panelPassword) {
+      if (ocupado()) {
+        console.log('[ServiceWorker] Auto-login skipped: job or login started meanwhile');
+        return;
+      }
       console.log('[ServiceWorker] Not logged in, attempting auto-login...');
 
-      // Attempt login
-      const result = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: async (credentials) => {
-          if (window.panelAutomation) {
-            return await window.panelAutomation.login(credentials);
-          }
-          return { success: false, error: 'Panel automation not loaded' };
-        },
-        args: [{
-          username: state.config.panelUsername,
-          password: state.config.panelPassword
-        }]
-      });
+      // Mismo candado que el re-login de las cargas: nunca dos logins a la vez.
+      let loginOk = false;
+      let loginError = null;
+      try {
+        await JobProcessor.loginOnce(tabId, state.config);
+        loginOk = true;
+        state.sessionValid = true;
+      } catch (err) {
+        loginError = err.message;
+      }
 
-      if (result[0]?.result?.success) {
+      if (loginOk) {
         console.log('[ServiceWorker] Auto-login successful!');
 
         // Wait a bit for login to complete
@@ -357,13 +446,13 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
           });
         }
       } else {
-        console.warn('[ServiceWorker] Auto-login failed:', result[0]?.result?.error);
+        console.warn('[ServiceWorker] Auto-login failed:', loginError);
         // Show error notification
         chrome.notifications.create({
           type: 'basic',
           iconUrl: 'icons/icon128.png',
           title: 'Auto-login Fallido',
-          message: result[0]?.result?.error || 'Error desconocido',
+          message: loginError || 'Error desconocido',
           priority: 1
         });
       }
@@ -392,10 +481,38 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 });
 
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === state.panelTabId) {
+    state.panelTabId = null;
+    state.sessionValid = undefined;
+  }
+});
+
+// Al arrancar Chrome, abre el panel (en segundo plano) si no hay ninguna pestaña:
+// el auto-login de tabs.onUpdated deja la sesión lista antes de la primera carga,
+// en vez de loguearse recién cuando llega una.
+async function openPanelTabIfMissing() {
+  const panelUrl = state.config?.panelUrl;
+  if (!panelUrl) return;
+  try {
+    const hostname = new URL(panelUrl).hostname;
+    const tabs = await chrome.tabs.query({ url: `*://${hostname}/*` });
+    if (tabs.length > 0) {
+      state.panelTabId = tabs[0].id;
+      return;
+    }
+    const tab = await chrome.tabs.create({ url: panelUrl, active: false });
+    state.panelTabId = tab.id;
+    persistLog('INFO', 'PANEL', 'Pestaña del panel abierta al iniciar Chrome');
+  } catch (err) {
+    console.warn('[ServiceWorker] Could not open panel tab at startup:', err.message);
+  }
+}
+
 // Load configuration from storage
 async function loadConfig() {
   const DEFAULT_CONFIG = {
-    backendUrl: 'https://tiorico-api.onrender.com',
+    backendUrl: 'https://tiorico-api-axfb.onrender.com',
     apiKey: 'Narciso',
   };
   const stored = await chrome.storage.local.get(['config']);
@@ -405,6 +522,27 @@ async function loadConfig() {
     state.config = { ...DEFAULT_CONFIG, ...(stored.config || {}) };
     await chrome.storage.local.set({ config: state.config });
     console.log('[ServiceWorker] Defaults applied + persisted');
+  }
+  // Migración de las demoras viejas (2000/7000). Esos valores no los eligió nadie: son
+  // los defaults que la extensión se autoguardó en el primer arranque, y quedaron
+  // grabados en el storage, así que bajar los defaults del código no alcanzaba para
+  // que tuvieran efecto. Se reemplazan sólo si coinciden EXACTO con los viejos; si el
+  // operador puso valores propios, se respetan.
+  if (state.config.minDelay === 2000 && state.config.maxDelay === 7000) {
+    state.config.minDelay = 400;
+    state.config.maxDelay = 1200;
+    await chrome.storage.local.set({ config: state.config });
+    console.log('[ServiceWorker] Demoras migradas 2000/7000 -> 400/1200');
+  }
+
+  // Build-time panel lock beats whatever is in storage — makes it impossible
+  // to lose/override the panelId in a locked build (see shared/panel-lock.js).
+  // Locked builds also pin backendUrl/apiKey to the production defaults:
+  // son fijos, y así ninguna edición en Options puede romper la conexión.
+  if (globalThis.PANEL_LOCK?.id) {
+    state.config.panelId = globalThis.PANEL_LOCK.id;
+    state.config.backendUrl = DEFAULT_CONFIG.backendUrl;
+    state.config.apiKey = DEFAULT_CONFIG.apiKey;
   }
   console.log('[ServiceWorker] Config loaded:', {
     backendUrl: state.config.backendUrl,
@@ -665,7 +803,8 @@ async function connectWebSocket() {
     if (data.startsWith('40/bot')) {
       // Connection acknowledged for /bot namespace — NOW we're truly connected
       console.log('[ServiceWorker] Connected to /bot namespace');
-      state.status = 'CONNECTED';
+      // Si hay una carga en curso, sigue en PROCESSING: reconectar no la termina.
+      if (!isBusy()) state.status = 'CONNECTED';
       state.heartbeatFailures = 0;
       state.wsReconnectAttempts = 0;
       // Report status to backend
@@ -677,6 +816,9 @@ async function connectWebSocket() {
       clearPolling();
 
       updateBadge();
+
+      // Resultados que no se pudieron reportar antes (corte de red).
+      flushFailedReports().catch((e) => console.warn('[ServiceWorker] flushFailedReports:', e.message));
     } else if (data.startsWith('42/bot,')) {
       // Event from /bot namespace
       try {
@@ -732,6 +874,7 @@ async function connectWebSocket() {
         } else if (eventName === 'reset_circuit_breaker') {
           state.circuitBreakerActive = false;
           state.consecutiveJobErrors = 0;
+          state.recentJobErrors = [];
           persistLog('INFO', 'CIRCUIT_BREAKER', 'Circuit breaker reseteado por operador');
         } else if (eventName === 'kill_switch') {
           await handleKillSwitch();
@@ -739,6 +882,16 @@ async function connectWebSocket() {
           console.log('[ServiceWorker] Bot authenticated successfully:', eventData);
         } else if (eventName === 'error') {
           console.warn('[ServiceWorker] WebSocket authentication error:', eventData?.message);
+          // Rejected for missing/invalid panelId → surface it to the operator.
+          // Throttled: the reconnect loop retries every few seconds.
+          if (eventData?.message?.toLowerCase().includes('panel')) {
+            persistLog('ERROR', 'CONNECTION', 'Backend rechazó la conexión: ' + eventData.message);
+            const now = Date.now();
+            if (now - (state.lastPanelErrorNotifTime || 0) > 5 * 60 * 1000) {
+              state.lastPanelErrorNotifTime = now;
+              showNotification('Panel No Configurado', eventData.message + ' — Abrí las opciones de la extensión y seleccioná el panel.', 'error');
+            }
+          }
           // Close WebSocket and fall back to polling
           if (state.websocket) {
             state.websocket.close();
@@ -994,8 +1147,25 @@ function startPolling(aggressive = false) {
 // job cannot start right now (so the backend re-queues it), or null to accept.
 // Only transient conditions belong here — terminal ones (circuit breaker,
 // duplicates) are handled inside handleNewJob so they don't re-dispatch forever.
+// Ocupado = estado PROCESSING, o una carga en curso / tomándose. El estado solo
+// no alcanza: una reconexión del WS en medio de una carga lo pisaba con
+// CONNECTED y la extensión aceptaba otra en paralelo (regla: una a la vez).
+// Lo que ve el operador en cada carga rechazada mientras la extensión está frenada:
+// por qué se frenó y qué hacer. "Circuit breaker active" en inglés no lo entendía nadie
+// y el 2026-10-15 los operadores cargaron a mano todo el día sin saber por qué.
+function circuitBreakerMessage() {
+  const ultimo = state.recentJobErrors?.[state.recentJobErrors.length - 1];
+  return 'Extensión PAUSADA por errores seguidos — esta carga NO se hizo. ' +
+    (ultimo ? `Último error: ${ultimo}. ` : '') +
+    'Revisar la pestaña del panel en la PC del bot (sesión, login) y después tocar "Reactivar" en Extensiones.';
+}
+
+function isBusy() {
+  return state.status === 'PROCESSING' || !!state.currentJob || state.claimingJobIds.size > 0;
+}
+
 function getJobRejectionReason(job) {
-  if (state.status === 'PROCESSING') {
+  if (isBusy()) {
     return 'busy';
   }
   if (state.config.panelId && job?.panelId && job.panelId !== state.config.panelId) {
@@ -1009,7 +1179,40 @@ function getJobRejectionReason(job) {
   return null;
 }
 
+// Synchronous anti-double-dispatch wrapper. The real work in _handleNewJobInner
+// starts with an `await` (kill-switch check) BEFORE it flips state to PROCESSING,
+// so two dispatches of the SAME job (e.g. new_job WS event + a reconnect/poll
+// re-dispatch) arriving ~simultaneously could BOTH slip past the async guards and
+// run the panel recarga twice, ~1s apart. Real double-load incident 2026-08-19
+// (one comprobante → two cargas). We claim the jobId here, synchronously, before
+// yielding to the event loop — the second concurrent call bails immediately.
 async function handleNewJob(job) {
+  if (!job || !job.id) return;
+
+  if (isBusy()) {
+    console.warn('[ServiceWorker] Already processing, ignoring new job:', job.id);
+    return;
+  }
+  if (state.claimingJobIds.has(job.id)) {
+    console.warn('[ServiceWorker] Job already being claimed (concurrent dispatch), ignoring:', job.id);
+    return;
+  }
+  const processedAt = state.processedJobIds.get(job.id);
+  if (processedAt && (Date.now() - processedAt) < 3600000) {
+    console.warn('[ServiceWorker] Duplicate job, already processed:', job.id);
+    return;
+  }
+
+  // Claim synchronously (before any await) so a racing dispatch sees it and bails.
+  state.claimingJobIds.add(job.id);
+  try {
+    await _handleNewJobInner(job);
+  } finally {
+    state.claimingJobIds.delete(job.id);
+  }
+}
+
+async function _handleNewJobInner(job) {
   console.log('[ServiceWorker] New job received:', job);
 
   // Circuit breaker guard — reject jobs when paused due to repeated failures
@@ -1018,7 +1221,7 @@ async function handleNewJob(job) {
     try {
       await ApiClient.reportJobResult(state.config, job.id, {
         success: false,
-        error: 'Circuit breaker active — extension paused after consecutive failures',
+        error: circuitBreakerMessage(),
       });
     } catch (_) { /* best-effort */ }
     return;
@@ -1047,7 +1250,8 @@ async function handleNewJob(job) {
   }
 
   // Check if already processing — silently ignore, job stays QUEUED in backend
-  if (state.status === 'PROCESSING') {
+  // (acá no va isBusy(): este mismo job ya está en claimingJobIds)
+  if (state.status === 'PROCESSING' || state.currentJob) {
     console.warn('[ServiceWorker] Already processing a job, ignoring new job:', job.id);
     return;
   }
@@ -1078,9 +1282,14 @@ async function handleNewJob(job) {
   const isWithdrawal = job.type === 'WITHDRAW_CHIPS';
   const isPasswordChange = job.type === 'CHANGE_PASSWORD';
   const isCreateUser = job.type === 'CREATE_USER';
+  // La verificacion de fichas ahora llega como job (antes venia por un emit aparte y
+  // chocaba con la carga en curso, porque el bot procesa uno a la vez).
+  const isVerifyChips = job.type === 'VERIFY_CHIPS';
   if (state.notificationSettings.jobStarted) {
-    const title = isCreateUser ? 'Creando Usuario' : isPasswordChange ? 'Cambiando Contraseña' : isWithdrawal ? 'Retirando Fichas' : 'Procesando Trabajo';
-    const body = isCreateUser
+    const title = isVerifyChips ? 'Verificando Fichas' : isCreateUser ? 'Creando Usuario' : isPasswordChange ? 'Cambiando Contraseña' : isWithdrawal ? 'Retirando Fichas' : 'Procesando Trabajo';
+    const body = isVerifyChips
+      ? `Verificando fichas de ${job.targetUsername}...`
+      : isCreateUser
       ? `Creando usuario ${job.targetUsername} en el panel...`
       : isPasswordChange
         ? `Cambiando contraseña de ${job.targetUsername}...`
@@ -1093,9 +1302,19 @@ async function handleNewJob(job) {
   // Report job started — if backend says another bot already claimed it, abort
   let startResult;
   try {
-    startResult = await ApiClient.reportJobStarted(state.config, job.id);
+    startResult = await ApiClient.reportJobStarted(state.config, job.id, await ensureInstanceId());
   } catch (startError) {
     console.error(`[ServiceWorker] Failed to report job started for ${job.id}:`, startError.message);
+    state.status = 'CONNECTED';
+    state.currentJob = null;
+    updateBadge();
+    return;
+  }
+  // Sin confirmación del backend no se toca el panel. Antes se seguía igual y la
+  // carga corría sin estar registrada como tomada por esta instancia.
+  if (startResult === null) {
+    console.warn(`[ServiceWorker] Backend did not confirm start of job ${job.id} — aborting without touching the panel`);
+    persistLog('WARN', 'JOB', 'El backend no confirmó el inicio: la carga no se ejecuta', { jobId: job.id });
     state.status = 'CONNECTED';
     state.currentJob = null;
     updateBadge();
@@ -1115,7 +1334,9 @@ async function handleNewJob(job) {
   const startTime = Date.now();
   try {
     // Route job execution based on type
-    const jobExecution = isCreateUser
+    const jobExecution = isVerifyChips
+      ? JobProcessor.verifyChips(job.targetUsername, state.config)
+      : isCreateUser
       ? JobProcessor.createUser(job.targetUsername, state.config)
       : isPasswordChange
         ? JobProcessor.executePasswordChange(job, state.config)
@@ -1144,7 +1365,10 @@ async function handleNewJob(job) {
       success: true,
       screenshotPath: screenshotPath || undefined,
       duration,
-      completedAt: new Date().toISOString()
+      completedAt: new Date().toISOString(),
+      // VERIFY_CHIPS devuelve el saldo leido del panel: el backend lo necesita para
+      // decidir si el usuario tiene fichas suficientes para el premio.
+      ...(isVerifyChips ? { balance: result?.balance, result } : {})
     };
     try {
       await retryWithDelay(() => ApiClient.reportJobResult(state.config, job.id, successResult));
@@ -1181,6 +1405,7 @@ async function handleNewJob(job) {
     // produces NaN/garbage if this is a string. Format to ISO at the heartbeat call site.
     state.lastJobCompletedAt = Date.now();
     state.consecutiveJobErrors = 0;
+    state.recentJobErrors = [];
 
     // Flush session logs on job completion
     flushSessionLogs().catch(() => {});
@@ -1199,6 +1424,9 @@ async function handleNewJob(job) {
     const duration = Math.round((Date.now() - startTime) / 1000);
     console.error('[ServiceWorker] Job failed:', error);
     persistLog('ERROR', 'JOB', `Job failed: ${job.targetUsername} ($${job.amount}) - ${error.message}`, { jobId: job.id, targetUsername: job.targetUsername, amount: job.amount, duration, error: error.message });
+    if (error?.isPanelChallenge) {
+      reportPanelChallenge(error.challenge, state.lastKnownUrl);
+    }
 
     // If timeout, abort panel automation by navigating panel tabs to about:blank
     // This kills running content scripts and prevents a second job from running concurrently
@@ -1278,15 +1506,20 @@ async function handleNewJob(job) {
 
     // Track job failure for enriched heartbeat + circuit breaker
     state.consecutiveJobErrors = (state.consecutiveJobErrors || 0) + 1;
-    if (state.consecutiveJobErrors >= 3 && !state.circuitBreakerActive) {
+    state.recentJobErrors = [...(state.recentJobErrors || []), String(error.message || '').slice(0, 160)].slice(-3);
+    // El guardia frenó un envío con monto/usuario distinto o un doble envío: algo en el
+    // panel no es lo que esperamos. Se frena YA, sin esperar a 3 fallas.
+    const tripNow = error?.guardBlocked === true;
+    if ((state.consecutiveJobErrors >= 3 || tripNow) && !state.circuitBreakerActive) {
       state.circuitBreakerActive = true;
-      persistLog('ERROR', 'CIRCUIT_BREAKER', `Extension pausada tras ${state.consecutiveJobErrors} errores consecutivos`);
+      persistLog('ERROR', 'CIRCUIT_BREAKER', `Extension pausada tras ${state.consecutiveJobErrors} errores consecutivos`, { errors: state.recentJobErrors });
       // Notify backend
       if (state.websocket?.readyState === WebSocket.OPEN) {
         state.websocket.send('42/bot,' + JSON.stringify(['extension:circuit_breaker', {
           active: true,
           errors: state.consecutiveJobErrors,
           panelId: state.config?.panelId,
+          reasons: state.recentJobErrors,
         }]));
       }
     }
@@ -1371,7 +1604,7 @@ async function handleSearchUser(data) {
   console.log(`[ServiceWorker] Discovery request: search for "${targetUsername}" (task ${taskId})`);
 
   // If currently processing a job OR another discovery, report busy
-  if (state.status === 'PROCESSING') {
+  if (isBusy()) {
     console.warn('[ServiceWorker] Cannot search — currently busy');
     await ApiClient.reportDiscoveryResult(state.config, taskId, {
       found: false,
@@ -1437,7 +1670,7 @@ async function handleCreateUser(data) {
   console.log(`[ServiceWorker] Create user request: "${targetUsername}" (task ${taskId})`);
 
   // If currently processing a job, report busy
-  if (state.status === 'PROCESSING') {
+  if (isBusy()) {
     console.warn('[ServiceWorker] Cannot create user — currently busy');
     await ApiClient.reportCreateUserResult(state.config, taskId, {
       success: false,
@@ -1495,7 +1728,7 @@ async function handleVerifyChips(data) {
   console.log(`[ServiceWorker] Verify chips request: "${targetUsername}" (task ${taskId})`);
 
   // If currently processing a job, report busy
-  if (state.status === 'PROCESSING') {
+  if (isBusy()) {
     console.warn('[ServiceWorker] Cannot verify chips — currently busy');
     await ApiClient.reportVerifyChipsResult(state.config, taskId, {
       success: false,
@@ -1578,6 +1811,32 @@ async function handleKillSwitch() {
 
 // Keepalive alarm handler — replaces unreliable setInterval
 // This fires every ~24s and survives service worker restarts.
+/**
+ * Manda el heartbeat por el canal que corresponda.
+ *
+ * WebSocket si hay socket abierto (el caso normal); POST solo si la extensión
+ * cayó a modo polling, donde no hay socket por donde emitir.
+ *
+ * Devuelve true si se pudo mandar. El WS no tiene ACK, así que "se pudo mandar"
+ * significa que el socket estaba OPEN y el send no tiró. Alcanza: si el socket
+ * estuviera muerto, el paso 3 (detección de zombie) lo caza igual.
+ */
+async function sendHeartbeat() {
+  if (state.websocket?.readyState === WebSocket.OPEN) {
+    try {
+      const payload = ApiClient.buildHeartbeatPayload(state.config, state);
+      state.websocket.send('42/bot,' + JSON.stringify(['heartbeat', payload]));
+      return true;
+    } catch (error) {
+      console.warn('[ServiceWorker] Heartbeat por WS fallo:', error.message);
+      return false;
+    }
+  }
+
+  // Sin socket: modo polling. Ahí sí vale el POST.
+  return ApiClient.sendHeartbeat(state.config, state);
+}
+
 // Handles: heartbeat, zombie WS detection, and connection self-healing.
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   // --- Selector health check (hourly) ---
@@ -1730,8 +1989,19 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     // Panel tab not accessible — skip balance check silently
   }
 
-  // Step 6: Send heartbeat to backend
-  const success = await ApiClient.sendHeartbeat(state.config, state);
+  // Step 6: heartbeat al backend.
+  //
+  // Va por el WebSocket, no por HTTP. El backend ya tenía el handler
+  // (`@SubscribeMessage('heartbeat')` en bot.gateway.ts) esperando exactamente
+  // este payload enriquecido, pero la extensión nunca lo emitía: lo mandaba por
+  // POST /api/bot/heartbeat, donde el ValidationPipe lo rechazaba con 400.
+  //
+  // Consecuencias de aquello: ~216.000 requests/mes al pedo entre las dos
+  // extensiones, un reconnect del WS cada ~72s (3 fallos x 24s), y la tarjeta de
+  // salud de la extensión en el panel de operadores siempre vacía.
+  //
+  // El POST queda solo como fallback para modo polling (sin socket).
+  const success = await sendHeartbeat();
 
   if (state.config.debugMode) {
     console.log('[ServiceWorker] Heartbeat sent:', success ? 'success' : 'failed');
@@ -1882,6 +2152,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     };
     saveLocalStats().then(() => sendResponse({ success: true }));
     return true;
+  } else if (message.type === 'NETWORK_ONLINE') {
+    // Volvió la red: reconectar ya en vez de esperar el backoff (hasta 15 s) o
+    // la alarma (~30 s). Sólo si no hay un WS abierto o abriéndose.
+    const ws = state.websocket;
+    const wsActivo = ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING);
+    if (state.status !== 'IDLE' && !wsActivo && state.config?.backendUrl) {
+      persistLog('INFO', 'CONNECTION', 'Volvió la red: reconectando ya');
+      initializeConnection().catch((e) => console.warn('[ServiceWorker] reconnect on online:', e.message));
+    }
+    sendResponse({ ok: true });
   } else if (message.type === 'KEEPALIVE_PING') {
     // Offscreen document keepalive — just respond to keep SW awake
     // Also send WS frame if connected to prevent server timeout

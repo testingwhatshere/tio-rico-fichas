@@ -1,10 +1,31 @@
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger, LogLevel, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { getCorsOrigin } from './common/cors.config';
 import { CorrelationInterceptor } from './common/interceptors/correlation.interceptor';
 
 const logger = new Logger('Process');
+
+/**
+ * Niveles de log activos.
+ *
+ * Nest por defecto deja prendido todo, debug y verbose incluidos: en producción eso son
+ * miles de líneas por día que nadie lee (una por request HTTP OK, más las transiciones
+ * de estado duplicadas), y encima acortan la ventana útil de los 7 días que retiene
+ * Render. En prod quedan log/warn/error; en dev sigue todo.
+ *
+ * Se puede forzar con LOG_LEVELS (lista separada por comas), p. ej. para depurar en
+ * producción sin tocar código: LOG_LEVELS=log,warn,error,debug
+ */
+function resolveLogLevels(): LogLevel[] {
+  const fromEnv = process.env.LOG_LEVELS?.trim();
+  if (fromEnv) {
+    return fromEnv.split(',').map((l) => l.trim()) as LogLevel[];
+  }
+  return process.env.NODE_ENV === 'production'
+    ? ['log', 'warn', 'error']
+    : ['log', 'warn', 'error', 'debug', 'verbose'];
+}
 
 process.on('unhandledRejection', (reason: any) => {
   logger.error(
@@ -21,7 +42,9 @@ process.on('uncaughtException', (error: Error) => {
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    logger: resolveLogLevels(),
+  });
 
   app.enableCors({
     origin: getCorsOrigin(),

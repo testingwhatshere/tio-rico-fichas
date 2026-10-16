@@ -10,9 +10,10 @@ import {
   TouchableOpacity,
   ScrollView,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import colors from '@/constants/colors';
+import { CopyableText } from '@/components/Copyable';
 import { emitWithTimeout } from '@/services/socket';
 import { formatAmount, parseAmount } from '@/utils/amount';
 import { toast } from '@/components/Toast';
@@ -126,9 +127,7 @@ export default function RequestsScreen() {
       <View style={styles.item}>
         <View style={styles.itemTop}>
           <View style={styles.itemTopLeft}>
-            <Text style={styles.username} numberOfLines={1}>
-              {username}
-            </Text>
+            <CopyableText value={username} label="Usuario" style={styles.username} iconSize={11} />
             {email ? <Text style={styles.email} numberOfLines={1}>{email}</Text> : null}
           </View>
           <Text style={styles.amount}>${formatAmount(amt)}</Text>

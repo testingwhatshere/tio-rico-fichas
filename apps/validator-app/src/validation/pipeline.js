@@ -89,21 +89,52 @@ function createPipeline(deps) {
     return hash.toString(36);
   }
 
-  function getCachedResult(imageBase64) {
-    const hash = getImageHash(imageBase64);
+  // La clave incluye el monto esperado: el veredicto depende de cuánto pidió el
+  // usuario. Con solo la imagen, un comprobante de $10.000 rechazado contra una
+  // carga de $15.000 quedaba rechazado también para la carga siguiente de
+  // $10.000 (nieva3, 2026-10-08).
+  function cacheKey(imageBase64, expectedAmount) {
+    return `${getImageHash(imageBase64)}:${Number(expectedAmount) || 0}`;
+  }
+
+  function getCachedResult(imageBase64, expectedAmount) {
+    const hash = cacheKey(imageBase64, expectedAmount);
     const cached = resultCache.get(hash);
     if (!cached) return null;
     if (Date.now() - cached.timestamp > CACHE_TTL_MS) { resultCache.delete(hash); return null; }
     return cached;
   }
 
-  function setCachedResult(imageBase64, result, validationMethod) {
-    const hash = getImageHash(imageBase64);
+  /**
+   * Monto distinto al pedido: ¿todas las lecturas de la imagen vieron ese mismo monto?
+   *
+   * El backend sólo le pregunta al jugador "¿te cargamos $X?" cuando el monto leído es
+   * firme. Una sola lectura no alcanza (es lo que acreditó $51.000 por $1.000 el
+   * 30/08/2026): cada variante se lee SIN el monto esperado, así dice lo que ve y no lo
+   * que se esperaba. Las que no vieron ningún monto no votan.
+   */
+  function consensoDeMonto(amount, variantTexts) {
+    const { extractAmountDetailed } = require('../ocr/patterns/_helpers');
+    let iguales = 0;
+    const otros = [];
+    for (const v of variantTexts || []) {
+      const det = extractAmountDetailed(v.text, null);
+      if (det.amount == null) continue;
+      if (Math.abs(det.amount - amount) <= 1) iguales++;
+      else otros.push(det.amount);
+    }
+    return { agree: iguales, disagree: otros.length, others: otros.slice(0, 5), unanimous: iguales >= 2 && otros.length === 0 };
+  }
+
+  function setCachedResult(imageBase64, expectedAmount, result, validationMethod, ocrText) {
+    const hash = cacheKey(imageBase64, expectedAmount);
     if (resultCache.size >= CACHE_MAX_SIZE) {
       const oldestKey = resultCache.keys().next().value;
       resultCache.delete(oldestKey);
     }
-    resultCache.set(hash, { result: { ...result }, validationMethod, timestamp: Date.now() });
+    // El ocrText viaja con el cache: sin él, un hit de cache llegaría al backend sin
+    // texto y el chequeo de billetera propia caeria a RECIPIENT_UNVERIFIABLE de gratis.
+    resultCache.set(hash, { result: { ...result }, validationMethod, ocrText: ocrText || '', timestamp: Date.now() });
   }
 
   let ocrWorker = null;
@@ -187,14 +218,59 @@ function createPipeline(deps) {
       }
       const imageBuffer = Buffer.from(imageData, 'base64');
 
-      const ocr = await recognizeWithMultiPass(imageBuffer, deps.sendToRenderer);
+      const expectedForEarlyExit =
+        request.expectedAmount > 0 ? request.expectedAmount : null;
+
+      // Criterio de corte temprano. Es deliberadamente estricto: sólo corta cuando el
+      // monto leído coincide EXACTO con el esperado y además salieron fecha y estado.
+      // Con eso ya está todo lo que decide la validación, así que seguir probando
+      // variantes no puede cambiar el veredicto — sólo hacer esperar al usuario.
+      // Si falta cualquiera de las tres, se siguen corriendo todas como siempre.
+      // OCR_EARLY_EXIT=monto-y-uno (experimental, sólo para medir): alcanza con
+      // el monto exacto más la fecha O el estado. Por defecto, el criterio de siempre.
+      const criterioFlexible = process.env.OCR_EARLY_EXIT === 'monto-y-uno';
+      const yaAlcanza = (texto) => {
+        if (expectedForEarlyExit == null) return false;
+        try {
+          const f = parseOCRText(texto, expectedForEarlyExit);
+          // Un monto dudoso no alcanza para cortar, por más que coincida con lo pedido:
+          // es justo el caso en que hacen falta las otras variantes para desempatar.
+          // Cortar acá era lo que dejaba la decisión en manos de una sola lectura.
+          if (f.amountAmbiguous) return false;
+          const montoExacto =
+            f.extractedAmount != null &&
+            Math.abs(f.extractedAmount - expectedForEarlyExit) <= 1;
+          // Una fecha fuera de la ventana no corta: puede ser una lectura mala del
+          // día (pantalla rajada, "12" leído "2") y conviene que lean las demás.
+          if (f.extractedDate) {
+            const dd = diffDaysArt(f.extractedDate);
+            if (dd !== null && (dd > getDateWindowDays() || dd < -1)) return false;
+          }
+          if (criterioFlexible) {
+            return montoExacto && (!!f.extractedDate || !!f.transactionStatus);
+          }
+          return (
+            montoExacto &&
+            !!f.extractedDate &&
+            !!f.transactionStatus
+          );
+        } catch (_) {
+          return false;
+        }
+      };
+
+      const ocr = await recognizeWithMultiPass(imageBuffer, deps.sendToRenderer, {
+        yaAlcanza,
+        deadline: request._deadline,
+      });
       if (!ocr) return { result: null, source: null, ocrText: '', fields: null };
+      const ocrStats = { passes: ocr.passes || 0, truncated: !!ocr.truncated };
       const text = ocr.text;
       // Lowered from 20 to 5 — number-focused variant produces very short strings
       // (just the amount line) but they're still useful for matching.
       if (!text || text.length < 5) {
         logger.info('OCR', `Too little text extracted (${text?.length || 0} chars), falling back to Ollama`);
-        return { result: null, source: null, ocrText: text, fields: null };
+        return { result: null, source: null, ocrText: text, fields: null, ocrStats };
       }
 
       const expected = request.expectedAmount > 0 ? request.expectedAmount : null;
@@ -203,6 +279,37 @@ function createPipeline(deps) {
       const extractMsg = `Extraido en ${duration}ms: amount=${fields.extractedAmount}, date=${fields.extractedDate}, confidence=${fields.confidence.toFixed(2)}, bank=${fields.detectedPlatform}`;
       logger.info('OCR', extractMsg);
       deps.sendToRenderer('log', { message: extractMsg, type: fields.extractedAmount != null ? 'success' : 'warning' });
+
+      // ── Monto dudoso: que voten las demás variantes ─────────────────────
+      //
+      // `amountAmbiguous` marca que el primer dígito del monto podía ser el símbolo de
+      // peso ($10.000 leído como "510.000"). Mirando un solo texto no hay forma de saberlo,
+      // pero la misma imagen se leyó con hasta 10 preprocesamientos distintos: si la
+      // mayoría vio otro número, esa mayoría manda.
+      //
+      // La votación corre SIN pasarle el monto esperado a propósito. Con el esperado, el
+      // extractor prefiere el candidato que coincide y entonces no se está leyendo el
+      // comprobante: se está confirmando lo que ya se creía. Así cada variante dice lo que
+      // realmente ve.
+      if (fields.amountAmbiguous && Array.isArray(ocr.variantTexts) && ocr.variantTexts.length > 1) {
+        const { elegirMontoPorMayoria } = require('../ocr/patterns/_helpers');
+        const { monto, detalle } = elegirMontoPorMayoria(ocr.variantTexts);
+
+        if (monto != null) {
+          if (monto !== fields.extractedAmount) {
+            const msg = `Monto corregido por mayoria: ${fields.extractedAmount} -> ${monto} (votos: ${detalle})`;
+            logger.warn('OCR', msg);
+            deps.sendToRenderer('log', { message: msg, type: 'warning' });
+            fields.extractedAmount = monto;
+          } else {
+            logger.info('OCR', `Monto dudoso confirmado por mayoria: ${monto} (votos: ${detalle})`);
+          }
+          fields.amountAmbiguous = false;
+        } else {
+          logger.warn('OCR', `Monto ambiguo sin mayoria (votos: ${detalle}). Va a revision manual.`);
+          deps.sendToRenderer('log', { message: 'El monto no se lee con certeza. Lo revisa un operador.', type: 'warning' });
+        }
+      }
 
       // High-confidence OCR but no amount extracted → dump raw text for debugging.
       // This is the exact case the user is hitting: 91% confidence but parseAmount fails.
@@ -250,6 +357,14 @@ function createPipeline(deps) {
           if (dd > dateWindow) { statusFlags.push('OLD_DATE'); dateValid = false; }
           if (dd < -1) { statusFlags.push('FUTURE_DATE'); dateValid = false; }
         }
+      } else {
+        // Sin fecha no hay control de comprobante viejo, y como `dateValid` arranca en
+        // true, no leerla sale gratis: es más permisivo que leerla mal. El flag NO es
+        // bloqueante — hay comprobantes legítimos que no muestran la fecha (la pantalla
+        // de "Transferiste $X" de MP) —, pero deja rastro para que una regresión del
+        // parser se vea en las métricas. Cuando MP cambió el formato de fecha el
+        // 2026-09-02, la extracción cayó al 15% y nada lo reportó.
+        statusFlags.push('NO_DATE');
       }
 
       // Status normalization. Includes modern MP/wallet wording.
@@ -295,6 +410,12 @@ function createPipeline(deps) {
       if (!amountMatchTolerant && expected != null && amount != null) {
         statusFlags.push('AMOUNT_MISMATCH');
       }
+      // Quedó dudoso incluso después de mirar todas las variantes: nadie puede afirmar
+      // cuánto dice el comprobante, así que no se aprueba solo. El flag es bloqueante
+      // (no está en la lista de no-bloqueantes de abajo) y lo mira un operador.
+      if (fields.amountAmbiguous) {
+        statusFlags.push('AMOUNT_AMBIGUOUS');
+      }
       if (!fields.senderName && !fields.senderDniCuit) statusFlags.push('MISSING_SENDER_INFO');
       if (!fields.transactionId) statusFlags.push('NO_TRANSACTION_ID');
 
@@ -303,17 +424,17 @@ function createPipeline(deps) {
       // OCR aggressive: bank not detected, but exact amount + date match.
       // Anything else → return null and let the cascade fall through to Ollama.
       const knownBank = fields.detectedPlatform && fields.detectedPlatform !== 'generic';
-      const blockingFlags = statusFlags.filter(f => f !== 'NO_TRANSACTION_ID' && f !== 'MISSING_SENDER_INFO' && f !== 'OCR_FAST_PATH' && f !== 'OCR_AGGRESSIVE');
+      const blockingFlags = statusFlags.filter(f => f !== 'NO_TRANSACTION_ID' && f !== 'MISSING_SENDER_INFO' && f !== 'NO_DATE' && f !== 'OCR_FAST_PATH' && f !== 'OCR_AGGRESSIVE');
 
       if (amountMatchExact && dateValid && statusApproved !== false && knownBank) {
         statusFlags.push('OCR_FAST_PATH');
         const result = buildOCRResult(fields, request, statusFlags, blockingFlags.length === 0);
-        return { result, source: 'ocr_fast', ocrText: text, fields };
+        return { result, source: 'ocr_fast', ocrText: text, fields, ocrStats };
       }
       if (amountMatchExact && dateValid && statusApproved !== false) {
         statusFlags.push('OCR_AGGRESSIVE');
         const result = buildOCRResult(fields, request, statusFlags, blockingFlags.length === 0);
-        return { result, source: 'ocr_aggressive', ocrText: text, fields };
+        return { result, source: 'ocr_aggressive', ocrText: text, fields, ocrStats };
       }
 
       // OCR confidence is high enough to make a tolerant decision but not exact: still return a
@@ -321,7 +442,7 @@ function createPipeline(deps) {
       if (fields.confidence >= getOcrThreshold() && amountMatchTolerant && dateValid && statusApproved !== false) {
         statusFlags.push('OCR_FAST_PATH');
         const result = buildOCRResult(fields, request, statusFlags, blockingFlags.length === 0);
-        return { result, source: 'ocr_fast', ocrText: text, fields };
+        return { result, source: 'ocr_fast', ocrText: text, fields, ocrStats };
       }
 
       // No exact match. If we have a clear "amount mismatch" with a high-confidence read, that's a
@@ -329,11 +450,12 @@ function createPipeline(deps) {
       if (fields.confidence >= getOcrThreshold() && amount != null && expected != null && !amountMatchTolerant) {
         statusFlags.push('OCR_FAST_PATH');
         const result = buildOCRResult(fields, request, statusFlags, false);
-        return { result, source: 'ocr_fast', ocrText: text, fields };
+        result.amountConsensus = consensoDeMonto(amount, ocr.variantTexts);
+        return { result, source: 'ocr_fast', ocrText: text, fields, ocrStats };
       }
 
       logger.info('OCR', `No definitive OCR decision (confidence=${fields.confidence.toFixed(2)}, amountMatchExact=${amountMatchExact}, dateValid=${dateValid}, status=${statusApproved})`);
-      return { result: null, source: null, ocrText: text, fields };
+      return { result: null, source: null, ocrText: text, fields, ocrStats };
     } catch (err) {
       logger.warn('OCR', `OCR failed: ${err.message}`);
       return { result: null, source: null, ocrText: '', fields: null };
@@ -347,6 +469,15 @@ function createPipeline(deps) {
     deps.sendToRenderer('validating', { id: request.id });
 
     const startTime = Date.now();
+
+    // Ollama fue retirado del pipeline por decisión de producto (2026-08-20):
+    // la validación automática es SOLO por OCR. Todo lo que el OCR no pueda
+    // decidir con certeza va directo a revisión manual del operador (no se
+    // consulta ningún modelo de IA). Esto también elimina los timeouts de
+    // validación (no hay llamada lenta a Ollama que exceda la ventana del
+    // backend). El flag queda por si algún día se quiere reactivar, pero por
+    // defecto está APAGADO.
+    const ollamaEnabled = deps.config?.ollamaEnabled === true;
 
     try {
       // Handle PDF conversion if needed
@@ -384,14 +515,19 @@ function createPipeline(deps) {
       }
 
       // Check cache for duplicate images
-      const cached = getCachedResult(processedRequest.imageBase64);
+      const cached = getCachedResult(processedRequest.imageBase64, processedRequest.expectedAmount);
       if (cached) {
         metrics.cacheHits++;
         const cachedResult = { ...cached.result, flags: [...(cached.result.flags || []), 'CACHED_RESULT'] };
         cachedResult.reasoning = `[Deteccion Rapida] ${cachedResult.reasoning || ''}`;
         logger.info('CACHE', `Cache hit for request ${request.id}`);
         deps.sendToRenderer('log', { message: 'Deteccion Rapida: imagen ya validada previamente', type: 'info' });
-        deps.emitValidationResult(request, { id: request.id, requestId: request.requestId, ...cachedResult });
+        deps.emitValidationResult(request, {
+          id: request.id,
+          requestId: request.requestId,
+          ...cachedResult,
+          ocrText: cached.ocrText ? String(cached.ocrText).slice(0, 4000) : null,
+        });
         deps.sendToRenderer('validation-done', { id: request.id, result: cachedResult });
         return;
       }
@@ -407,11 +543,18 @@ function createPipeline(deps) {
       // (otherwise the inbound MP/Fiwind/etc verifier handles forensics for us).
       let ocrSource = null;
       let authenticityPromise = null;
+      // Texto OCR crudo. Se manda al backend para que pueda buscar cualquier dato
+      // nuestro (nombre / CBU / CVU / alias / DNI de cualquier billetera) en TODO el
+      // comprobante, sin depender de que el parser haya acertado el campo "Para".
+      let rawOcrText = '';
+      let ocrStats = null;
 
       if (walletHasVerification) {
         deps.sendToRenderer('log', { message: 'Validacion Express: billetera con verificacion', type: 'info' });
         deps.sendToRenderer('validation-progress', { id: request.id, step: 'ocr', message: 'Lectura Inteligente: extrayendo datos...' });
         const ocr = await validateWithOCR(processedRequest);
+        rawOcrText = ocr.ocrText || '';
+        ocrStats = ocr.ocrStats || null;
         if (ocr.result) {
           result = ocr.result;
           ocrSource = ocr.source; // 'ocr_fast' or 'ocr_aggressive'
@@ -424,12 +567,14 @@ function createPipeline(deps) {
         deps.sendToRenderer('log', { message: 'Doble Verificacion: lectura + control de autenticidad', type: 'info' });
         deps.sendToRenderer('validation-progress', { id: request.id, step: 'ocr+auth', message: 'Doble Verificacion en proceso...' });
 
-        const ollamaUp = !!deps.getOllamaAvailable && deps.getOllamaAvailable();
+        const ollamaUp = ollamaEnabled && !!deps.getOllamaAvailable && deps.getOllamaAvailable();
         const [ocr, authenticityResult] = await Promise.all([
           validateWithOCR(processedRequest),
           ollamaUp ? checkAuthenticity(processedRequest.imageBase64, deps.config) : Promise.resolve(null),
         ]);
 
+        rawOcrText = ocr.ocrText || '';
+        ocrStats = ocr.ocrStats || null;
         if (ocr.result) {
           result = ocr.result;
           ocrSource = ocr.source;
@@ -463,12 +608,15 @@ function createPipeline(deps) {
         }
       }
 
-      // Cascade fallback: only invoke Ollama if OCR could not produce a definitive answer.
+      // Cascade fallback: when OCR could not produce a definitive answer, the
+      // proof goes to manual operator review (OCR-only policy). Ollama is only
+      // consulted if it was explicitly re-enabled (off by default).
       if (!result) {
-        const ollamaUp = !!deps.getOllamaAvailable && deps.getOllamaAvailable();
+        const ollamaUp = ollamaEnabled && !!deps.getOllamaAvailable && deps.getOllamaAvailable();
         if (!ollamaUp) {
-          // OCR insufficient AND Ollama down → operator review.
-          deps.sendToRenderer('log', { message: 'OCR insuficiente y motor IA no disponible — requiere revision manual', type: 'warning' });
+          // OCR could not read the proof with confidence → operator review.
+          deps.sendToRenderer('log', { message: 'Lectura Inteligente no pudo validar automaticamente — requiere revision del operador', type: 'warning' });
+          const sinTiempo = ocrStats?.truncated === true;
           result = {
             isValid: false, confidence: 0,
             extractedAmount: null, extractedDate: null, extractedTime: null,
@@ -476,8 +624,12 @@ function createPipeline(deps) {
             senderName: null, senderDniCuit: null, recipientName: null,
             recipientAccount: null, recipientMatch: null, bankName: null,
             transactionStatus: null, authenticityChecks: null,
-            reasoning: 'OCR no pudo extraer datos confiables y el motor de IA no esta disponible. Requiere revision manual.',
-            flags: ['OCR_INSUFFICIENT', 'OLLAMA_UNAVAILABLE', 'REQUIRES_MANUAL_REVIEW'],
+            reasoning: sinTiempo
+              ? 'La lectura automatica no termino a tiempo. Requiere revision de un operador.'
+              : 'La lectura automatica del comprobante no fue concluyente. Requiere revision de un operador.',
+            flags: sinTiempo
+              ? ['OCR_TIMEOUT', 'OCR_INSUFFICIENT', 'REQUIRES_MANUAL_REVIEW']
+              : ['OCR_INSUFFICIENT', 'REQUIRES_MANUAL_REVIEW'],
           };
           validationMethod = 'failed';
         } else {
@@ -501,17 +653,31 @@ function createPipeline(deps) {
       if (result.isValid) metrics.approved++; else metrics.rejected++;
       emitStats();
 
-      // Cache result for duplicate detection
-      setCachedResult(processedRequest.imageBase64, result, validationMethod);
+      // Cache result for duplicate detection. Una lectura cortada por tiempo no se
+      // guarda: con tiempo completo podría salir distinta.
+      if (!ocrStats?.truncated) {
+        setCachedResult(processedRequest.imageBase64, processedRequest.expectedAmount, result, validationMethod, rawOcrText);
+      }
 
       deps.sendToRenderer('validation-progress', { id: request.id, step: 'done', message: 'Motor de Validacion: completado' });
 
-      logger.logValidationResult(request.id, { ...result, durationMs: duration, validationMethod });
+      logger.logValidationResult(request.id, {
+        ...result,
+        requestId: request.requestId,
+        durationMs: duration,
+        validationMethod,
+        ocrPasses: ocrStats?.passes ?? null,
+        ocrTruncated: ocrStats?.truncated ?? false,
+        rssMb: Math.round(process.memoryUsage().rss / 1048576),
+      });
 
       deps.emitValidationResult(request, {
         id: request.id,
         requestId: request.requestId,
         ...result,
+        // Recortado: al backend le alcanza para buscar identificadores nuestros y no
+        // tiene sentido mandar páginas de ruido OCR por el socket.
+        ocrText: rawOcrText ? String(rawOcrText).slice(0, 4000) : null,
       });
 
       const statusText = result.isValid ? 'APROBADO' : 'RECHAZADO';

@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { BotController } from './bot.controller';
+import { ExtensionDownloadController } from './extension-download.controller';
 import { BotService } from './bot.service';
 import { BotGateway } from './bot.gateway';
 import { BotApiKeyGuard } from './guards/bot-api-key.guard';
@@ -35,7 +36,7 @@ import { PrizeClaimsModule } from '../prize-claims/prize-claims.module';
     forwardRef(() => NotificationsModule),
     forwardRef(() => PrizeClaimsModule),
   ],
-  controllers: [BotController],
+  controllers: [BotController, ExtensionDownloadController],
   providers: [BotService, BotGateway, BotApiKeyGuard],
   exports: [BotService, BotGateway],
 })

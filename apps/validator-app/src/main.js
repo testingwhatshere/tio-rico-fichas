@@ -49,106 +49,14 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // ==========================================
-// PDF CONVERSION (stays here — uses temp paths)
+// PDF CONVERSION (src/pdf.js, compartido con el modo servidor)
 // ==========================================
 
-// pdfjs-based renderer (cross-platform, pure JS via @napi-rs/canvas).
-// Primary path on Windows: pdf-poppler 0.51 (2016) renderiza mal PDFs MP modernos
-// con fuentes Unicode/SVG y produce comprobantes "inválidos" aguas abajo.
-let pdfToPng = null;
-try { ({ pdfToPng } = require('pdf-to-png-converter')); } catch (_) {}
-
-// Legacy poppler binary path — sigue siendo primario en macOS (donde renderiza bien
-// con 0.66) y queda como fallback en Windows si pdfjs no cargara por algún motivo.
-let pdfPoppler = null;
-try { pdfPoppler = require('pdf-poppler'); } catch (_) {}
-
-async function renderWithPdfJs(pdfBuffer) {
-  if (!pdfToPng) throw new Error('pdf-to-png-converter not available');
-  const t0 = Date.now();
-  // viewportScale 2.0 → A4 (595×842pt) renderiza a ~1190×1684px, mucho mejor para OCR
-  // que el scale=1024 de poppler. Comprobantes MP móviles típicos quedan en ~900-1200px.
-  const pages = await pdfToPng(pdfBuffer, {
-    pagesToProcess: [1],
-    viewportScale: 2.0,
-    disableFontFace: true,
-    useSystemFonts: false,
-    verbosityLevel: 0,
-  });
-  if (!pages || !pages[0] || !pages[0].content) {
-    throw new Error('pdf-to-png-converter returned no page content');
-  }
-  const base64 = pages[0].content.toString('base64');
-  const elapsed = Date.now() - t0;
-  console.log(`[validator] PDF→PNG via pdfjs in ${elapsed}ms (${pages[0].width}×${pages[0].height}, ${base64.length} chars)`);
-  return base64;
-}
-
-async function renderWithPoppler(pdfBuffer) {
-  if (!pdfPoppler) throw new Error('pdf-poppler not available');
-  const configMod = require('./config');
-  const tempDir = path.join(configMod.state.userDataPath || app.getPath('userData'), 'temp');
-  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-
-  const timestamp = Date.now();
-  const tempPdfPath = path.join(tempDir, `proof_${timestamp}.pdf`);
-
-  const t0 = Date.now();
-  try {
-    fs.writeFileSync(tempPdfPath, pdfBuffer);
-
-    await pdfPoppler.convert(tempPdfPath, {
-      format: 'png',
-      out_dir: tempDir,
-      out_prefix: `proof_${timestamp}`,
-      page: 1,
-      // 2048 producía PNGs de 30-60s en comprobantes MP normales; 1024 sigue siendo
-      // más que suficiente para OCR/Ollama y baja el tiempo de conversión 3-4x.
-      scale: 1024,
-    });
-
-    const pngFiles = fs.readdirSync(tempDir).filter(f =>
-      f.startsWith(`proof_${timestamp}`) && f.endsWith('.png')
-    );
-    if (pngFiles.length === 0) throw new Error('No PNG output from pdf-poppler');
-
-    const pngPath = path.join(tempDir, pngFiles[0]);
-    const imageBase64 = fs.readFileSync(pngPath).toString('base64');
-
-    try { fs.unlinkSync(tempPdfPath); } catch (_) {}
-    try { fs.unlinkSync(pngPath); } catch (_) {}
-
-    const elapsed = Date.now() - t0;
-    console.log(`[validator] PDF→PNG via poppler in ${elapsed}ms (${imageBase64.length} chars)`);
-    return imageBase64;
-  } catch (error) {
-    try { fs.unlinkSync(tempPdfPath); } catch (_) {}
-    throw error;
-  }
-}
-
-async function convertPdfToImage(base64Pdf) {
-  const pdfBuffer = Buffer.from(base64Pdf, 'base64');
-
-  // En Windows el pdftocairo 0.51 empaquetado por pdf-poppler (binario de 2016)
-  // renderiza mal PDFs MP modernos → el OCR/Ollama no encuentra datos y marca el
-  // comprobante como inválido. Por eso priorizamos pdfjs ahí. En macOS (poppler 0.66)
-  // dejamos poppler primario para no cambiar el comportamiento que viene andando.
-  const tryPdfJsFirst = process.platform === 'win32';
-  const primary = tryPdfJsFirst ? renderWithPdfJs : renderWithPoppler;
-  const fallback = tryPdfJsFirst ? renderWithPoppler : renderWithPdfJs;
-
-  try {
-    return await primary(pdfBuffer);
-  } catch (primaryErr) {
-    console.warn(`[validator] primary PDF renderer failed (${primaryErr.message}), trying fallback`);
-    try {
-      return await fallback(pdfBuffer);
-    } catch (fallbackErr) {
-      throw new Error(`PDF render failed — primary: ${primaryErr.message}; fallback: ${fallbackErr.message}`);
-    }
-  }
-}
+const { createPdfConverter } = require('./pdf');
+const { convertPdfToImage } = createPdfConverter({
+  getTempDir: () => require('./config').state.userDataPath || app.getPath('userData'),
+  log: { info: (m) => console.log(`[validator] ${m}`), warn: (m) => console.warn(`[validator] ${m}`) },
+});
 
 // ==========================================
 // WINDOW & TRAY
@@ -367,18 +275,26 @@ app.whenReady().then(async () => {
     downloadUpdate: downloadUpdateFn,
   });
 
-  // 5. Start Ollama check (delayed for renderer to be ready)
-  setTimeout(() => {
-    ollamaManager.checkOllama().then(() => {
-      updateTray();
-    }).catch(err => {
-      console.error('[checkOllama] Error:', err);
-      sendToRenderer('ollama-status', {
-        installed: false, running: false, hasVisionModel: false,
-        error: err.message,
+  // OCR-only policy (2026-08-20): Ollama fue retirado. No arrancamos el chequeo
+  // ni el health-check de Ollama para no ensuciar el panel del operador con
+  // "Ollama no está corriendo" / "Motor de IA no responde" (falsas alarmas que
+  // hacían pensar que el validador estaba roto). Reversible via config.
+  const ollamaEnabled = configMod.state.config.ollamaEnabled === true;
+
+  // 5. Start Ollama check (delayed for renderer to be ready) — only if enabled.
+  if (ollamaEnabled) {
+    setTimeout(() => {
+      ollamaManager.checkOllama().then(() => {
+        updateTray();
+      }).catch(err => {
+        console.error('[checkOllama] Error:', err);
+        sendToRenderer('ollama-status', {
+          installed: false, running: false, hasVisionModel: false,
+          error: err.message,
+        });
       });
-    });
-  }, 2000);
+    }, 2000);
+  }
 
   // 5b. Pre-warm OCR worker (so first validation doesn't wait for init)
   setTimeout(() => {
@@ -393,8 +309,10 @@ app.whenReady().then(async () => {
     connectionModule.connectToBackend();
   }
 
-  // 7. Start monitoring
-  ollamaManager.startHealthCheck();
+  // 7. Start monitoring — Ollama health-check only if Ollama is enabled.
+  if (ollamaEnabled) {
+    ollamaManager.startHealthCheck();
+  }
   ollamaManager.startMemoryMonitoring();
 
   // 8. Send initial state to renderer

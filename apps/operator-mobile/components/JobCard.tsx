@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import colors from '@/constants/colors';
+import { CopyableText, CopyButton } from '@/components/Copyable';
 import { parseAmount, formatAmount } from '@/utils/amount';
 import StatusBadge from './StatusBadge';
 
@@ -95,13 +96,17 @@ export default function JobCard({ job, onRetry }: JobCardProps) {
         <View style={styles.amountRow}>
           <Text style={styles.amountSymbol}>$</Text>
           <Text style={styles.amountValue}>{formatAmount(amount)}</Text>
+          <CopyButton value={amount} label="Monto" size={12} />
         </View>
 
         <View style={styles.detailRow}>
           <Ionicons name="person-outline" size={12} color={colors.textMuted} />
-          <Text style={styles.detailText} numberOfLines={1}>
-            {targetUsername}
-          </Text>
+          <CopyableText
+            value={targetUsername}
+            label="Usuario"
+            style={styles.detailText}
+            iconSize={11}
+          />
           {job.panelId && job.panel?.name && (
             <View style={styles.panelBadge}>
               <Ionicons name="server-outline" size={9} color={colors.info} />
@@ -113,9 +118,13 @@ export default function JobCard({ job, onRetry }: JobCardProps) {
         {isFailed && errorPreview && (
           <View style={styles.errorRow}>
             <Ionicons name="warning-outline" size={11} color={colors.error} />
-            <Text style={styles.errorText} numberOfLines={2}>
-              {errorPreview}
-            </Text>
+            <CopyableText
+              value={errorPreview}
+              label="Error"
+              style={styles.errorText}
+              numberOfLines={2}
+              iconSize={11}
+            />
           </View>
         )}
       </View>

@@ -5,6 +5,10 @@ import {
   MaxLength,
   Matches,
 } from 'class-validator';
+import {
+  PANEL_USERNAME_REGEX,
+  PANEL_USERNAME_MESSAGE,
+} from '../../common/validators/username';
 
 /**
  * DTO for client-only authentication (username + phone).
@@ -23,10 +27,10 @@ export class ClientAuthDto {
   @MaxLength(30, {
     message: 'El nombre de usuario debe tener máximo 30 caracteres',
   })
-  @Matches(/^[a-zA-Z][a-zA-Z0-9_]*$/, {
-    message:
-      'El nombre de usuario debe comenzar con una letra y solo contener letras, números y guiones bajos',
-  })
+  // Los usuarios del panel de juego arrancan con número muy seguido
+  // ("15sebas15", "3312diego"): exigir letra inicial dejaba afuera a 122 clientes
+  // precargados, que no podían entrar nunca. Mismo criterio que valida el chat-app.
+  @Matches(PANEL_USERNAME_REGEX, { message: PANEL_USERNAME_MESSAGE })
   username: string;
 
   @IsOptional()

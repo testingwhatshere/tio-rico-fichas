@@ -58,7 +58,7 @@ render deploys create srv-d75uba75r7bs738qam90 -o json | jq -r '.id, .status'
 render deploys list srv-d75uba75r7bs738qam90 --limit 1
 ```
 
-**Verificación**: `curl https://tiorico-api.onrender.com/api/health` devuelve 200.
+**Verificación**: `curl https://tiorico-api-axfb.onrender.com/api/health` devuelve 200.
 
 ---
 
@@ -165,7 +165,7 @@ Tiempo: **10–15 min**.
 ```bash
 cd ~/Trabajo/Codigo/Misc/game-automation-platform/apps/operator-mobile
 # Si querés override de backend URL durante el build (ver memoria):
-# export EXPO_PUBLIC_DEFAULT_API_URL=https://tiorico-api.onrender.com
+# export EXPO_PUBLIC_DEFAULT_API_URL=https://tiorico-api-axfb.onrender.com
 # export EXPO_PUBLIC_OPERATOR_API_KEY=Narciso   # producción
 cd android
 ./gradlew assembleRelease

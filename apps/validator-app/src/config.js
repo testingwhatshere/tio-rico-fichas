@@ -8,8 +8,10 @@ let state = {
   offlineQueuePath: null,
   processedIdsPath: null,
   config: {
-    backendUrl: 'https://tiorico-api.onrender.com',
-    apiKey: 'Narciso',
+    backendUrl: 'https://tiorico-api-axfb.onrender.com',
+    // Sin key en el código: se carga desde el asistente (escritorio) o desde
+    // VALIDATOR_API_KEY (modo servidor).
+    apiKey: '',
     ollamaUrl: 'http://localhost:11434',
     ollamaModel: '',
     customPrompt: '',
@@ -18,7 +20,12 @@ let state = {
 
 // Initialize paths from app.getPath('userData')
 function initPaths(app) {
-  state.userDataPath = app.getPath('userData');
+  initPathsFromDir(app.getPath('userData'));
+}
+
+// Igual que initPaths pero con un directorio explícito (modo servidor).
+function initPathsFromDir(dir) {
+  state.userDataPath = dir;
   state.configPath = path.join(state.userDataPath, 'config.json');
   state.offlineQueuePath = path.join(state.userDataPath, 'offline-queue.json');
   state.processedIdsPath = path.join(state.userDataPath, 'processed-ids.json');
@@ -138,6 +145,7 @@ function scheduleSaveProcessedIds() {
 module.exports = {
   state,
   initPaths,
+  initPathsFromDir,
   loadConfig,
   saveConfig,
   recentlyProcessedIds,

@@ -1,8 +1,11 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { TelegramService } from '../notifications/telegram.service';
 import { SettingsService } from '../settings/settings.service';
+import { BotGateway } from '../bot/bot.gateway';
+import { OperatorGateway } from '../events/operator.gateway';
 
 interface HealthStatus {
   db: boolean;
@@ -28,6 +31,7 @@ export class SelfMonitorService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly telegram: TelegramService,
     private readonly settings: SettingsService,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   onModuleInit() {
@@ -55,6 +59,54 @@ export class SelfMonitorService implements OnModuleInit {
       }
     } catch (error) {
       this.logger.error('Health check failed to execute:', error);
+    }
+  }
+
+  /**
+   * "Entran cargas y no sale ninguna": en los últimos 30 min hubo al menos 3
+   * cargas que fallaron y ninguna que el bot completara. Cubre el freno de la
+   * extensión y cualquier otra causa que todavía no conocemos. Avisa por
+   * Telegram (una vez por hora mientras dure) y con un aviso en la web.
+   *
+   * Nace del 2026-10-15: el bot estuvo frenado ~9 h y los operadores cargaron
+   * todo a mano sin que nada avisara. Son dos COUNT por índice: barato.
+   */
+  private lastStalledWebAlertAt = 0;
+
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async checkBotStalled() {
+    try {
+      const since = new Date(Date.now() - 30 * 60 * 1000);
+      const [failed, completed] = await Promise.all([
+        this.prisma.job.count({
+          where: { type: 'LOAD_CREDITS', status: 'FAILED', createdAt: { gte: since } },
+        }),
+        this.prisma.job.count({
+          where: { type: 'LOAD_CREDITS', status: 'COMPLETED', createdAt: { gte: since } },
+        }),
+      ]);
+      if (failed < 3 || completed > 0) return;
+
+      const message =
+        `En los últimos 30 minutos fallaron <b>${failed}</b> cargas y el bot no completó ninguna.\n\n` +
+        `Los operadores están cargando a mano. Revisar las PCs del bot (sesión del panel, extensión pausada) y la cola de Fallos.`;
+      this.logger.warn(`Bot stalled: ${failed} failed / 0 completed in 30 min`);
+      await this.telegram.alertBotStalled('no-completions', message);
+      if (Date.now() - this.lastStalledWebAlertAt < 30 * 60 * 1000) return;
+      this.lastStalledWebAlertAt = Date.now();
+      try {
+        const op = this.moduleRef.get(OperatorGateway, { strict: false });
+        op?.emitToAll('system_alert', {
+          type: 'bot_stalled',
+          severity: 'critical',
+          message: `El bot no está cargando: ${failed} cargas fallaron en 30 min y ninguna salió. Revisar las PCs del bot.`,
+          timestamp: new Date().toISOString(),
+        });
+      } catch {
+        /* sin gateway: queda el Telegram */
+      }
+    } catch (error) {
+      this.logger.error('Bot-stalled check failed:', error);
     }
   }
 
@@ -87,26 +139,22 @@ export class SelfMonitorService implements OnModuleInit {
     }
   }
 
-  private async checkBotOnline(): Promise<boolean> {
+  /**
+   * ¿Hay alguna extensión conectada AHORA? Se mira el gateway en vivo.
+   *
+   * Antes se leían los Settings BOT_STATUS / BOT_LAST_HEARTBEAT, pero el
+   * heartbeat se persiste como mucho cada 5 minutos (HEARTBEAT_PERSIST_INTERVAL_MS)
+   * y el chequeo exigía uno de hace menos de 3: daba BOT_OFFLINE con el bot
+   * andando (28 alertas falsas el 2026-10-13). Además eran 2 consultas a la base
+   * cada 5 minutos. El gateway se busca con ModuleRef: el módulo de health no
+   * importa el de bot.
+   */
+  private checkBotOnline(): Promise<boolean> {
     try {
-      const setting = await this.prisma.setting.findUnique({
-        where: { key: 'BOT_STATUS' },
-      });
-      if (!setting || setting.value === 'offline') return false;
-
-      // Check heartbeat — if last heartbeat > 3 minutes ago, bot is stale
-      const heartbeat = await this.prisma.setting.findUnique({
-        where: { key: 'BOT_LAST_HEARTBEAT' },
-      });
-      if (heartbeat?.value) {
-        const lastBeat = new Date(heartbeat.value).getTime();
-        const threeMinAgo = Date.now() - 3 * 60 * 1000;
-        if (lastBeat < threeMinAgo) return false;
-      }
-
-      return true;
+      const gateway = this.moduleRef.get(BotGateway, { strict: false });
+      return Promise.resolve(gateway.getTotalBotCount() > 0);
     } catch {
-      return false;
+      return Promise.resolve(false);
     }
   }
 

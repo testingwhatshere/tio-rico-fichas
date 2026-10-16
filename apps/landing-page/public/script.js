@@ -3,12 +3,12 @@ document.addEventListener('DOMContentLoaded', function () {
   var isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
   var isAndroid = /android/i.test(ua);
 
-  var WEB_APP_URL = 'https://tiorico-chat-web.onrender.com';
+  var WEB_APP_URL = 'https://tiorico-juegos.onrender.com';
   // APK served from GitHub Releases (free, unlimited bandwidth, CDN-backed).
   // To publish a new version: bump app.json version, build APK, then
   //   gh release create vX.Y.Z apps/landing-page/public/tio-rico-fichas.apk
   // and update this URL (or just bump the tag).
-  var APK_URL = 'https://github.com/testingwhatshere/tio-rico-fichas/releases/download/v1.0.0/tio-rico-fichas.apk';
+  var APK_URL = 'https://github.com/testingwhatshere/tio-rico-fichas/releases/download/v1.0.1/tio-rico-fichas.apk';
 
   var btns = [
     document.getElementById('downloadBtn'),

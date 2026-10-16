@@ -8,7 +8,7 @@ window.humanize = {
    * Load config from storage or use injected config
    */
   // Safe defaults used when config hasn't been injected yet
-  _safeDefaults: { minDelay: 3000, maxDelay: 8000, typingDelay: 80, typingVariance: 70 },
+  _safeDefaults: { minDelay: 400, maxDelay: 1200, typingDelay: 40, typingVariance: 30 },
   _configReady: false,
 
   async loadConfig() {
@@ -75,8 +75,8 @@ window.humanize = {
   async getDelayRange() {
     if (!this._config) await this.loadConfig();
     return {
-      min: this._config.minDelay ?? 2000,
-      max: this._config.maxDelay ?? 7000
+      min: this._config.minDelay ?? 400,
+      max: this._config.maxDelay ?? 1200
     };
   },
 
@@ -104,20 +104,23 @@ window.humanize = {
    * More human-like than uniform random — special chars and uppercase take longer.
    */
   async typingDelay(char = null) {
-    // Box-Muller transform for gaussian distribution (center 100ms, stddev 30ms)
+    // Box-Muller para una distribucion normal. Centro bajado de 100ms a 45ms: sigue
+    // siendo tecleo caracter por caracter con ritmo irregular, pero de dactilografo
+    // rapido en vez de alguien buscando las teclas. La forma de la curva no cambia,
+    // que es lo que distingue un tipeo real de un value= instantaneo.
     const u1 = Math.random();
     const u2 = Math.random();
     const gaussian = Math.sqrt(-2 * Math.log(u1 || 0.001)) * Math.cos(2 * Math.PI * u2);
-    let delay = Math.round(100 + gaussian * 30);
+    let delay = Math.round(45 + gaussian * 15);
 
     // Character-type variance
     if (char) {
-      if (char === ' ') delay += Math.random() * 40; // Slight pause on spaces
-      if ('@#$%^&*()_+-=[]{}|;:,.<>?/~`'.includes(char)) delay += 50 + Math.random() * 80; // Special chars slower
-      if (char >= 'A' && char <= 'Z') delay += 20; // Shift key adds time
+      if (char === ' ') delay += Math.random() * 20; // Slight pause on spaces
+      if ('@#$%^&*()_+-=[]{}|;:,.<>?/~`'.includes(char)) delay += 25 + Math.random() * 40; // Special chars slower
+      if (char >= 'A' && char <= 'Z') delay += 10; // Shift key adds time
     }
 
-    delay = Math.max(30, Math.min(250, Math.round(delay))); // Clamp 30-250ms
+    delay = Math.max(15, Math.min(120, Math.round(delay))); // Clamp 15-120ms
     return new Promise(resolve => setTimeout(resolve, delay));
   },
 
@@ -181,7 +184,7 @@ window.humanize = {
 
     // Focus element
     element.focus();
-    await this.randomDelay(300, 800);
+    await this.randomDelay(120, 300);
 
     // Clear existing value — select all + delete (works with framework-controlled inputs)
     element.select();
@@ -222,7 +225,7 @@ window.humanize = {
     element.dispatchEvent(new Event('input', { bubbles: true }));
     element.dispatchEvent(new Event('change', { bubbles: true }));
 
-    await this.randomDelay(200, 500);
+    await this.randomDelay(80, 200);
 
     // Allow framework state sync (React/Vue controlled inputs may batch updates)
     await new Promise(r => setTimeout(r, 50));
@@ -254,7 +257,7 @@ window.humanize = {
   async moveMouseToElement(element) {
     // Scroll into view with slight delay to simulate mouse movement
     element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await this.randomDelay(300, 700);
+    await this.randomDelay(120, 280);
   },
 
   /**
@@ -284,7 +287,7 @@ window.humanize = {
     element.dispatchEvent(new MouseEvent('click', eventOpts));
 
     this.logAction('CLICK', { selector: element.id || element.className || element.tagName });
-    await this.randomDelay(1000, 2000);
+    await this.randomDelay(350, 800);
   },
 
   /**

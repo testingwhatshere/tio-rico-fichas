@@ -12,106 +12,256 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="top">
-    <div class="brand">
-      <span class="chip" aria-hidden="true"></span>
-      <div>
-        <h1>Tío Rico</h1>
-        <p class="brand-sub">Panel del dueño</p>
+
+<header class="top">
+  <div class="brand">
+    <span class="chip" aria-hidden="true"></span>
+    <div>
+      <h1>Tío Rico</h1>
+      <p class="brand-sub">Panel del dueño</p>
+    </div>
+  </div>
+
+  <div class="filtros">
+    <div class="filtro">
+      <label for="sel-rango">Período</label>
+      <select id="sel-rango"></select>
+    </div>
+    <div class="filtro" id="filtro-fechas" hidden>
+      <label for="fecha-desde">Desde / hasta</label>
+      <div class="fechas">
+        <input type="date" id="fecha-desde" />
+        <input type="date" id="fecha-hasta" />
+        <button id="btn-aplicar" class="btn chico">Ver</button>
       </div>
     </div>
-    <nav class="ranges" aria-label="Período">
-      <button data-range="hoy" class="active">Hoy</button>
-      <button data-range="7d">7 días</button>
-      <button data-range="mes">Este mes</button>
-      <button data-range="30d">30 días</button>
-      <button data-range="todo">Todo</button>
-    </nav>
-  </header>
+    <div class="filtro">
+      <label for="sel-panel">Panel</label>
+      <select id="sel-panel"><option value="">Todos</option></select>
+    </div>
+    <div class="filtro">
+      <label for="btn-refrescar">&nbsp;</label>
+      <div class="acciones">
+        <button id="btn-refrescar" class="btn" title="Volver a pedir los datos">Actualizar</button>
+        <details class="menu">
+          <summary class="btn">Descargar</summary>
+          <div class="menu-panel" id="menu-export"></div>
+        </details>
+      </div>
+    </div>
+  </div>
+</header>
 
-  <main id="app" class="loading" aria-busy="true">
+<div id="banda-estado" class="banda" hidden></div>
+<section id="alertas" class="alertas" aria-live="polite"></section>
 
-    <!-- Asiento del período: el número que el dueño quiere ver primero -->
+<nav class="tabs" role="tablist" aria-label="Secciones">
+  <button role="tab" data-tab="resumen"   class="active">Resumen</button>
+  <button role="tab" data-tab="tendencia">Tendencias</button>
+  <button role="tab" data-tab="jugadores">Jugadores</button>
+  <button role="tab" data-tab="operacion">Operación</button>
+  <button role="tab" data-tab="canales"  >Paneles y billeteras</button>
+</nav>
+
+<main id="app" class="loading" aria-busy="true">
+
+  <!-- ================= RESUMEN ================= -->
+  <section class="tab-panel activo" data-panel="resumen">
+
     <section class="ledger">
       <div class="ledger-main">
         <p class="eyebrow" id="ledger-label">Entradas de hoy</p>
         <p class="ledger-amount"><span id="entradas-monto">$ —</span></p>
         <p class="ledger-sub" id="ledger-sub">&nbsp;</p>
+        <p class="ledger-delta" id="entradas-delta"></p>
       </div>
       <dl class="ledger-side">
         <div class="ledger-row">
           <dt>Premios pagados</dt>
           <dd class="loss" id="premios-pagados-monto">—</dd>
+          <span class="mini" id="premios-delta"></span>
         </div>
         <div class="ledger-row">
           <dt>Resultado</dt>
           <dd id="resultado-monto">—</dd>
+          <span class="mini" id="resultado-delta"></span>
         </div>
         <div class="ledger-row">
-          <dt>Jugadores que cargaron</dt>
-          <dd id="jugadores-activos">—</dd>
+          <dt>Se paga de lo que entra</dt>
+          <dd id="payout-ratio">—</dd>
+          <span class="mini" id="payout-nota"></span>
         </div>
       </dl>
     </section>
 
+    <div class="kpis" id="kpis"></div>
+
     <div class="grid">
-
       <section class="card wide">
-        <h2><span class="chip sm" aria-hidden="true"></span>Movimiento diario <small>últimos 30 días</small></h2>
-        <div class="chart-box"><canvas id="chart-diario"></canvas></div>
+        <h2><span class="chip sm" aria-hidden="true"></span>Movimiento <small id="serie-sub"></small></h2>
+        <div class="chart-box"><canvas id="chart-serie"></canvas></div>
+        <p class="leyenda-nota">Las barras son la plata que entró; la línea, los premios que se pagaron.</p>
       </section>
 
       <section class="card">
-        <h2><span class="chip sm" aria-hidden="true"></span>Cargas por panel <small id="panel-periodo"></small></h2>
-        <div id="paneles" class="paneles"></div>
+        <h2><span class="chip sm" aria-hidden="true"></span>Del pedido a las fichas <small id="embudo-sub"></small></h2>
+        <div id="embudo" class="embudo"></div>
       </section>
 
       <section class="card">
-        <h2><span class="chip sm" aria-hidden="true"></span>Premios <small id="premios-periodo"></small></h2>
-        <dl class="stats">
-          <div><dt>Pedidos</dt><dd id="premios-pedidos">—</dd><span class="stat-note" id="premios-pedidos-monto"></span></div>
-          <div><dt>Pagados</dt><dd id="premios-pagados-count">—</dd><span class="stat-note" id="premios-pagados-monto-2"></span></div>
-          <div><dt>En trámite</dt><dd id="premios-proceso">—</dd></div>
-          <div><dt>Rechazados</dt><dd id="premios-rechazados">—</dd></div>
-        </dl>
+        <h2><span class="chip sm" aria-hidden="true"></span>Cómo viene el día a día</h2>
+        <div id="estado-actual" class="estado-actual"></div>
       </section>
+    </div>
+  </section>
 
-      <section class="card">
-        <h2><span class="chip sm" aria-hidden="true"></span>Jugadores</h2>
-        <dl class="stats">
-          <div><dt id="jug-activos-label">Cargaron hoy</dt><dd id="jug-activos">—</dd></div>
-          <div><dt>Nuevos</dt><dd id="jug-nuevos">—</dd></div>
-          <div><dt>Total histórico</dt><dd id="jug-total">—</dd></div>
-          <div><dt>Carga promedio</dt><dd id="ticket-promedio">—</dd></div>
-        </dl>
-      </section>
-
-      <section class="card">
-        <h2><span class="chip sm" aria-hidden="true"></span>Horarios de carga <small>últimos 30 días</small></h2>
-        <div class="chart-box short"><canvas id="chart-horas"></canvas></div>
+  <!-- ================= TENDENCIAS ================= -->
+  <section class="tab-panel" data-panel="tendencia">
+    <div class="grid">
+      <section class="card wide">
+        <h2><span class="chip sm" aria-hidden="true"></span>Resultado mes a mes <small>últimos 12 meses</small></h2>
+        <div class="chart-box"><canvas id="chart-mensual"></canvas></div>
       </section>
 
       <section class="card wide">
-        <h2><span class="chip sm" aria-hidden="true"></span>Mes a mes</h2>
+        <h2><span class="chip sm" aria-hidden="true"></span>Mes a mes, en números</h2>
         <div class="table-scroll">
           <table id="tabla-mensual">
             <thead>
-              <tr><th>Mes</th><th>Cargas</th><th>Entró</th><th>Premios pagados</th><th>Resultado</th></tr>
+              <tr><th>Mes</th><th>Cargas</th><th>Entró</th><th>Premios</th><th>Resultado</th><th>Se paga</th><th>Jugadores</th><th>Nuevos</th></tr>
             </thead>
             <tbody></tbody>
           </table>
         </div>
       </section>
 
+      <section class="card wide">
+        <h2><span class="chip sm" aria-hidden="true"></span>Cuándo cargan <small id="heat-sub"></small></h2>
+        <div id="heatmap" class="heatmap"></div>
+        <p class="leyenda-nota">Cuanto más lleno el cuadrito, más cargas hubo en ese día y hora.</p>
+      </section>
+
+      <section class="card">
+        <h2><span class="chip sm" aria-hidden="true"></span>Tamaño de las cargas <small id="distrib-sub"></small></h2>
+        <div class="chart-box short"><canvas id="chart-distribucion"></canvas></div>
+      </section>
+
+      <section class="card">
+        <h2><span class="chip sm" aria-hidden="true"></span>Jugadores activos por período</h2>
+        <div class="chart-box short"><canvas id="chart-jugadores-serie"></canvas></div>
+      </section>
     </div>
+  </section>
 
-    <footer>
-      <p id="footer-note">Cargando datos…</p>
-      <p class="footer-totals" id="footer-totals"></p>
-    </footer>
-  </main>
+  <!-- ================= JUGADORES ================= -->
+  <section class="tab-panel" data-panel="jugadores">
+    <div class="kpis" id="kpis-jugadores"></div>
+    <div class="grid">
+      <section class="card">
+        <h2><span class="chip sm" aria-hidden="true"></span>¿De dónde viene la plata? <small id="comp-sub"></small></h2>
+        <div id="composicion" class="composicion"></div>
+      </section>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="app.js"></script>
+      <section class="card">
+        <h2><span class="chip sm" aria-hidden="true"></span>Cuántas veces carga cada uno <small id="frec-sub"></small></h2>
+        <div class="chart-box short"><canvas id="chart-frecuencia"></canvas></div>
+      </section>
+
+      <section class="card wide">
+        <h2><span class="chip sm" aria-hidden="true"></span>Los que más cargaron <small id="top-sub"></small></h2>
+        <div class="table-scroll">
+          <table id="tabla-top">
+            <thead><tr><th>Jugador</th><th>Cargas</th><th>Cargó</th><th>Cobró en premios</th><th>Neto</th><th>Última</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card wide">
+        <h2><span class="chip sm" aria-hidden="true"></span>Se están apagando <small>cargaban seguido y hace más de 14 días que no vuelven</small></h2>
+        <div class="table-scroll">
+          <table id="tabla-riesgo">
+            <thead><tr><th>Jugador</th><th>Cargas (6 meses)</th><th>Total cargado</th><th>Última carga</th><th>Hace</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card wide">
+        <h2><span class="chip sm" aria-hidden="true"></span>¿Vuelven? <small>de cada grupo que debutó, cuántos siguieron cargando</small></h2>
+        <div class="table-scroll"><div id="cohortes"></div></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- ================= OPERACIÓN ================= -->
+  <section class="tab-panel" data-panel="operacion">
+    <div class="kpis" id="kpis-operacion"></div>
+    <div class="grid">
+      <section class="card">
+        <h2><span class="chip sm" aria-hidden="true"></span>Cuánto tarda una carga <small id="tiempos-sub"></small></h2>
+        <div id="tiempos" class="tiempos"></div>
+      </section>
+
+      <section class="card">
+        <h2><span class="chip sm" aria-hidden="true"></span>Trabajo del bot <small id="bot-sub"></small></h2>
+        <div class="table-scroll">
+          <table id="tabla-bot">
+            <thead><tr><th>Tarea</th><th>Total</th><th>Salieron bien</th><th>Fallaron</th><th>Éxito</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card wide">
+        <h2><span class="chip sm" aria-hidden="true"></span>Por qué falla <small id="errores-sub"></small></h2>
+        <div class="table-scroll">
+          <table id="tabla-errores">
+            <thead><tr><th>Motivo</th><th>Veces</th><th>Última vez</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2><span class="chip sm" aria-hidden="true"></span>Premios: en qué estado están <small id="premios-sub"></small></h2>
+        <div id="premios-pipeline" class="pipeline"></div>
+      </section>
+
+      <section class="card">
+        <h2><span class="chip sm" aria-hidden="true"></span>Cuánto trabaja sola la IA <small id="valid-sub"></small></h2>
+        <div id="validacion" class="validacion"></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- ================= PANELES Y BILLETERAS ================= -->
+  <section class="tab-panel" data-panel="canales">
+    <div class="grid">
+      <section class="card wide">
+        <h2><span class="chip sm" aria-hidden="true"></span>Cargas por panel <small id="panel-sub"></small></h2>
+        <div id="paneles" class="paneles"></div>
+      </section>
+
+      <section class="card wide">
+        <h2><span class="chip sm" aria-hidden="true"></span>Por dónde entró la plata <small id="wallet-sub"></small></h2>
+        <div class="table-scroll">
+          <table id="tabla-wallets">
+            <thead><tr><th>Billetera</th><th>Tipo</th><th>Titular</th><th>Cargas</th><th>Entró</th><th>Acumulado / tope</th><th>Estado</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <footer>
+    <p id="footer-note">Cargando datos…</p>
+    <p class="footer-totals" id="footer-totals"></p>
+  </footer>
+</main>
+
+<script src="vendor/chart.umd.min.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

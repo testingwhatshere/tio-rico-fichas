@@ -6,7 +6,7 @@
 (function() {
 'use strict';
 
-const BACKEND_URL = 'https://tiorico-api.onrender.com';
+const BACKEND_URL = 'https://tiorico-api-axfb.onrender.com';
 const API_KEY = 'Narciso';
 
 // Event callback registry

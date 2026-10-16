@@ -23,6 +23,18 @@ interface ValidatorLogDto {
   data?: any;
 }
 
+/**
+ * Categorías que vale la pena guardar en la base.
+ *
+ * El resto (MEMORY, CONNECTION, OCR, SOCKET, QUEUE, CACHE…) es ruido operativo de alta
+ * frecuencia: llegó a 132.000 filas y 37 MB, el 74% de toda la base, para una tabla que
+ * nadie consulta. Sólo MEMORY aportaba 47.745 filas de un aviso de heap mal calculado.
+ *
+ * Nada se pierde: el validador escribe siempre el log completo en disco
+ * (validator-app/src/logger.js → writeToFile), que es de donde se lee cuando hace falta.
+ */
+const PERSISTED_LOG_CATEGORIES = new Set(['VALIDATION', 'APP', 'CRASH']);
+
 @Controller('validator')
 export class ValidatorController {
   private readonly logger = new Logger(ValidatorController.name);
@@ -74,20 +86,22 @@ export class ValidatorController {
       `[Validator] ${logEntry.level} - ${logEntry.category}: ${logEntry.message}`,
     );
 
-    // Store in database
-    try {
-      await this.prisma.validatorLog.create({
-        data: {
-          timestamp: new Date(logEntry.timestamp),
-          level: logEntry.level,
-          category: logEntry.category,
-          message: logEntry.message,
-          data: logEntry.data || {},
-        },
-      });
-    } catch (error) {
-      // Log table might not exist yet, just log to console
-      this.logger.warn('Could not store validator log in DB:', error.message);
+    // Store in database (sólo las categorías que alguien va a mirar)
+    if (PERSISTED_LOG_CATEGORIES.has(logEntry.category)) {
+      try {
+        await this.prisma.validatorLog.create({
+          data: {
+            timestamp: new Date(logEntry.timestamp),
+            level: logEntry.level,
+            category: logEntry.category,
+            message: logEntry.message,
+            data: logEntry.data || {},
+          },
+        });
+      } catch (error) {
+        // Log table might not exist yet, just log to console
+        this.logger.warn('Could not store validator log in DB:', error.message);
+      }
     }
 
     return { success: true };
@@ -112,9 +126,17 @@ export class ValidatorController {
       `[Validator] Receiving batch of ${body.logs.length} logs`,
     );
 
+    const persistable = body.logs.filter((log) =>
+      PERSISTED_LOG_CATEGORIES.has(log.category),
+    );
+
+    if (persistable.length === 0) {
+      return { success: true, count: body.logs.length, stored: 0 };
+    }
+
     try {
       await this.prisma.validatorLog.createMany({
-        data: body.logs.map((log) => ({
+        data: persistable.map((log) => ({
           timestamp: new Date(log.timestamp),
           level: log.level,
           category: log.category,
@@ -124,7 +146,11 @@ export class ValidatorController {
         skipDuplicates: true,
       });
 
-      return { success: true, count: body.logs.length };
+      return {
+        success: true,
+        count: body.logs.length,
+        stored: persistable.length,
+      };
     } catch (error) {
       this.logger.warn('Could not store batch logs in DB:', error.message);
       return { success: false, error: error.message };

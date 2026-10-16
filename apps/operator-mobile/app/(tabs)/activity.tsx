@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, Image } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import colors from '@/constants/colors';
 import { useOperatorStore } from '@/stores/operator.store';
@@ -94,7 +94,7 @@ export default function ActivityScreen() {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Image source={require('@/assets/icon.png')} style={{ width: 32, height: 32, borderRadius: 8 }} />
+            <Image source={require('@/assets/logo.png')} style={{ width: 32, height: 32, borderRadius: 8 }} />
             <Text style={styles.headerTitle}>Actividad</Text>
           </View>
           <Text style={styles.headerSubtitle}>

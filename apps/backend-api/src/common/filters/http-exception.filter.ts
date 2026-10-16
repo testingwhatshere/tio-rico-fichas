@@ -29,7 +29,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
         message = exceptionResponse;
       } else if (typeof exceptionResponse === 'object') {
         const res = exceptionResponse as Record<string, unknown>;
-        message = (res.message as string) || exception.message;
+        // El ValidationPipe devuelve `message` como array de strings. El chat-app
+        // lo pasa tal cual a Alert.alert(), y Android cierra la app cuando le llega
+        // un array donde espera un String. Lo aplanamos acá, una sola vez, para
+        // todos los endpoints: la respuesta siempre lleva `message` string.
+        message = Array.isArray(res.message)
+          ? (res.message as unknown[]).join('. ')
+          : (res.message as string) || exception.message;
         error = (res.error as string) || 'Error';
       }
     } else if (exception instanceof Error) {
@@ -53,6 +59,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
       this.logger.error(
         `${request.method} ${request.url} ${status}`,
         JSON.stringify(errorResponse),
+      );
+    } else if (status >= 400) {
+      // Los 4xx no dejaban rastro: el LoggingInterceptor sólo corre en el camino
+      // feliz (`tap` de éxito) y acá se cortaban en el 500. Resultado: el día que
+      // varios clientes quedaron trabados con "Ya tenés una carga en proceso" no
+      // había una sola línea en los logs — el incidente hubo que reconstruirlo
+      // por los "Creating request" que no tenían un 201 detrás.
+      this.logger.warn(
+        `${request.method} ${request.url} ${status} - ${message}`,
       );
     }
 

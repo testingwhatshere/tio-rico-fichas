@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import colors from '@/constants/colors';
+import { CopyableText, CopyButton } from '@/components/Copyable';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: string; borderColor: string }> = {
   PENDING: { label: 'Pendiente', color: colors.warning, icon: 'hourglass-outline', borderColor: colors.warning },
@@ -80,21 +81,39 @@ export default function PaymentCard({ payment, onPress, onConfirm, onRetry, onCa
         </View>
 
         {/* Amount */}
-        <Text style={styles.amount}>{formatAmount(payment.amount)}</Text>
+        <View style={styles.copyRow}>
+          <Text style={styles.amount}>{formatAmount(payment.amount)}</Text>
+          <CopyButton value={payment.amount} label="Monto" size={12} />
+        </View>
 
-        {/* Destination */}
-        <Text style={styles.destination} numberOfLines={1}>
-          {accountHolder ? `${accountHolder} · ` : ''}{destination}
-        </Text>
+        {/* Destination — se copia sólo el CBU/alias, sin el titular adelante. */}
+        <View style={styles.copyRow}>
+          {!!accountHolder && (
+            <CopyableText value={accountHolder} label="Titular" style={styles.destination} iconSize={11} />
+          )}
+          <CopyableText value={destination} label="Destino" mono style={styles.destination} iconSize={11} />
+        </View>
 
         {/* Operation number (if completed) */}
         {payment.operationNumber && (
-          <Text style={styles.operationNumber}>Op: {payment.operationNumber}</Text>
+          <CopyableText
+            value={payment.operationNumber}
+            display={`Op: ${payment.operationNumber}`}
+            label="Número de operación"
+            style={styles.operationNumber}
+            iconSize={11}
+          />
         )}
 
         {/* Error (if failed) */}
         {payment.status === 'FAILED' && payment.error && (
-          <Text style={styles.errorText} numberOfLines={2}>{payment.error}</Text>
+          <CopyableText
+            value={payment.error}
+            label="Error"
+            style={styles.errorText}
+            numberOfLines={2}
+            iconSize={11}
+          />
         )}
       </View>
 
@@ -126,6 +145,7 @@ export default function PaymentCard({ payment, onPress, onConfirm, onRetry, onCa
 }
 
 const styles = StyleSheet.create({
+  copyRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   card: {
     flexDirection: 'row',
     alignItems: 'center',

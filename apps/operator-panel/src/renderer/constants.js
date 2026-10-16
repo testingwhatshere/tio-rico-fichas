@@ -25,6 +25,7 @@ export const VIEW_TITLES = {
   failures: 'Fallos',
   jobs: 'Trabajos',
   requests: 'Solicitudes',
+  'approved-loads': 'Cargas Aprobadas',
   chats: 'Chats',
   activity: 'Actividad',
   wallets: 'Billeteras',
@@ -41,7 +42,9 @@ export const REQUEST_STATUS_CONFIG = {
   PENDING:           { label: 'Pendiente',          class: 'queued'     },
   PENDING_PROOF:     { label: 'Esperando Prueba',   class: 'queued'     },
   VALIDATING:                { label: 'Validando',           class: 'processing' },
-  PENDING_MP_VERIFICATION:   { label: 'Verificando Pago',    class: 'processing' },
+  // Estado legado: ya no se entra aca (ver payments/requests service). Solo aparece
+  // en requests viejos que quedaron colgados antes del fix del 2026-08-20.
+  PENDING_MP_VERIFICATION:   { label: 'En Revision',         class: 'processing' },
   VALIDATION_FAILED:         { label: 'Validacion Fallida',  class: 'failed'     },
   APPROVED:                  { label: 'Aprobado',            class: 'completed'  },
   PROCESSING:        { label: 'Procesando',         class: 'processing' },
@@ -71,8 +74,11 @@ export const ACTION_ICONS = {
 };
 
 export const FLAG_LABELS = {
-  'RECIPIENT_MISMATCH': 'Destinatario no coincide',
-  'RECIPIENT_ACCOUNT_MISMATCH': 'Cuenta destino no coincide',
+  // Copy deliberadamente neutro: no afirmamos que la plata no llego a una cuenta
+  // nuestra, solo que no se pudo verificar automaticamente. El operador confirma.
+  'RECIPIENT_MISMATCH': 'No se pudo verificar el nombre del destinatario',
+  'RECIPIENT_ACCOUNT_MISMATCH': 'No se pudo verificar la cuenta destino',
+  'RECIPIENT_UNVERIFIABLE': 'El comprobante no muestra datos del destinatario',
   'DUPLICATE_TRANSACTION_ID': 'Nro de operacion duplicado',
   'CROSS_USER_DUPLICATE': 'Duplicado de otro usuario',
   'CROSS_USER_SENDER': 'Remitente de otro usuario',
@@ -83,6 +89,7 @@ export const FLAG_LABELS = {
   'INVALID_FORMAT': 'Formato invalido',
   'STATUS_NOT_APPROVED': 'Estado no aprobado',
   'AMOUNT_MISMATCH': 'Monto no coincide',
+  'AMOUNT_AMBIGUOUS': 'El monto no se lee con certeza',
   'OLD_DATE': 'Fecha antigua',
   'FUTURE_DATE': 'Fecha futura',
 };

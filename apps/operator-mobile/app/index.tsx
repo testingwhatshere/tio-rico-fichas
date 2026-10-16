@@ -14,7 +14,7 @@ export default function Index() {
     AsyncStorage.getItem(NAME_KEY)
       .then((name) => {
         if (!active) return;
-        setTarget(name && name.trim() ? '/(tabs)/dashboard' : '/wizard');
+        setTarget(name && name.trim() ? '/(tabs)/inbox' : '/wizard');
       })
       .catch(() => {
         if (!active) return;

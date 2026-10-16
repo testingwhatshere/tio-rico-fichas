@@ -6,20 +6,43 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { ModuleRef } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { invalidateSettingsCache } from '../settings/settings-cache';
 import { BotGateway } from '../bot/bot.gateway';
-import { NotificationsService } from './notifications.service';
+
+/**
+ * Every alert this service can push. 'other' is the catch-all for the generic
+ * send() used by callers outside this file (self-monitor, mp-verification,
+ * broken-selectors check, monthly/daily reports).
+ */
+type AlertKey = 'new_prize' | 'low_panel_balance' | 'bot_stalled' | 'other';
 
 @Injectable()
 export class TelegramService implements OnModuleInit {
   private readonly logger = new Logger(TelegramService.name);
+
+  /**
+   * Hard allowlist: ONLY these alerts go out over Telegram. Everything else
+   * (failed jobs, failed validations, verifiers offline/stale, bot disconnected,
+   * MP session expired, duplicate payments, daily/monthly reports, self-monitor
+   * health alerts) stays muted until further notice — by owner's request.
+   */
+  private static readonly ENABLED_ALERTS: ReadonlySet<AlertKey> =
+    new Set<AlertKey>(['new_prize', 'low_panel_balance', 'bot_stalled']);
+  // 'bot_stalled' (2026-10-15, pedido del dueño): extensión frenada o el bot sin
+  // completar cargas mientras entran. Ese día se cargó a mano todo el día sin aviso.
   private botToken: string | null = null;
   private chatIds: Set<string> = new Set();
   private enabled = false;
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private lastUpdateId = 0;
+  /**
+   * Password a chat must send before it can subscribe or run any command.
+   * Without it, anyone who finds the bot would get the operator's read-only
+   * view of the system (jobs, wallets, prizes, panel balance).
+   */
+  private accessPassword: string;
 
   constructor(
     private readonly configService: ConfigService,
@@ -27,13 +50,15 @@ export class TelegramService implements OnModuleInit {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => BotGateway))
     private readonly botGateway: BotGateway,
-    @Inject(forwardRef(() => NotificationsService))
-    private readonly notificationsService: NotificationsService,
-    private readonly moduleRef: ModuleRef,
   ) {
     this.botToken =
       this.configService.get<string>('TELEGRAM_BOT_TOKEN') || null;
     this.enabled = !!this.botToken;
+    this.accessPassword = (
+      this.configService.get<string>('TELEGRAM_ACCESS_PASSWORD') || 'leon123'
+    )
+      .trim()
+      .toLowerCase();
 
     if (!this.enabled) {
       this.logger.warn(
@@ -93,6 +118,7 @@ export class TelegramService implements OnModuleInit {
         update: { value },
         create: { key: 'TELEGRAM_CHAT_IDS', value },
       });
+      invalidateSettingsCache();
     } catch (e) {
       this.logger.warn('Could not save Telegram chat IDs:', e.message);
     }
@@ -131,14 +157,6 @@ export class TelegramService implements OnModuleInit {
                 command: 'premios',
                 description: 'Premios pendientes de cobro',
               },
-              {
-                command: 'promo',
-                description: 'Enviar promo a todos los usuarios',
-              },
-              {
-                command: 'update',
-                description: 'Publicar nueva version del APK',
-              },
               { command: 'help', description: 'Ayuda' },
             ],
           }),
@@ -150,6 +168,19 @@ export class TelegramService implements OnModuleInit {
   // ==========================================
   // POLL & COMMAND HANDLING
   // ==========================================
+
+  private get helpText(): string {
+    return (
+      `📋 <b>Comandos disponibles</b>\n\n` +
+      `/status — Estado general del sistema\n` +
+      `/fichas — Fichas disponibles en el panel\n` +
+      `/billeteras — Estado de las billeteras\n` +
+      `/jobs — Resumen de jobs de hoy\n` +
+      `/fallos — Fallos pendientes de revision\n` +
+      `/premios — Premios pendientes de cobro\n` +
+      `/stop — Dejar de recibir alertas`
+    );
+  }
 
   private async pollUpdates() {
     if (!this.botToken) return;
@@ -180,11 +211,26 @@ export class TelegramService implements OnModuleInit {
         const text = (msg.text || '').trim().toLowerCase();
         const name = msg.from?.first_name || 'Operador';
 
-        // Auto-subscribe on any message if not subscribed
-        if (!this.chatIds.has(chatId) && text !== '/stop') {
-          this.chatIds.add(chatId);
-          subscribersChanged = true;
-          this.logger.log(`New Telegram subscriber: ${name} (${chatId})`);
+        // Password gate: an unknown chat can only send the access password.
+        // Anything else gets the "private bot" reply and never reaches a command.
+        if (!this.chatIds.has(chatId)) {
+          if (text === this.accessPassword) {
+            this.chatIds.add(chatId);
+            subscribersChanged = true;
+            this.logger.log(`New Telegram subscriber: ${name} (${chatId})`);
+            await this.sendTo(
+              chatId,
+              `✅ <b>Acceso concedido, ${name}!</b>\n\n` +
+                `Vas a recibir alertas de premios nuevos y fichas bajas.\n\n` +
+                this.helpText,
+            );
+          } else {
+            await this.sendTo(
+              chatId,
+              '🔒 Este bot es privado. Enviá la contraseña para usarlo.',
+            );
+          }
+          continue;
         }
 
         if (text === '/start' || text === 'hola') {
@@ -202,19 +248,7 @@ export class TelegramService implements OnModuleInit {
             '✅ Ya no recibiras alertas. Envia /start para volver.',
           );
         } else if (text === '/help') {
-          await this.sendTo(
-            chatId,
-            `📋 <b>Comandos disponibles</b>\n\n` +
-              `/status — Estado general del sistema\n` +
-              `/fichas — Fichas disponibles en el panel\n` +
-              `/billeteras — Estado de las billeteras\n` +
-              `/jobs — Resumen de jobs de hoy\n` +
-              `/fallos — Fallos pendientes de revision\n` +
-              `/premios — Premios pendientes de cobro\n` +
-              `/promo &lt;mensaje&gt; — Enviar promo a todos los usuarios\n` +
-              `/update &lt;version&gt; — Publicar nueva version del APK\n` +
-              `/stop — Dejar de recibir alertas`,
-          );
+          await this.sendTo(chatId, this.helpText);
         } else if (text === '/status') {
           await this.handleStatusCommand(chatId);
         } else if (text === '/fichas') {
@@ -227,20 +261,6 @@ export class TelegramService implements OnModuleInit {
           await this.handleFallosCommand(chatId);
         } else if (text === '/premios') {
           await this.handlePremiosCommand(chatId);
-        } else if (text.startsWith('/promo ')) {
-          await this.handlePromoCommand(chatId, text.substring(7).trim());
-        } else if (text === '/promo') {
-          await this.sendTo(
-            chatId,
-            '📢 Uso: /promo <mensaje>\n\nEjemplo: /promo HOY 10% extra en cargas de +$10.000!',
-          );
-        } else if (text.startsWith('/update ')) {
-          await this.handleUpdateCommand(chatId, text.substring(8).trim());
-        } else if (text === '/update') {
-          await this.sendTo(
-            chatId,
-            '📦 Uso: /update <version>\n\nEjemplo: /update 1.2.0\n\nSe usara el APK de la landing page.',
-          );
         }
       }
 
@@ -361,6 +381,9 @@ export class TelegramService implements OnModuleInit {
         },
       );
     } catch {}
+
+    // Same password gate as text commands: buttons only work for authorized chats
+    if (!this.chatIds.has(chatId)) return;
 
     if (data.startsWith('fichas:')) {
       const panelId = data.substring(7);
@@ -655,7 +678,7 @@ export class TelegramService implements OnModuleInit {
     }
   }
 
-  async send(message: string): Promise<boolean> {
+  private async broadcast(message: string): Promise<boolean> {
     if (!this.enabled) return false;
 
     // Lazy-reload chat IDs if empty (may have failed at startup)
@@ -670,6 +693,29 @@ export class TelegramService implements OnModuleInit {
     return results.some((r) => r.status === 'fulfilled' && r.value);
   }
 
+  /**
+   * Alert gate. Only the keys listed in ENABLED_ALERTS reach Telegram; every
+   * other alert (including any external caller of send()) is dropped silently.
+   * To turn something back on, add its key to ENABLED_ALERTS and pass that key
+   * from the corresponding alert method.
+   */
+  private async emit(key: AlertKey, message: string): Promise<boolean> {
+    if (!TelegramService.ENABLED_ALERTS.has(key)) {
+      this.logger.debug(`Telegram alert suppressed (${key})`);
+      return false;
+    }
+    return this.broadcast(message);
+  }
+
+  /**
+   * Kept public for the callers outside this service (self-monitor,
+   * mp-verification, bot selectors check). They all fall into the 'other'
+   * bucket, which is currently muted.
+   */
+  async send(message: string): Promise<boolean> {
+    return this.emit('other', message);
+  }
+
   // ==========================================
   // ALERT METHODS
   // ==========================================
@@ -680,12 +726,28 @@ export class TelegramService implements OnModuleInit {
     panelId?: string,
   ) {
     const panel = panelId ? ` (${panelId})` : '';
-    await this.send(
+    await this.emit(
+      'low_panel_balance',
       `🔴 <b>FICHAS BAJAS${panel}</b>\n\n` +
         `Balance: <b>$${balance.toLocaleString('es-AR')}</b>\n` +
         `Umbral: $${threshold.toLocaleString('es-AR')}\n\n` +
         `Se necesita recargar fichas en el panel.`,
     );
+  }
+
+  private lastBotStalledAlertAt = new Map<string, number>();
+  private static readonly BOT_STALLED_ALERT_COOLDOWN_MS = 60 * 60 * 1000; // 1 h por motivo
+
+  /**
+   * El bot no está cargando (extensión frenada, o cargas entrando sin que
+   * ninguna salga). Un aviso por `key` por hora: mientras siga igual no repite.
+   */
+  async alertBotStalled(key: string, message: string) {
+    const now = Date.now();
+    const last = this.lastBotStalledAlertAt.get(key) ?? 0;
+    if (now - last < TelegramService.BOT_STALLED_ALERT_COOLDOWN_MS) return;
+    this.lastBotStalledAlertAt.set(key, now);
+    await this.emit('bot_stalled', `🛑 <b>EL BOT NO ESTÁ CARGANDO</b>\n\n${message}`);
   }
 
   async alertJobFailed(jobId: string, error: string, targetUsername?: string) {
@@ -873,7 +935,8 @@ export class TelegramService implements OnModuleInit {
     amount: number,
     chipBalance: number,
   ) {
-    await this.send(
+    await this.emit(
+      'new_prize',
       `🏆 <b>NUEVO PREMIO</b>\n\n` +
         `Usuario: ${username}\n` +
         `Monto: <b>$${amount.toLocaleString('es-AR')}</b>\n` +
@@ -882,11 +945,59 @@ export class TelegramService implements OnModuleInit {
     );
   }
 
+  /**
+   * Chips retired from the panel — the prize is now ready for the operator to
+   * send the money. This is the "pay now" call to action; the WS alert only
+   * reaches an operator with the app open, so Telegram is the backstop.
+   */
+  async alertPrizeReadyToPay(username: string, amount: number) {
+    await this.send(
+      `💸 <b>PREMIO LISTO PARA PAGAR</b>\n\n` +
+        `Usuario: <b>${username}</b>\n` +
+        `Monto: <b>$${amount.toLocaleString('es-AR')}</b>\n\n` +
+        `Las fichas ya se retiraron del panel. Enviá la transferencia al usuario.`,
+    );
+  }
+
+  /**
+   * Confirmation that a prize was paid (operator marked it COMPLETED with a
+   * transfer proof). Closes the loop so the operator sees the payment landed.
+   */
+  async alertPrizePaid(username: string, amount: number) {
+    await this.send(
+      `✅ <b>PREMIO PAGADO</b>\n\n` +
+        `Usuario: <b>${username}</b>\n` +
+        `Monto: <b>$${amount.toLocaleString('es-AR')}</b>\n\n` +
+        `El premio se marcó como pagado con comprobante.`,
+    );
+  }
+
   async alertPrizeWithdrawalFailed(username: string, error: string) {
     await this.send(
       `❌ <b>RETIRO DE FICHAS FALLIDO</b>\n\n` +
         `Usuario: ${username}\n` +
         `Error: ${error}`,
+    );
+  }
+
+  /**
+   * Chip verification for a prize claim failed (timeout, no bot connected,
+   * discovery miss, or a hard error). These claims need an operator to check the
+   * panel by hand — but the panel WS alert only reaches an operator with the app
+   * open. Telegram is the cross-device backstop so a failed verification isn't
+   * silently stranded when nobody is watching the panel.
+   */
+  async alertPrizeVerificationFailed(
+    username: string,
+    amount: number,
+    reason: string,
+  ) {
+    await this.send(
+      `⚠️ <b>PREMIO PARA REVISAR</b>\n\n` +
+        `Usuario: <b>${username}</b>\n` +
+        `Monto: <b>$${amount.toLocaleString('es-AR')}</b>\n` +
+        `Motivo: ${reason}\n\n` +
+        `La verificacion automatica de fichas fallo. Revisá el panel a mano.`,
     );
   }
 
@@ -940,127 +1051,6 @@ export class TelegramService implements OnModuleInit {
         chatId,
         `❌ Error al obtener premios: ${error.message}`,
       );
-    }
-  }
-
-  private async handleUpdateCommand(chatId: string, version: string) {
-    if (!/^\d+\.\d+\.\d+$/.test(version)) {
-      await this.sendTo(
-        chatId,
-        '❌ Version invalida. Usa formato X.Y.Z (ej: 1.2.0)',
-      );
-      return;
-    }
-
-    try {
-      // Get APK URL from settings or use default landing page URL
-      const customApkUrl = await this.prisma.setting
-        ?.findUnique?.({ where: { key: 'APP_APK_URL_CHAT' } })
-        .then((s) => s?.value)
-        .catch(() => null);
-      const apkUrl =
-        customApkUrl ||
-        'https://tiorico-landing.onrender.com/tio-rico-fichas.apk';
-
-      // Save version settings
-      const settingsService = this.moduleRef.get(
-        require('../settings/settings.service').SettingsService,
-        { strict: false },
-      );
-      if (!settingsService) {
-        await this.sendTo(chatId, '❌ Servicio de settings no disponible');
-        return;
-      }
-
-      await settingsService.setSetting('APP_VERSION_CHAT', version);
-      await settingsService.setSetting('APP_APK_URL_CHAT', apkUrl);
-
-      // Notify users via push
-      const { NotificationsService } = require('./notifications.service');
-      const notificationsService = this.moduleRef.get(NotificationsService, {
-        strict: false,
-      });
-      let pushCount = 0;
-      if (notificationsService) {
-        pushCount = await notificationsService.broadcastPromo(
-          'Nueva version disponible',
-          `Actualiza a v${version} para tener las ultimas mejoras.`,
-          { type: 'APP_UPDATE', version },
-        );
-      }
-
-      await this.sendTo(
-        chatId,
-        `✅ Actualizacion publicada!\n\n` +
-          `📦 Version: ${version}\n` +
-          `🔗 APK: ${apkUrl}\n` +
-          `📱 ${pushCount} usuarios notificados\n\n` +
-          `Los usuarios seran forzados a actualizar la proxima vez que abran la app.`,
-      );
-    } catch (error: any) {
-      await this.sendTo(
-        chatId,
-        `❌ Error publicando actualizacion: ${error.message}`,
-      );
-    }
-  }
-
-  private async handlePromoCommand(chatId: string, message: string) {
-    if (!message) {
-      await this.sendTo(
-        chatId,
-        '📢 Uso: /promo <mensaje>\n\nEjemplo: /promo HOY 10% extra!',
-      );
-      return;
-    }
-
-    try {
-      const pushCount = await this.notificationsService.broadcastPromo(
-        '📢 Tio Rico',
-        message,
-      );
-
-      // Also broadcast to Telegram users via the user bot
-      let tgCount = 0;
-      const userBotToken = this.configService.get<string>(
-        'TELEGRAM_USER_BOT_TOKEN',
-      );
-      if (userBotToken) {
-        const tgUsers = await this.prisma.user.findMany({
-          where: { telegramId: { not: null }, role: 'CLIENT', isActive: true },
-          select: { telegramId: true },
-        });
-
-        for (const user of tgUsers) {
-          if (!user.telegramId) continue;
-          try {
-            await fetch(
-              `https://api.telegram.org/bot${userBotToken}/sendMessage`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  chat_id: user.telegramId,
-                  text: `📢 ${message}`,
-                }),
-              },
-            );
-            tgCount++;
-            await new Promise((r) => setTimeout(r, 50)); // Telegram rate limit
-          } catch {}
-        }
-      }
-
-      await this.sendTo(
-        chatId,
-        `✅ Promo enviada!\n\n` +
-          `📱 ${pushCount} usuarios notificados via push\n` +
-          `💬 ${tgCount} usuarios notificados via Telegram\n` +
-          `📋 Mensaje: "${message}"`,
-      );
-    } catch (error: any) {
-      this.logger.error(`Promo command failed: ${error.message}`);
-      await this.sendTo(chatId, `❌ Error enviando promo: ${error.message}`);
     }
   }
 

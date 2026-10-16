@@ -7,6 +7,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { invalidateSettingsCache, settingsCache } from './settings-cache';
 import { EventsGateway } from '../events/events.gateway';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction, EntityType } from '../audit/dto';
@@ -21,6 +22,41 @@ import {
 @Injectable()
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
+
+  /**
+   * Copia en memoria de la tabla Setting (son ~30 filas).
+   *
+   * Se leia de la base en cada validacion de pago, cada conexion de operador,
+   * cada heartbeat: ~6.000 lecturas por dia contra Supabase, que cobra cada
+   * viaje. Ahora se lee entera una vez y se reusa 15 s. Toda escritura (aca o
+   * en otros servicios que escriben Setting directo) llama a `invalidateCache`,
+   * asi que un cambio —el kill switch incluido— se ve en la siguiente lectura.
+   * El TTL cubre lo que escapara a eso. Una sola instancia en Render.
+   */
+  private static readonly CACHE_TTL_MS = 15_000;
+
+  static invalidateCache(): void {
+    invalidateSettingsCache();
+  }
+
+  private async loadAll(): Promise<Map<string, any>> {
+    const cached = settingsCache.value;
+    if (cached && Date.now() - cached.at < SettingsService.CACHE_TTL_MS) {
+      return cached.rows;
+    }
+    if (settingsCache.loading) return settingsCache.loading;
+    settingsCache.loading = this.prisma.setting
+      .findMany()
+      .then((rows) => {
+        const map = new Map(rows.map((r) => [r.key, r]));
+        settingsCache.value = { at: Date.now(), rows: map };
+        return map;
+      })
+      .finally(() => {
+        settingsCache.loading = null;
+      });
+    return settingsCache.loading;
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -88,9 +124,7 @@ export class SettingsService {
    * Get a single setting by key
    */
   async getSetting(key: string): Promise<string> {
-    const setting = await this.prisma.setting.findUnique({
-      where: { key },
-    });
+    const setting = (await this.loadAll()).get(key);
 
     return setting?.value ?? DEFAULT_SETTINGS[key] ?? '';
   }
@@ -108,6 +142,7 @@ export class SettingsService {
       update: { value },
       create: { key, value },
     });
+    SettingsService.invalidateCache();
 
     this.logger.log(`Setting ${key} updated to ${value}`);
 
@@ -135,7 +170,7 @@ export class SettingsService {
    * Get all settings
    */
   async getAllSettings(): Promise<SettingResponseDto[]> {
-    const settings = await this.prisma.setting.findMany();
+    const settings = [...(await this.loadAll()).values()];
 
     // Merge with defaults
     const allKeys = Object.keys(DEFAULT_SETTINGS);
@@ -199,7 +234,7 @@ export class SettingsService {
       maxRequestAmount: this.clamp(
         this.safeParseInt(getValue('MAX_REQUEST_AMOUNT'), 50000),
         100,
-        1000000,
+        10000000,
       ),
       // Validation settings
       validationThreshold: this.clamp(
@@ -440,6 +475,7 @@ export class SettingsService {
         }),
       ),
     );
+    SettingsService.invalidateCache();
 
     // Post-commit: emit events and single audit log
     for (const update of updates) {
@@ -552,6 +588,7 @@ export class SettingsService {
       update: { value: new Date().toISOString() },
       create: { key: 'BOT_LAST_HEARTBEAT', value: new Date().toISOString() },
     });
+    SettingsService.invalidateCache();
 
     this.eventsGateway.emitBotStatus({ status, timestamp: new Date() });
   }

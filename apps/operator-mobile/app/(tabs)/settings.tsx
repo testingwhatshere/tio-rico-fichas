@@ -1,1130 +1,362 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  Switch,
-  Alert,
-  ActivityIndicator,
-  Image,
-  StyleSheet,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import colors from '@/constants/colors';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TextInput, Pressable, Switch, ActivityIndicator, Platform } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useOperatorStore, DEFAULT_QUICK_REPLIES, type QuickReply } from '@/stores/operator.store';
+import { useRouter } from 'expo-router';
+import { useOperatorStore, DEFAULT_QUICK_REPLIES, QuickReply } from '@/stores/operator.store';
 import { useAuthStore } from '@/stores/auth.store';
-import { connectSocket, disconnectSocket, emitWithTimeout } from '@/services/socket';
-import { hapticSuccess, hapticMedium, hapticError } from '@/utils/haptics';
-import { getSoundEnabled, setSoundEnabled, getVibrationEnabled, setVibrationEnabled } from '@/services/notifications';
+import { emitWithTimeout, getSocket } from '@/services/socket';
+import { getApiConfig } from '@/services/api';
+import { toast } from '@/components/Toast';
 import KillSwitchButton from '@/components/KillSwitchButton';
+import { Button, ConfirmDialog, Card, PageHeader } from '@/components/ui';
+import { colors, space, radius, text, alpha } from '@/constants/theme';
+import {
+  notificationPermission,
+  prizeAlertsEnabled,
+  setPrizeAlertsEnabled,
+  testPrizeAlert,
+} from '@/services/webNotifications';
 
+const QUICK_REPLIES_KEY = '@operator_quick_replies';
+
+/**
+ * Ajustes.
+ *
+ * Antes eran 1.130 líneas con ~20 `useState` espejando el store, 23
+ * `Alert.alert` y tres cosas que no hacían nada: el toggle de "Sonido" (el
+ * servicio de notificaciones sólo vibra, y en web ni eso), el de "Vibración"
+ * (no aplica en un browser) y los tres campos `autoPayment*`, que se mandaban
+ * al backend sin tener ningún control en la pantalla.
+ *
+ * `update_system_settings` aplica los campos de a uno (`if (dto.x !== undefined)`),
+ * así que omitir los que ya no se editan no los resetea.
+ */
 export default function SettingsScreen() {
-  const insets = useSafeAreaInsets();
-  const config = useAuthStore((s) => s.config);
-  const isConnected = useAuthStore((s) => s.isConnected);
-  const logout = useAuthStore((s) => s.logout);
-
+  const router = useRouter();
+  // Avisos de premios: preferencia del navegador, no del servidor — es de este
+  // puesto de trabajo, no de la cuenta.
+  const [prizeAlerts, setPrizeAlerts] = useState(prizeAlertsEnabled());
+  const config = useAuthStore((s) => s.config) ?? getApiConfig();
+  const storeSettings = useOperatorStore((s) => s.settings);
+  const setStoreSettings = useOperatorStore((s) => s.setSettings);
   const killSwitchActive = useOperatorStore((s) => s.killSwitchActive);
   const setKillSwitch = useOperatorStore((s) => s.setKillSwitch);
   const quickReplies = useOperatorStore((s) => s.quickReplies);
   const setQuickReplies = useOperatorStore((s) => s.setQuickReplies);
-  const storeSettings = useOperatorStore((s) => s.settings);
-  const setStoreSettings = useOperatorStore((s) => s.setSettings);
-  const lastUpdate = useOperatorStore((s) => s.lastUpdate);
+  const isConnected = useAuthStore((s) => s.isConnected);
+  const reset = useOperatorStore((s) => s.reset);
 
-  // ---- Local form state ----
-  const [supportPhone, setSupportPhone] = useState('');
-  const [savingSupport, setSavingSupport] = useState(false);
-
-  const [validationThreshold, setValidationThreshold] = useState('');
-  const [validationTimeout, setValidationTimeout] = useState('');
-  const [queueCooldown, setQueueCooldown] = useState('');
-  // maxRequestAmount removed — no amount limits
-  const [maxRequestsPerHour, setMaxRequestsPerHour] = useState('');
-  const [activityWindowStart, setActivityWindowStart] = useState('');
-  const [activityWindowEnd, setActivityWindowEnd] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    validationThreshold: '',
+    validationTimeoutMs: '',
+    queueCooldownMs: '',
+    maxRequestsPerUserPerHour: '',
+    panelBalanceThreshold: '',
+    botActivityWindowStart: '',
+    botActivityWindowEnd: '',
+    supportPhoneNumber: '',
+  });
   const [botEnabled, setBotEnabled] = useState(true);
-  const [panelBalanceThreshold, setPanelBalanceThreshold] = useState('');
-  const [defaultNewUserPanelId, setDefaultNewUserPanelId] = useState('');
-  const [autoPaymentEnabled, setAutoPaymentEnabled] = useState(false);
-  const [autoPaymentRequiresConfirm, setAutoPaymentRequiresConfirm] = useState(true);
-  const [autoPaymentMaxAmount, setAutoPaymentMaxAmount] = useState('50000');
-  const [panels, setPanels] = useState<Array<{ id: string; name: string; isActive: boolean }>>([]);
-  const [savingSettings, setSavingSettings] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const [operatorName, setOperatorName] = useState('');
 
-  const [reconnecting, setReconnecting] = useState(false);
-
-  // Notification settings
-  const [soundOn, setSoundOn] = useState(getSoundEnabled());
-  const [vibrationOn, setVibrationOn] = useState(getVibrationEnabled());
-
-  // Quick reply editing
-  const [editingQR, setEditingQR] = useState<QuickReply | null>(null);
-  const [qrIcon, setQrIcon] = useState('');
-  const [qrLabel, setQrLabel] = useState('');
-  const [qrText, setQrText] = useState('');
-
-  const QUICK_REPLIES_STORAGE_KEY = '@operator_quick_replies';
-
-  // Load notification preferences on mount
   useEffect(() => {
-    AsyncStorage.getItem('@notif_sound').then((v) => {
-      if (v !== null) { const on = v !== 'false'; setSoundOn(on); setSoundEnabled(on); }
-    });
-    AsyncStorage.getItem('@notif_vibration').then((v) => {
-      if (v !== null) { const on = v !== 'false'; setVibrationOn(on); setVibrationEnabled(on); }
-    });
+    AsyncStorage.getItem('operator_name').then((n) => n && setOperatorName(n));
   }, []);
 
-  const handleToggleSound = (val: boolean) => {
-    setSoundOn(val);
-    setSoundEnabled(val);
-    AsyncStorage.setItem('@notif_sound', String(val));
-  };
-
-  const handleToggleVibration = (val: boolean) => {
-    setVibrationOn(val);
-    setVibrationEnabled(val);
-    AsyncStorage.setItem('@notif_vibration', String(val));
-  };
-
-  // Load quick replies from AsyncStorage on mount
+  // Un solo efecto de sincronización, en vez de veinte estados sueltos con
+  // defaults duplicados como strings.
   useEffect(() => {
-    AsyncStorage.getItem(QUICK_REPLIES_STORAGE_KEY).then((stored) => {
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored) as QuickReply[];
-          setQuickReplies(parsed);
-        } catch { /* use defaults */ }
-      }
+    if (!storeSettings) return;
+    setForm({
+      validationThreshold: String(storeSettings.validationThreshold ?? 0.7),
+      validationTimeoutMs: String(storeSettings.validationTimeoutMs ?? 90),
+      queueCooldownMs: String(storeSettings.queueCooldownMs ?? 30000),
+      maxRequestsPerUserPerHour: String(storeSettings.maxRequestsPerUserPerHour ?? 10),
+      panelBalanceThreshold: String(storeSettings.panelBalanceThreshold ?? 0),
+      botActivityWindowStart: storeSettings.botActivityWindowStart ?? '',
+      botActivityWindowEnd: storeSettings.botActivityWindowEnd ?? '',
+      supportPhoneNumber: storeSettings.supportPhoneNumber ?? '',
+    });
+    setBotEnabled(storeSettings.botEnabled ?? true);
+  }, [storeSettings]);
+
+  useEffect(() => {
+    AsyncStorage.getItem(QUICK_REPLIES_KEY).then((stored) => {
+      if (!stored) return;
+      try { setQuickReplies(JSON.parse(stored) as QuickReply[]); } catch { /* defaults */ }
     });
   }, [setQuickReplies]);
 
-  const effectiveQuickReplies = quickReplies.length > 0 ? quickReplies : DEFAULT_QUICK_REPLIES;
+  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  const persistQuickReplies = useCallback(
-    async (replies: QuickReply[]) => {
-      setQuickReplies(replies);
-      await AsyncStorage.setItem(QUICK_REPLIES_STORAGE_KEY, JSON.stringify(replies));
-    },
-    [setQuickReplies],
-  );
-
-  const handleAddQuickReply = useCallback(() => {
-    setEditingQR({ id: '', icon: '💬', label: '', text: '', order: effectiveQuickReplies.length });
-    setQrIcon('💬');
-    setQrLabel('');
-    setQrText('');
-  }, [effectiveQuickReplies.length]);
-
-  const handleEditQuickReply = useCallback((qr: QuickReply) => {
-    setEditingQR(qr);
-    setQrIcon(qr.icon);
-    setQrLabel(qr.label);
-    setQrText(qr.text);
-  }, []);
-
-  const handleSaveQuickReply = useCallback(async () => {
-    if (!qrIcon.trim() || !qrLabel.trim() || !qrText.trim()) {
-      Alert.alert('Error', 'Todos los campos son obligatorios');
-      return;
-    }
-    if (qrLabel.length > 30) {
-      Alert.alert('Error', 'La etiqueta no puede tener mas de 30 caracteres');
-      return;
-    }
-    if (qrText.length > 500) {
-      Alert.alert('Error', 'El texto no puede tener mas de 500 caracteres');
-      return;
-    }
-
-    const isNew = !editingQR?.id;
-    const current = quickReplies.length > 0 ? [...quickReplies] : [...DEFAULT_QUICK_REPLIES];
-
-    if (isNew) {
-      if (current.length >= 20) {
-        Alert.alert('Error', 'Maximo 20 respuestas rapidas');
-        return;
-      }
-      const newQR: QuickReply = {
-        id: `qr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        icon: qrIcon.trim(),
-        label: qrLabel.trim(),
-        text: qrText.trim(),
-        order: current.length,
-      };
-      await persistQuickReplies([...current, newQR]);
-    } else {
-      const updated = current.map((qr) =>
-        qr.id === editingQR!.id
-          ? { ...qr, icon: qrIcon.trim(), label: qrLabel.trim(), text: qrText.trim() }
-          : qr,
-      );
-      await persistQuickReplies(updated);
-    }
-
-    setEditingQR(null);
-    hapticSuccess();
-  }, [editingQR, qrIcon, qrLabel, qrText, quickReplies, persistQuickReplies]);
-
-  const handleDeleteQuickReply = useCallback(
-    (id: string) => {
-      Alert.alert('Eliminar', 'Seguro que queres eliminar esta respuesta rapida?', [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            const current = quickReplies.length > 0 ? quickReplies : DEFAULT_QUICK_REPLIES;
-            const filtered = current.filter((qr) => qr.id !== id).map((qr, i) => ({ ...qr, order: i }));
-            await persistQuickReplies(filtered);
-            hapticMedium();
-          },
-        },
-      ]);
-    },
-    [quickReplies, persistQuickReplies],
-  );
-
-  const handleResetQuickReplies = useCallback(() => {
-    Alert.alert('Restaurar', 'Restaurar las respuestas rapidas por defecto?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Restaurar',
-        onPress: async () => {
-          await persistQuickReplies([]);
-          hapticSuccess();
-        },
-      },
-    ]);
-  }, [persistQuickReplies]);
-
-  // Populate form from store settings
-  useEffect(() => {
-    if (!storeSettings) return;
-
-    setSupportPhone(storeSettings.supportPhoneNumber || '');
-    setValidationThreshold(
-      storeSettings.validationThreshold != null ? String(storeSettings.validationThreshold) : '0.8',
-    );
-    setValidationTimeout(
-      storeSettings.validationTimeout != null ? String(storeSettings.validationTimeout) : '30',
-    );
-    setQueueCooldown(
-      storeSettings.queueCooldown != null ? String(storeSettings.queueCooldown) : '30',
-    );
-    setMaxRequestsPerHour(
-      storeSettings.maxRequestsPerHour != null ? String(storeSettings.maxRequestsPerHour) : '10',
-    );
-    setActivityWindowStart(storeSettings.activityWindowStart || '08:00');
-    setActivityWindowEnd(storeSettings.activityWindowEnd || '23:00');
-    setBotEnabled(storeSettings.botEnabled !== false);
-    setPanelBalanceThreshold(
-      storeSettings.panelBalanceThreshold != null ? String(storeSettings.panelBalanceThreshold) : '1000',
-    );
-    setDefaultNewUserPanelId(storeSettings.defaultNewUserPanelId || '');
-    setAutoPaymentEnabled(storeSettings.autoPaymentEnabled === true);
-    setAutoPaymentRequiresConfirm(storeSettings.autoPaymentRequiresConfirm !== false);
-    setAutoPaymentMaxAmount(
-      storeSettings.autoPaymentMaxAmount != null ? String(storeSettings.autoPaymentMaxAmount) : '50000',
-    );
-    if (storeSettings.panels) {
-      setPanels(storeSettings.panels);
-    }
-  }, [storeSettings]);
-
-  // ---- Handlers ----
-
-  const handleReconnect = useCallback(async () => {
-    if (!config) return;
-    setReconnecting(true);
-    hapticMedium();
-
-    try {
-      disconnectSocket();
-      // Small delay to ensure clean disconnect
-      await new Promise((r) => setTimeout(r, 500));
-      connectSocket({
-        backendUrl: config.backendUrl,
-        apiKey: config.apiKey,
-        operatorName: config.operatorName,
-      });
-      hapticSuccess();
-    } catch {
-      hapticError();
-      Alert.alert('Error', 'No se pudo reconectar');
-    } finally {
-      setTimeout(() => setReconnecting(false), 2000);
-    }
-  }, [config]);
-
-  const handleLogout = useCallback(() => {
-    Alert.alert(
-      'Cerrar Sesion',
-      'Se desconectara del backend y se eliminaran las credenciales guardadas.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Cerrar Sesion',
-          style: 'destructive',
-          onPress: () => {
-            hapticMedium();
-            disconnectSocket();
-            useOperatorStore.getState().reset();
-            logout();
-          },
-        },
-      ],
-    );
-  }, [logout]);
-
-  const handleToggleKillSwitch = useCallback(async (reason?: string) => {
-    try {
-      const newState = !killSwitchActive;
-      const payload: any = { active: newState };
-      if (reason) payload.reason = reason;
-
-      const result = await emitWithTimeout<any>(
-        'set_kill_switch',
-        payload,
-        10000,
-      );
-      if (result?.error) {
-        Alert.alert('Error', result.error);
-        return;
-      }
-      setKillSwitch(newState);
-      hapticSuccess();
-    } catch (err: any) {
-      hapticError();
-      Alert.alert('Error', err.message || 'No se pudo cambiar el kill switch');
-    }
-  }, [killSwitchActive, setKillSwitch]);
-
-  const handleSaveSupport = useCallback(async () => {
-    if (!supportPhone.trim()) {
-      Alert.alert('Error', 'Ingresa un numero de telefono');
-      return;
-    }
-
-    setSavingSupport(true);
-    try {
-      const result = await emitWithTimeout<any>(
-        'update_system_settings',
-        { supportPhoneNumber: supportPhone.trim() },
-        15000,
-      );
-      if (result?.error) {
-        Alert.alert('Error', result.error);
-        return;
-      }
-      if (result?.data) {
-        setStoreSettings(result.data);
-      }
-      hapticSuccess();
-      Alert.alert('Guardado', 'Telefono de soporte actualizado');
-    } catch (err: any) {
-      hapticError();
-      Alert.alert('Error', err.message || 'No se pudo guardar');
-    } finally {
-      setSavingSupport(false);
-    }
-  }, [supportPhone, setStoreSettings]);
-
-  const handleSaveSystemSettings = useCallback(async () => {
-    // Validate
-    const threshold = parseFloat(validationThreshold);
+  const saveSystem = useCallback(async () => {
+    const threshold = parseFloat(form.validationThreshold);
     if (isNaN(threshold) || threshold < 0 || threshold > 1) {
-      Alert.alert('Error', 'El umbral de validacion debe estar entre 0 y 1');
-      return;
+      return toast.error('El umbral de validación va entre 0 y 1');
+    }
+    const timeRe = /^([01]\d|2[0-3]):([0-5]\d)$/;
+    for (const k of ['botActivityWindowStart', 'botActivityWindowEnd'] as const) {
+      if (form[k] && !timeRe.test(form[k])) return toast.error('El horario va en formato HH:MM');
     }
 
-    const timeout = parseInt(validationTimeout, 10);
-    if (isNaN(timeout) || timeout < 5) {
-      Alert.alert('Error', 'El timeout de validacion debe ser al menos 5 segundos');
-      return;
-    }
-
-    const cooldown = parseInt(queueCooldown, 10);
-    if (isNaN(cooldown) || cooldown < 0) {
-      Alert.alert('Error', 'El cooldown debe ser >= 0');
-      return;
-    }
-
-    // Validate time format HH:MM
-    const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
-    if (activityWindowStart && !timeRegex.test(activityWindowStart)) {
-      Alert.alert('Error', 'El horario de inicio debe tener formato HH:MM (24hs)');
-      return;
-    }
-    if (activityWindowEnd && !timeRegex.test(activityWindowEnd)) {
-      Alert.alert('Error', 'El horario de fin debe tener formato HH:MM (24hs)');
-      return;
-    }
-
-    setSavingSettings(true);
+    setSaving(true);
     try {
       const payload: any = {
         validationThreshold: threshold,
-        validationTimeoutMs: timeout,
-        queueCooldownMs: cooldown,
-        maxRequestsPerUserPerHour: parseInt(maxRequestsPerHour, 10) || 10,
+        validationTimeoutMs: parseInt(form.validationTimeoutMs, 10) || 90,
+        queueCooldownMs: parseInt(form.queueCooldownMs, 10) || 30000,
+        maxRequestsPerUserPerHour: parseInt(form.maxRequestsPerUserPerHour, 10) || 10,
+        panelBalanceThreshold: parseInt(form.panelBalanceThreshold, 10) || 0,
         botEnabled,
-        panelBalanceThreshold: parseInt(panelBalanceThreshold, 10) || 0,
-        defaultNewUserPanelId,
-        autoPaymentEnabled,
-        autoPaymentRequiresConfirm,
-        autoPaymentMaxAmount: parseInt(autoPaymentMaxAmount, 10) || 50000,
       };
+      if (form.botActivityWindowStart) payload.botActivityWindowStart = form.botActivityWindowStart;
+      if (form.botActivityWindowEnd) payload.botActivityWindowEnd = form.botActivityWindowEnd;
+      if (form.supportPhoneNumber.trim()) payload.supportPhoneNumber = form.supportPhoneNumber.trim();
 
-      if (activityWindowStart) payload.botActivityWindowStart = activityWindowStart;
-      if (activityWindowEnd) payload.botActivityWindowEnd = activityWindowEnd;
-
-      const result = await emitWithTimeout<any>('update_system_settings', payload, 15000);
-      if (result?.error) {
-        Alert.alert('Error', result.error);
-        return;
-      }
-      if (result?.data) {
-        setStoreSettings(result.data);
-      }
-      hapticSuccess();
-      Alert.alert('Guardado', 'Configuracion del sistema actualizada');
-    } catch (err: any) {
-      hapticError();
-      Alert.alert('Error', err.message || 'No se pudo guardar la configuracion');
+      const res: any = await emitWithTimeout('update_system_settings', payload, 15000);
+      if (res?.error) throw new Error(res.error);
+      if (res?.data) setStoreSettings(res.data);
+      toast.success('Configuración guardada');
+    } catch (e: any) {
+      toast.error(e?.message || 'No se pudo guardar');
     } finally {
-      setSavingSettings(false);
+      setSaving(false);
     }
-  }, [
-    validationThreshold,
-    validationTimeout,
-    queueCooldown,
-    maxRequestsPerHour,
-    activityWindowStart,
-    activityWindowEnd,
-    botEnabled,
-    defaultNewUserPanelId,
-    autoPaymentEnabled,
-    autoPaymentRequiresConfirm,
-    autoPaymentMaxAmount,
-    setStoreSettings,
-  ]);
+  }, [form, botEnabled, setStoreSettings]);
 
-  // ---- Render helpers ----
+  const toggleKillSwitch = useCallback(async (reason?: string) => {
+    const next = !killSwitchActive;
+    try {
+      const payload: any = { active: next };
+      if (reason) payload.reason = reason;
+      const res: any = await emitWithTimeout('set_kill_switch', payload, 10000);
+      if (res?.error) throw new Error(res.error);
+      setKillSwitch(next);
+      toast.success(next ? 'Kill switch activado — no se despacha nada' : 'Kill switch desactivado');
+    } catch (e: any) {
+      toast.error(e?.message || 'No se pudo cambiar el kill switch');
+    }
+  }, [killSwitchActive, setKillSwitch]);
 
-  const renderSectionHeader = (title: string, icon: React.ComponentProps<typeof Ionicons>['name']) => (
-    <View style={styles.sectionHeader}>
-      <Ionicons name={icon} size={18} color={colors.primary} />
-      <Text style={styles.sectionTitle}>{title}</Text>
-    </View>
-  );
+  const persistReplies = async (replies: QuickReply[]) => {
+    setQuickReplies(replies);
+    await AsyncStorage.setItem(QUICK_REPLIES_KEY, JSON.stringify(replies));
+  };
 
-  const renderSettingRow = (
-    label: string,
-    value: string,
-    onChange: (v: string) => void,
-    options?: {
-      placeholder?: string;
-      keyboardType?: 'default' | 'number-pad' | 'decimal-pad';
-      maxLength?: number;
-      hint?: string;
-    },
-  ) => (
-    <View style={styles.settingRow}>
-      <View style={styles.settingLabelRow}>
-        <Text style={styles.settingLabel}>{label}</Text>
-        {options?.hint && <Text style={styles.settingHint}>{options.hint}</Text>}
-      </View>
-      <TextInput
-        style={styles.settingInput}
-        value={value}
-        onChangeText={onChange}
-        placeholder={options?.placeholder || ''}
-        placeholderTextColor={colors.placeholder}
-        keyboardType={options?.keyboardType || 'default'}
-        maxLength={options?.maxLength}
-      />
-    </View>
-  );
+  const logout = async () => {
+    await AsyncStorage.removeItem('operator_name');
+    reset();
+    setLogoutOpen(false);
+    router.replace('/wizard');
+  };
 
-  const renderReadOnlyRow = (label: string, value: string) => (
-    <View style={styles.settingRow}>
-      <Text style={styles.settingLabel}>{label}</Text>
-      <View style={styles.readOnlyField}>
-        <Text style={styles.readOnlyText} numberOfLines={1}>{value || '-'}</Text>
-      </View>
-    </View>
-  );
+  const replies = quickReplies.length > 0 ? quickReplies : DEFAULT_QUICK_REPLIES;
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 40 }]}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Image source={require('@/assets/icon.png')} style={{ width: 32, height: 32, borderRadius: 8 }} />
-          <Text style={styles.headerTitle}>Configuracion</Text>
-        </View>
-        <Text style={styles.headerSubtitle}>Ajustes del sistema y la conexion</Text>
-      </View>
+    <View style={s.screen}>
+      <PageHeader title="Ajustes" subtitle="Lo que casi nunca se toca" />
 
-      {/* ==================== CONNECTION ==================== */}
-      <View style={styles.section}>
-        {renderSectionHeader('Conexion', 'globe-outline')}
-
-        {renderReadOnlyRow('Backend URL', config?.backendUrl || '')}
-        {renderReadOnlyRow('Operador', config?.operatorName || '')}
-
-        {/* Connection status */}
-        <View style={styles.settingRow}>
-          <Text style={styles.settingLabel}>Estado</Text>
-          <View style={styles.statusRow}>
-            <View
-              style={[
-                styles.statusDot,
-                { backgroundColor: isConnected ? colors.onlineGreen : colors.error },
-              ]}
-            />
-            <Text style={[styles.statusText, { color: isConnected ? colors.onlineGreen : colors.error }]}>
-              {isConnected ? 'Conectado' : 'Desconectado'}
-            </Text>
+      <ScrollView contentContainerStyle={s.content}>
+        <Card>
+          <Text style={s.cardTitle}>Conexión</Text>
+          <Row label="Servidor" value={config?.backendUrl || '—'} />
+          <Row label="Operador" value={(config as any)?.operatorName || operatorName || '—'} />
+          <View style={s.statusRow}>
+            <View style={[s.dot, { backgroundColor: isConnected ? colors.onlineGreen : colors.error }]} />
+            <Text style={s.statusText}>{isConnected ? 'Conectado' : 'Desconectado'}</Text>
           </View>
-        </View>
+          <View style={s.rowButtons}>
+            <Button
+              label="Reconectar" tone="neutral" icon="refresh" style={{ flex: 1 }}
+              onPress={() => {
+                const sock = getSocket();
+                sock?.disconnect();
+                setTimeout(() => sock?.connect(), 500);
+                toast.success('Reconectando…');
+              }}
+            />
+            <Button label="Cerrar sesión" tone="neutral" icon="log-out-outline" style={{ flex: 1 }}
+                    onPress={() => setLogoutOpen(true)} />
+          </View>
+        </Card>
 
-        {/* Reconnect button */}
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={handleReconnect}
-          disabled={reconnecting}
-          activeOpacity={0.7}
-        >
-          {reconnecting ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : (
-            <Ionicons name="refresh-outline" size={18} color={colors.primary} />
-          )}
-          <Text style={styles.actionButtonText}>
-            {reconnecting ? 'Reconectando...' : 'Reconectar'}
+        <Card>
+          <Text style={s.cardTitle}>Kill switch</Text>
+          <Text style={s.hint}>
+            Con esto activo el bot no despacha ninguna carga. Las solicitudes se siguen
+            acumulando en la cola y salen cuando lo desactivás.
           </Text>
-        </TouchableOpacity>
+          <KillSwitchButton active={killSwitchActive} onToggle={toggleKillSwitch} />
+        </Card>
 
-        {/* Logout button */}
-        <TouchableOpacity
-          style={[styles.actionButton, styles.logoutButton]}
-          onPress={handleLogout}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="log-out-outline" size={18} color={colors.error} />
-          <Text style={[styles.actionButtonText, { color: colors.error }]}>Cerrar Sesion</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* ==================== NOTIFICATIONS ==================== */}
-      <View style={styles.section}>
-        {renderSectionHeader('Notificaciones', 'notifications-outline')}
-        <View style={styles.settingRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.settingLabel}>Sonido</Text>
-            <Text style={styles.settingHint}>Alertas sonoras para fallos, mensajes y billeteras</Text>
-          </View>
-          <Switch
-            value={soundOn}
-            onValueChange={handleToggleSound}
-            trackColor={{ false: colors.border, true: colors.primary + '80' }}
-            thumbColor={soundOn ? colors.primary : '#666'}
-          />
-        </View>
-        <View style={styles.settingRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.settingLabel}>Vibracion</Text>
-            <Text style={styles.settingHint}>Vibracion al recibir notificaciones</Text>
-          </View>
-          <Switch
-            value={vibrationOn}
-            onValueChange={handleToggleVibration}
-            trackColor={{ false: colors.border, true: colors.primary + '80' }}
-            thumbColor={vibrationOn ? colors.primary : '#666'}
-          />
-        </View>
-      </View>
-
-      {/* ==================== KILL SWITCH ==================== */}
-      <View style={styles.section}>
-        {renderSectionHeader('Kill Switch', 'hand-left-outline')}
-        <KillSwitchButton active={killSwitchActive} onToggle={handleToggleKillSwitch} />
-      </View>
-
-      {/* ==================== QUICK REPLIES ==================== */}
-      <View style={styles.section}>
-        {renderSectionHeader('Respuestas Rapidas', 'chatbubbles-outline')}
-
-        {editingQR ? (
-          <View style={styles.qrEditForm}>
-            <View style={styles.qrEditRow}>
-              <View style={styles.qrIconField}>
-                <Text style={styles.settingLabel}>Icono</Text>
-                <TextInput
-                  style={[styles.settingInput, styles.qrIconInput]}
-                  value={qrIcon}
-                  onChangeText={(v) => setQrIcon(v.slice(0, 2))}
-                  placeholder="💬"
-                  placeholderTextColor={colors.placeholder}
-                  maxLength={2}
-                />
+        <Card>
+          <Text style={s.cardTitle}>Respuestas rápidas</Text>
+          <Text style={s.hint}>Aparecen como atajos arriba del teclado en el chat.</Text>
+          {replies.map((qr) => (
+            <View key={qr.id} style={s.replyRow}>
+              <Text style={s.replyIcon}>{qr.icon}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.replyLabel}>{qr.label}</Text>
+                <Text style={s.replyText} numberOfLines={2}>{qr.text}</Text>
               </View>
-              <View style={styles.qrLabelField}>
-                <Text style={styles.settingLabel}>Etiqueta</Text>
-                <TextInput
-                  style={styles.settingInput}
-                  value={qrLabel}
-                  onChangeText={setQrLabel}
-                  placeholder="Nombre corto"
-                  placeholderTextColor={colors.placeholder}
-                  maxLength={30}
-                />
-              </View>
-            </View>
-            <Text style={styles.settingLabel}>Texto del mensaje</Text>
-            <TextInput
-              style={[styles.settingInput, styles.qrTextInput]}
-              value={qrText}
-              onChangeText={setQrText}
-              placeholder="Mensaje que se enviara..."
-              placeholderTextColor={colors.placeholder}
-              multiline
-              maxLength={500}
-            />
-            <View style={styles.qrEditActions}>
-              <TouchableOpacity
-                style={styles.qrCancelBtn}
-                onPress={() => setEditingQR(null)}
-                activeOpacity={0.7}
+              <Pressable
+                onPress={() => persistReplies(replies.filter((r) => r.id !== qr.id))}
+                style={s.replyDelete}
               >
-                <Text style={styles.qrCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.qrSaveBtn}
-                onPress={handleSaveQuickReply}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="checkmark" size={18} color={colors.textOnPrimary} />
-                <Text style={styles.qrSaveText}>Guardar</Text>
-              </TouchableOpacity>
+                <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
+              </Pressable>
             </View>
-          </View>
-        ) : (
-          <>
-            {effectiveQuickReplies.map((qr) => (
-              <View key={qr.id} style={styles.qrItem}>
-                <Text style={styles.qrItemIcon}>{qr.icon}</Text>
-                <View style={styles.qrItemContent}>
-                  <Text style={styles.qrItemLabel}>{qr.label}</Text>
-                  <Text style={styles.qrItemText} numberOfLines={2}>{qr.text}</Text>
-                </View>
-                <View style={styles.qrItemActions}>
-                  <TouchableOpacity onPress={() => handleEditQuickReply(qr)} activeOpacity={0.6}>
-                    <Ionicons name="pencil-outline" size={18} color={colors.textMuted} />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handleDeleteQuickReply(qr.id)} activeOpacity={0.6}>
-                    <Ionicons name="trash-outline" size={18} color={colors.error} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
+          ))}
+          <Button label="Restaurar las de fábrica" tone="neutral" icon="refresh-outline"
+                  onPress={() => persistReplies([...DEFAULT_QUICK_REPLIES])} />
+        </Card>
 
-            <View style={styles.qrBottomActions}>
-              <TouchableOpacity style={styles.qrAddBtn} onPress={handleAddQuickReply} activeOpacity={0.7}>
-                <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
-                <Text style={styles.qrAddText}>Agregar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.qrResetBtn} onPress={handleResetQuickReplies} activeOpacity={0.7}>
-                <Ionicons name="refresh-outline" size={16} color={colors.textMuted} />
-                <Text style={styles.qrResetText}>Restaurar</Text>
-              </TouchableOpacity>
+        <Card>
+          <Text style={s.cardTitle}>Sistema</Text>
+
+          <Field label="Umbral de validación (0 a 1)"
+                 hint="Debajo de esto el comprobante cae a revisión manual."
+                 value={form.validationThreshold} onChange={(v) => set('validationThreshold', v)} numeric />
+          <Field label="Timeout del validador (segundos)"
+                 value={form.validationTimeoutMs} onChange={(v) => set('validationTimeoutMs', v)} numeric />
+          <Field label="Espera entre cargas (ms)"
+                 hint="Cuánto descansa el bot entre un job y el siguiente."
+                 value={form.queueCooldownMs} onChange={(v) => set('queueCooldownMs', v)} numeric />
+          <Field label="Máximo de cargas por usuario por hora"
+                 value={form.maxRequestsPerUserPerHour} onChange={(v) => set('maxRequestsPerUserPerHour', v)} numeric />
+          <Field label="Avisar cuando el panel baje de"
+                 hint="Fichas disponibles en el panel de juego."
+                 value={form.panelBalanceThreshold} onChange={(v) => set('panelBalanceThreshold', v)} numeric />
+
+          <View style={s.rowFields}>
+            <Field label="El bot arranca a las" placeholder="09:00" style={{ flex: 1 }}
+                   value={form.botActivityWindowStart} onChange={(v) => set('botActivityWindowStart', v)} />
+            <Field label="y para a las" placeholder="23:00" style={{ flex: 1 }}
+                   value={form.botActivityWindowEnd} onChange={(v) => set('botActivityWindowEnd', v)} />
+          </View>
+
+          <Field label="Teléfono de soporte"
+                 value={form.supportPhoneNumber} onChange={(v) => set('supportPhoneNumber', v)} />
+
+          {Platform.OS === 'web' && (
+            <View style={s.switchRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.fieldLabel}>Avisar cuando llega un pedido de premio</Text>
+                <Text style={s.hint}>
+                  {notificationPermission() === 'denied'
+                    ? 'El navegador tiene las notificaciones bloqueadas: sólo vas a escuchar el sonido y ver el contador en la pestaña.'
+                    : 'Suena un aviso y salta una notificación aunque tengas el panel en otra pestaña.'}
+                  {'  '}
+                  <Text style={s.testLink} onPress={testPrizeAlert}>Probar</Text>
+                </Text>
+              </View>
+              <Switch
+                value={prizeAlerts}
+                onValueChange={(v) => {
+                  setPrizeAlerts(v);
+                  setPrizeAlertsEnabled(v);
+                }}
+                trackColor={{ false: colors.border, true: alpha(colors.primary, 0.5) }}
+                thumbColor={prizeAlerts ? colors.primary : colors.textMuted}
+              />
             </View>
-          </>
-        )}
-      </View>
-
-      {/* ==================== SUPPORT CONTACT ==================== */}
-      <View style={styles.section}>
-        {renderSectionHeader('Contacto de Soporte', 'call-outline')}
-
-        <View style={styles.settingRow}>
-          <Text style={styles.settingLabel}>Telefono</Text>
-          <TextInput
-            style={styles.settingInput}
-            value={supportPhone}
-            onChangeText={setSupportPhone}
-            placeholder="+54 11 1234-5678"
-            placeholderTextColor={colors.placeholder}
-            keyboardType="phone-pad"
-          />
-        </View>
-
-        <TouchableOpacity
-          style={[styles.saveButton, savingSupport && styles.saveButtonDisabled]}
-          onPress={handleSaveSupport}
-          disabled={savingSupport}
-          activeOpacity={0.8}
-        >
-          {savingSupport ? (
-            <ActivityIndicator size="small" color={colors.textOnPrimary} />
-          ) : (
-            <>
-              <Ionicons name="checkmark-outline" size={18} color={colors.textOnPrimary} />
-              <Text style={styles.saveButtonText}>Guardar Telefono</Text>
-            </>
           )}
-        </TouchableOpacity>
-      </View>
 
-      {/* ==================== SYSTEM SETTINGS ==================== */}
-      <View style={styles.section}>
-        {renderSectionHeader('Configuracion del Sistema', 'construct-outline')}
-
-        {renderSettingRow(
-          'Umbral de validacion',
-          validationThreshold,
-          setValidationThreshold,
-          { placeholder: '0.8', keyboardType: 'decimal-pad', hint: '0 a 1' },
-        )}
-
-        {renderSettingRow(
-          'Timeout validacion (seg)',
-          validationTimeout,
-          setValidationTimeout,
-          { placeholder: '30', keyboardType: 'number-pad', hint: 'segundos' },
-        )}
-
-        {renderSettingRow(
-          'Cooldown de cola (seg)',
-          queueCooldown,
-          setQueueCooldown,
-          { placeholder: '30', keyboardType: 'number-pad', hint: 'entre jobs' },
-        )}
-
-        {renderSettingRow(
-          'Max requests/hora/usuario',
-          maxRequestsPerHour,
-          setMaxRequestsPerHour,
-          { placeholder: '10', keyboardType: 'number-pad' },
-        )}
-
-        {renderSettingRow(
-          'Alerta fichas bajas (umbral)',
-          panelBalanceThreshold,
-          setPanelBalanceThreshold,
-          { placeholder: '1000', keyboardType: 'number-pad', hint: '0 = desactivado' },
-        )}
-
-        {/* Panel for new user creation */}
-        <View style={styles.settingRow}>
-          <Text style={styles.settingLabel}>Panel para nuevos usuarios</Text>
-          <View style={[styles.settingInput, { paddingVertical: 0, justifyContent: 'center' }]}>
-            {panels.length > 0 ? (
-              <View>
-                <TouchableOpacity
-                  style={{ paddingVertical: 12 }}
-                  onPress={() => {
-                    const options = [
-                      { label: 'No crear automaticamente', value: '' },
-                      ...panels.filter(p => p.isActive).map(p => ({ label: p.name, value: p.id })),
-                    ];
-                    const currentIndex = options.findIndex(o => o.value === defaultNewUserPanelId);
-                    Alert.alert(
-                      'Panel para nuevos usuarios',
-                      'Cuando un usuario no existe en ningun panel, se crea automaticamente en el panel seleccionado.',
-                      options.map(o => ({
-                        text: (o.value === defaultNewUserPanelId ? '✓ ' : '') + o.label,
-                        onPress: () => setDefaultNewUserPanelId(o.value),
-                      })),
-                    );
-                  }}
-                >
-                  <Text style={{ color: colors.textPrimary, fontSize: 14 }}>
-                    {defaultNewUserPanelId
-                      ? panels.find(p => p.id === defaultNewUserPanelId)?.name || defaultNewUserPanelId
-                      : 'No crear automaticamente'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <Text style={{ color: colors.textMuted, fontSize: 14, paddingVertical: 12 }}>Sin paneles disponibles</Text>
-            )}
+          <View style={s.switchRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.fieldLabel}>Bot habilitado</Text>
+              <Text style={s.hint}>Si lo apagás, las cargas quedan encoladas.</Text>
+            </View>
+            <Switch value={botEnabled} onValueChange={setBotEnabled}
+                    trackColor={{ false: colors.border, true: alpha(colors.primary, 0.5) }}
+                    thumbColor={botEnabled ? colors.primary : colors.textMuted} />
           </View>
-          <Text style={styles.settingHint}>Selecciona donde se crean las cuentas nuevas</Text>
-        </View>
 
-        {/* Activity window */}
-        <View style={styles.timeRow}>
-          <View style={styles.timeField}>
-            <Text style={styles.settingLabel}>Horario inicio</Text>
-            <TextInput
-              style={styles.settingInput}
-              value={activityWindowStart}
-              onChangeText={setActivityWindowStart}
-              placeholder="08:00"
-              placeholderTextColor={colors.placeholder}
-              maxLength={5}
-            />
-          </View>
-          <View style={styles.timeSeparator}>
-            <Text style={styles.timeSeparatorText}>a</Text>
-          </View>
-          <View style={styles.timeField}>
-            <Text style={styles.settingLabel}>Horario fin</Text>
-            <TextInput
-              style={styles.settingInput}
-              value={activityWindowEnd}
-              onChangeText={setActivityWindowEnd}
-              placeholder="23:00"
-              placeholderTextColor={colors.placeholder}
-              maxLength={5}
-            />
-          </View>
-        </View>
+          <Button label="Guardar configuración" tone="primary" icon="save-outline"
+                  loading={saving} onPress={saveSystem} />
+        </Card>
+      </ScrollView>
 
-        {/* Bot enabled toggle */}
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleLabelContainer}>
-            <Text style={styles.settingLabel}>Bot habilitado</Text>
-            <Text style={styles.settingHint}>
-              {botEnabled ? 'El bot esta procesando jobs' : 'El bot esta pausado'}
-            </Text>
-          </View>
-          <Switch
-            value={botEnabled}
-            onValueChange={setBotEnabled}
-            trackColor={{ false: colors.backgroundTertiary, true: colors.primaryDark }}
-            thumbColor={botEnabled ? colors.primary : colors.textMuted}
-          />
-        </View>
-
-        {/* Save all button */}
-        <TouchableOpacity
-          style={[styles.saveButton, savingSettings && styles.saveButtonDisabled]}
-          onPress={handleSaveSystemSettings}
-          disabled={savingSettings}
-          activeOpacity={0.8}
-        >
-          {savingSettings ? (
-            <ActivityIndicator size="small" color={colors.textOnPrimary} />
-          ) : (
-            <>
-              <Ionicons name="save-outline" size={18} color={colors.textOnPrimary} />
-              <Text style={styles.saveButtonText}>Guardar Configuracion</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      {/* ==================== INFO ==================== */}
-      <View style={styles.section}>
-        {renderSectionHeader('Informacion', 'information-circle-outline')}
-
-        {renderReadOnlyRow('Version de la app', '1.0.0')}
-        {renderReadOnlyRow(
-          'Ultima actualizacion',
-          lastUpdate
-            ? new Date(lastUpdate).toLocaleString('es-AR', {
-                day: '2-digit',
-                month: '2-digit',
-                year: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-              })
-            : '-',
-        )}
-      </View>
-    </ScrollView>
+      <ConfirmDialog
+        visible={logoutOpen} title="Cerrar sesión"
+        message="Vas a volver a la pantalla de configuración inicial."
+        confirmLabel="Cerrar sesión" tone="danger"
+        onConfirm={logout} onCancel={() => setLogoutOpen(false)}
+      />
+      {saving && <View style={s.busy}><ActivityIndicator color={colors.primary} /></View>}
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    paddingHorizontal: 16,
-  },
-  header: {
-    paddingHorizontal: 4,
-    paddingBottom: 12,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  section: {
-    backgroundColor: colors.cardBackground,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 14,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  settingRow: {
-    marginBottom: 14,
-  },
-  settingLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  settingLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    marginBottom: 6,
-  },
-  settingHint: {
-    fontSize: 11,
-    color: colors.textMuted,
-  },
-  settingInput: {
-    backgroundColor: colors.input,
-    borderWidth: 1,
-    borderColor: colors.inputBorder,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    fontSize: 15,
-    color: colors.textPrimary,
-  },
-  readOnlyField: {
-    backgroundColor: colors.backgroundSecondary,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  readOnlyText: {
-    fontSize: 14,
-    color: colors.textMuted,
-    fontFamily: 'monospace',
-  },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
-  },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  statusText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: colors.backgroundSecondary,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 8,
-  },
-  actionButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  logoutButton: {
-    borderColor: colors.error + '40',
-    backgroundColor: colors.error + '10',
-    marginBottom: 0,
-  },
-  saveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 13,
-    marginTop: 8,
-  },
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-  saveButtonText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.textOnPrimary,
-  },
-  timeRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 0,
-    marginBottom: 14,
-  },
-  timeField: {
-    flex: 1,
-  },
-  timeSeparator: {
-    paddingHorizontal: 10,
-    paddingBottom: 14,
-  },
-  timeSeparatorText: {
-    fontSize: 14,
-    color: colors.textMuted,
-    fontWeight: '500',
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-    paddingVertical: 4,
-  },
-  toggleLabelContainer: {
-    flex: 1,
-    marginRight: 12,
-  },
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={s.infoRow}>
+      <Text style={s.infoLabel}>{label}</Text>
+      <Text style={s.infoValue} selectable numberOfLines={1}>{value}</Text>
+    </View>
+  );
+}
 
-  // Quick replies
-  qrItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    gap: 10,
+function Field({
+  label, hint, value, onChange, numeric, placeholder, style,
+}: {
+  label: string; hint?: string; value: string; onChange: (v: string) => void;
+  numeric?: boolean; placeholder?: string; style?: any;
+}) {
+  return (
+    <View style={[{ gap: space.xs }, style]}>
+      <Text style={s.fieldLabel}>{label}</Text>
+      {!!hint && <Text style={s.hint}>{hint}</Text>}
+      <TextInput
+        style={s.input} value={value} onChangeText={onChange}
+        keyboardType={numeric ? 'numeric' : 'default'}
+        placeholder={placeholder} placeholderTextColor={colors.placeholder}
+      />
+    </View>
+  );
+}
+
+const s = StyleSheet.create({
+  testLink: { color: colors.primary, textDecorationLine: 'underline' },
+  screen: { flex: 1, backgroundColor: colors.background },
+  content: { padding: space.xl, paddingTop: 0, gap: space.lg, maxWidth: 720, width: '100%' },
+
+  cardTitle: { ...text.label, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: space.sm },
+  hint: { ...text.caption, color: colors.textMuted, lineHeight: 16 },
+
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', gap: space.md, paddingVertical: space.xs },
+  infoLabel: { ...text.body, color: colors.textSecondary },
+  infoValue: { ...text.body, color: colors.textPrimary, flexShrink: 1 },
+
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: space.sm },
+  dot: { width: 7, height: 7, borderRadius: radius.full },
+  statusText: { ...text.caption, color: colors.textSecondary },
+
+  rowButtons: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
+  rowFields: { flexDirection: 'row', gap: space.md },
+
+  replyRow: {
+    flexDirection: 'row', alignItems: 'center', gap: space.md,
+    paddingVertical: space.sm, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle,
   },
-  qrItemIcon: {
-    fontSize: 20,
-    width: 30,
-    textAlign: 'center',
+  replyIcon: { fontSize: 18 },
+  replyLabel: { ...text.bodyStrong, color: colors.textPrimary },
+  replyText: { ...text.caption, color: colors.textMuted },
+  replyDelete: { padding: space.sm },
+
+  fieldLabel: { ...text.body, color: colors.textPrimary },
+  input: {
+    ...text.body, color: colors.textPrimary, backgroundColor: colors.input,
+    borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md,
+    paddingHorizontal: space.md, paddingVertical: space.md,
   },
-  qrItemContent: {
-    flex: 1,
-  },
-  qrItemLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  qrItemText: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  qrItemActions: {
-    flexDirection: 'row',
-    gap: 14,
-  },
-  qrBottomActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 12,
-  },
-  qrAddBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  qrAddText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  qrResetBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  qrResetText: {
-    fontSize: 13,
-    color: colors.textMuted,
-  },
-  qrEditForm: {
-    gap: 8,
-  },
-  qrEditRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  qrIconField: {
-    width: 70,
-  },
-  qrIconInput: {
-    textAlign: 'center',
-    fontSize: 20,
-  },
-  qrLabelField: {
-    flex: 1,
-  },
-  qrTextInput: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  qrEditActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 10,
-    marginTop: 4,
-  },
-  qrCancelBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: colors.backgroundSecondary,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  qrCancelText: {
-    fontSize: 14,
-    color: colors.textMuted,
-    fontWeight: '600',
-  },
-  qrSaveBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: colors.primary,
-  },
-  qrSaveText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textOnPrimary,
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.sm },
+
+  busy: {
+    ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: alpha(colors.background, 0.5),
   },
 });

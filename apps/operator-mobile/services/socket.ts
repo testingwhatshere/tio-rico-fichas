@@ -17,6 +17,51 @@ export interface SocketConfig {
 let socket: Socket | null = null;
 let currentConfig: SocketConfig | null = null;
 
+/** Nosotros pedimos la desconexión (logout). Sin esto el watchdog reconectaría
+ *  al instante y el operador nunca podría salir. */
+let intentionalDisconnect = false;
+let watchdog: ReturnType<typeof setInterval> | null = null;
+let browserHooksReady = false;
+
+/**
+ * Cada cuánto se controla que el socket siga vivo.
+ *
+ * socket.io reintenta solo, pero hay dos casos donde no lo hace y el panel se
+ * queda mudo sin que nadie se entere:
+ *
+ *  1. `io server disconnect` — el servidor cortó a propósito (un deploy, por
+ *     ejemplo). El cliente NO reintenta: hay que llamar `connect()` a mano.
+ *     Es el mismo bug que tuvo el validador.
+ *  2. La pestaña estuvo dormida o la máquina suspendida. Al volver, el socket
+ *     puede estar muerto sin haber emitido nada.
+ */
+const WATCHDOG_MS = 20000;
+
+/** Reconecta si hace falta. Idempotente: si ya está reintentando, no molesta. */
+function ensureConnected(reason: string) {
+  if (!socket || intentionalDisconnect || socket.connected) return;
+  console.log(`[Socket] Reconectando (${reason})`);
+  socket.connect();
+}
+
+function startKeepAlive() {
+  if (watchdog) clearInterval(watchdog);
+  watchdog = setInterval(() => ensureConnected('watchdog'), WATCHDOG_MS);
+
+  if (browserHooksReady || typeof window === 'undefined') return;
+  browserHooksReady = true;
+
+  // Volvió la red: no esperar hasta 30s del backoff para darse cuenta.
+  window.addEventListener('online', () => ensureConnected('volvió la red'));
+  // Volver a la pestaña es cuando el operador va a mirar: que esté al día.
+  window.addEventListener('focus', () => ensureConnected('foco en la pestaña'));
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) ensureConnected('pestaña visible');
+    });
+  }
+}
+
 // ============================================
 // Connection management
 // ============================================
@@ -28,6 +73,8 @@ let currentConfig: SocketConfig | null = null;
  * Returns the socket instance.
  */
 export function connectSocket(config: SocketConfig, autoStart = true): Socket {
+  intentionalDisconnect = false;
+
   // Tear down existing connection
   if (socket) {
     socket.removeAllListeners();
@@ -70,6 +117,12 @@ export function connectSocket(config: SocketConfig, autoStart = true): Socket {
 
   socket.on('disconnect', (reason) => {
     console.log('[Socket] Disconnected:', reason);
+    // `io server disconnect` es la única desconexión que socket.io no reintenta
+    // sola. Pasa en cada deploy del backend: sin esto el panel queda abierto,
+    // en silencio y desactualizado hasta que alguien recarga la página.
+    if (reason === 'io server disconnect' && !intentionalDisconnect) {
+      setTimeout(() => ensureConnected('el servidor cortó'), 1000);
+    }
   });
 
   socket.on('connect_error', (err) => {
@@ -95,6 +148,8 @@ export function connectSocket(config: SocketConfig, autoStart = true): Socket {
     socket.connect();
   }
 
+  startKeepAlive();
+
   return socket;
 }
 
@@ -102,6 +157,11 @@ export function connectSocket(config: SocketConfig, autoStart = true): Socket {
  * Cleanly disconnect the current socket.
  */
 export function disconnectSocket(): void {
+  intentionalDisconnect = true;
+  if (watchdog) {
+    clearInterval(watchdog);
+    watchdog = null;
+  }
   if (socket) {
     socket.removeAllListeners();
     socket.disconnect();

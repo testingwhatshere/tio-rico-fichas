@@ -42,6 +42,16 @@ const DEFAULT_SELECTORS = {
   PASSWORD_SUBMIT: 'button[type="submit"].btn-cyan, .modal-body button[type="submit"], button.btn[type="submit"].btn-cyan'
 };
 
+// Sin link a Usuarios casi siempre es que la sesión se cerró y la pestaña quedó en el
+// login: decirlo así para que el operador sepa qué hacer en vez de "selector roto".
+function usersLinkMissingError(base) {
+  const pwd = document.querySelector('input[type="password"]');
+  if (pwd && pwd.offsetParent !== null) {
+    return new Error(`${base}: la sesión del panel se cerró (la pestaña muestra el login)`);
+  }
+  return new Error(`${base} (url: ${window.location.pathname})`);
+}
+
 // Active selectors — merged from custom panel profile (if any) + defaults
 // Custom profile only needs to override the keys that differ from TioRico
 let SELECTORS = { ...DEFAULT_SELECTORS };
@@ -165,7 +175,12 @@ async function executeStep(stepName, stepFunction, context = {}) {
     const enhancedMessage = `Failed at ${stepName}${contextStr ? ` (${contextStr})` : ''}: ${error.message}`;
     // Log full page state on failure for debugging
     logPageState(`${stepName}_FAILED`);
-    throw new Error(enhancedMessage);
+    const enhanced = new Error(enhancedMessage);
+    // Preserve the structured cause. Callers decide what a failure MEANS from this
+    // code, never from the message text — a selector timeout and "the user really
+    // isn't on this panel" must not be confusable (see USER_NOT_FOUND_IN_PANEL).
+    if (error.code) enhanced.code = error.code;
+    throw enhanced;
   }
 }
 
@@ -349,6 +364,11 @@ window.panelAutomation = {
       targetUsername: jobData.targetUsername,
       amount: jobData.amount
     };
+    // Saldo del usuario ANTES de cargar, leído del mismo botón "+" que se toca (data-balance):
+    // si después de Aceptar no aparece confirmación, el job-processor compara contra esto
+    // para saber si la carga entró. No agrega pasos en el panel.
+    let balanceBefore = null;
+    let userKingboxId = null;
 
     try {
       humanize.log('Starting credit load for TioRico panel', jobData);
@@ -388,7 +408,7 @@ window.panelAutomation = {
         }
 
         if (!usersLink) {
-          throw new Error('Users page link not found in navigation');
+          throw usersLinkMissingError('Users page link not found in navigation');
         }
 
         humanize.log('Found users link:', { href: usersLink.getAttribute('href'), text: usersLink.textContent.trim() });
@@ -434,7 +454,7 @@ window.panelAutomation = {
         await humanize.typeIntoElement(searchInput, jobData.targetUsername);
 
         // Human-like pause before clicking search
-        await humanize.randomDelay(1000, 2000);
+        await humanize.randomDelay(350, 800);
       }, { ...context, selector: SELECTORS.USER_SEARCH_INPUT });
 
       // Step 3: Click "BUSCAR" button to trigger search
@@ -496,11 +516,13 @@ window.panelAutomation = {
                 }
               }
 
-              // Strategy 2: Try span.color or other text-based selectors (fallback)
+              // Strategy 2: Try span.color or other text-based selectors (fallback).
+              // EXACT equality only — a substring match here would let the flow
+              // proceed to a wrong-user row in step 5.
               const usernameSpan = rows[i].querySelector('span.color, td:first-child span, span.username, span.user-name');
               if (usernameSpan) {
                 const rowText = usernameSpan.textContent.trim().toLowerCase();
-                if (rowText === targetLower || rowText.includes(targetLower)) {
+                if (rowText === targetLower) {
                   humanize.log(`Search results loaded, user found in row ${i + 1} (via text selector)`);
                   return;
                 }
@@ -526,35 +548,57 @@ window.panelAutomation = {
           humanize.log('First row text:', firstRow.textContent.substring(0, 300));
         }
 
-        throw new Error(`User "${jobData.targetUsername}" not found in search results after ${timeout}ms`);
+        // This is the ONLY place in loadCredits allowed to conclude that the user is
+        // absent from this panel: the search ran and we polled the table for the full
+        // timeout. Any other failure (selector gone, panel slow, SW restarted mid-job)
+        // is NOT evidence about the user's existence.
+        const notFound = new Error(`User "${jobData.targetUsername}" not found in search results after ${timeout}ms`);
+        notFound.code = 'USER_NOT_FOUND_IN_PANEL';
+        throw notFound;
       }, context);
 
       // Step 5: Get the "Add Credits" href from the <a> tag in the matching row
       const addCreditsHref = await executeStep('get_add_credits_href', async () => {
-        // Find the row containing our target username
+        // Find the row containing our target username.
+        // EXACT match only — matching by substring here is how a load once went to
+        // the wrong account ("ian6" selecting the "braian65t" row). For a financial
+        // action we never pick a row just because it *contains* the target name.
         const rows = document.querySelectorAll('table tbody tr');
         const targetLower = jobData.targetUsername.toLowerCase().trim();
-        let targetRow = null;
-        for (const row of rows) {
-          // TioRico: username in <span class="color"> with leading/trailing spaces
-          const usernameSpan = row.querySelector('span.color, td:first-child span, span.username, span.user-name');
-          const rowText = usernameSpan
-            ? usernameSpan.textContent.trim().toLowerCase()
-            : row.textContent.toLowerCase();
-          if (rowText.includes(targetLower)) {
-            targetRow = row;
-            break;
+        // Escape for use inside a CSS attribute selector value
+        const escaped = targetLower.replace(/["\\]/g, '\\$&');
+
+        // Primary: exact match by data-username on the add button (same reliable
+        // approach as readUserChipBalance). This is the add button itself.
+        let addButton = document.querySelector(
+          `table tbody tr a.action-plus[data-username="${escaped}" i]`
+        );
+        let targetRow = addButton ? addButton.closest('tr') : null;
+
+        // Fallback (panels without data-username): exact text equality of the
+        // username cell — NEVER substring.
+        if (!targetRow) {
+          for (const row of rows) {
+            const usernameSpan = row.querySelector('span.color, td:first-child span, span.username, span.user-name');
+            const rowText = (usernameSpan ? usernameSpan.textContent : row.textContent)
+              .trim().toLowerCase();
+            if (rowText === targetLower) {
+              targetRow = row;
+              break;
+            }
           }
         }
 
         if (!targetRow) {
-          throw new Error('Target user row not found after search');
+          throw new Error(`Target user "${jobData.targetUsername}" not found (exact match) after search`);
         }
 
         // TioRico: <a class="action-plus" data-username="..." data-balance="...">
         //   <i class="fas fa-plus"></i>
         // </a>  — NO href attribute (Vue.js click handler)
-        let addButton = targetRow.querySelector(SELECTORS.ADD_CREDITS_BUTTON_ROW);
+        if (!addButton) {
+          addButton = targetRow.querySelector(SELECTORS.ADD_CREDITS_BUTTON_ROW);
+        }
 
         // Fallback: look for icon-based match
         if (!addButton) {
@@ -604,6 +648,12 @@ window.panelAutomation = {
           dataUsername: addButton.getAttribute('data-username'),
           dataBalance: addButton.getAttribute('data-balance')
         });
+        const rawBalance = addButton.getAttribute('data-balance');
+        if (rawBalance != null && /^-?\d+$/.test(rawBalance.trim())) balanceBefore = parseInt(rawBalance, 10);
+        // Id interno del panel (`userKingboxId` en addCredit). Con esto el guardia de red
+        // bloquea una carga que saliera hacia otro usuario.
+        const rawId = addButton.getAttribute('data-id');
+        if (rawId != null && /^\d+$/.test(rawId.trim())) userKingboxId = rawId.trim();
 
         const href = addButton.getAttribute('href');
         if (!href || href === '#' || href.startsWith('javascript:') || href.startsWith('#')) {
@@ -664,7 +714,9 @@ window.panelAutomation = {
         return {
           success: true,
           navigateTo: addCreditsHref,
-          phase: 'NAVIGATE_TO_ADD_CREDITS'
+          phase: 'NAVIGATE_TO_ADD_CREDITS',
+          balanceBefore,
+          userKingboxId,
         };
       }
 
@@ -673,13 +725,18 @@ window.panelAutomation = {
       return {
         success: true,
         phase: 'MODAL_OPEN',
+        balanceBefore,
+        userKingboxId,
       };
 
     } catch (error) {
       humanize.log('Credit load failed', error.message);
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        // Structured verdict for the job-processor. Custom Error props don't survive
+        // the executeScript boundary, so it travels as a field on the result object.
+        userNotFound: error.code === 'USER_NOT_FOUND_IN_PANEL',
       };
     }
   },
@@ -793,7 +850,7 @@ window.panelAutomation = {
       // No extra Vue tricks needed — the click step handles enabling the button
 
       // Human-like pause before submitting (review amount)
-      await humanize.randomDelay(2000, 4000);
+      await humanize.randomDelay(600, 1200);
     }, { ...context, selector: SELECTORS.MODAL_AMOUNT_INPUT });
 
     // Final step: hand off to job-processor.js which clicks Aceptar in MAIN world via
@@ -809,6 +866,61 @@ window.panelAutomation = {
     };
   },
 
+
+  /**
+   * ¿La página es un desafío de verificación en vez del panel?
+   * Devuelve 'cloudflare' | 'turnstile' | 'recaptcha' | 'hcaptcha' | null.
+   *
+   * Sólo detecta: un desafío lo resuelve una persona en la PC. Sin esto se
+   * veía como un error genérico de selector ("Login form not rendered").
+   */
+  detectChallenge() {
+    try {
+      const title = (document.title || '').toLowerCase();
+      const body = (document.body?.innerText || '').slice(0, 3000).toLowerCase();
+      // Sólo iframes visibles y que no sean la versión invisible del captcha: un
+      // reCAPTCHA/Turnstile invisible en el login no es un desafío para resolver.
+      const frames = [...document.querySelectorAll('iframe')]
+        .filter((f) => {
+          const src = f.src || '';
+          if (src.includes('size=invisible')) return false;
+          const r = f.getBoundingClientRect();
+          return r.width > 30 && r.height > 30;
+        })
+        .map((f) => f.src || '');
+      if (
+        document.querySelector('#challenge-form, #challenge-running, #cf-challenge-running, .cf-browser-verification') ||
+        title.includes('just a moment') || title.includes('un momento') ||
+        body.includes('checking your browser') || body.includes('verificando que') ||
+        body.includes('verify you are human') || body.includes('verifique que es un ser humano')
+      ) {
+        return frames.some((src) => src.includes('challenges.cloudflare.com')) ? 'turnstile' : 'cloudflare';
+      }
+      if (frames.some((src) => src.includes('challenges.cloudflare.com'))) return 'turnstile';
+      if (frames.some((src) => src.includes('google.com/recaptcha') || src.includes('recaptcha.net'))) return 'recaptcha';
+      if (frames.some((src) => src.includes('hcaptcha.com'))) return 'hcaptcha';
+
+      // Los widgets actuales (Turnstile sobre todo) meten su iframe en un shadow
+      // DOM cerrado: desde la página no se ve. Lo que sí se ve es el contenedor y
+      // el campo de respuesta, vacío mientras nadie lo resolvió. Cuenta sólo si el
+      // contenedor es visible y de tamaño de widget: los modos invisibles no lo son.
+      const widgetSinResolver = (selector, respuesta) =>
+        [...document.querySelectorAll(selector)].some((el) => {
+          if (el.getAttribute('data-size') === 'invisible') return false;
+          const r = el.getBoundingClientRect();
+          const st = getComputedStyle(el);
+          if (r.width < 100 || r.height < 40 || st.visibility === 'hidden' || st.display === 'none') return false;
+          const campo = el.querySelector(respuesta) || document.querySelector(respuesta);
+          return !campo || !campo.value;
+        });
+      if (widgetSinResolver('.cf-turnstile', 'input[name="cf-turnstile-response"]')) return 'turnstile';
+      if (widgetSinResolver('.g-recaptcha', 'textarea[name="g-recaptcha-response"]')) return 'recaptcha';
+      if (widgetSinResolver('.h-captcha', 'textarea[name="h-captcha-response"]')) return 'hcaptcha';
+      return null;
+    } catch (_) {
+      return null;
+    }
+  },
 
   /**
    * Check current login status (SPA-aware)
@@ -849,8 +961,11 @@ window.panelAutomation = {
       // On login page = not logged in
       const onLoginPage = window.location.pathname.includes('login');
 
+      const challenge = this.detectChallenge();
+
       const status = {
-        isLoggedIn: (hasLogoutLink || hasUserMenu || hasOwnUsername) && !hasPasswordInput && !onLoginPage,
+        isLoggedIn: !challenge && (hasLogoutLink || hasUserMenu || hasOwnUsername) && !hasPasswordInput && !onLoginPage,
+        challenge,
         hasUserMenu,
         hasLogoutLink,
         hasOwnUsername,
@@ -896,7 +1011,7 @@ window.panelAutomation = {
             return text.includes('usuario') || text.includes('users');
           });
         }
-        if (!usersLink) throw new Error('Users page link not found');
+        if (!usersLink) throw usersLinkMissingError('Users page link not found');
         await humanize.clickElement(usersLink);
         await waitForSPAContent('#filter-input, input[type="search"], table', 10000);
       }, context);
@@ -913,7 +1028,7 @@ window.panelAutomation = {
         }
         if (!searchInput) throw new Error('Search input not found');
         await humanize.typeIntoElement(searchInput, targetUsername);
-        await humanize.randomDelay(1000, 2000);
+        await humanize.randomDelay(350, 800);
       }, context);
 
       // Step 3: Click search
@@ -938,6 +1053,15 @@ window.panelAutomation = {
       return await executeStep('read_balance', async () => {
         const startTime = Date.now();
         const timeout = 15000;
+        // Este paso no hace clicks ni tipea, así que no dejaba ninguna huella:
+        // cuando una verificación se colgaba acá, la traza del bot terminaba en
+        // el click de "Buscar" y no había forma de saber si había leído el
+        // saldo, si no había encontrado la fila o si nunca había vuelto.
+        humanize.logAction('READ_BALANCE_START', {
+          selector: 'table tbody tr a.action-plus[data-username]',
+          value: targetUsername,
+          step: 'read_balance',
+        });
         const targetLower = targetUsername.toLowerCase().trim();
         // Escape for use inside a CSS attribute selector value
         const escaped = targetLower.replace(/["\\]/g, '\\$&');
@@ -959,12 +1083,19 @@ window.panelAutomation = {
           if (exactBtn) {
             const balance = parseInt(exactBtn.getAttribute('data-balance') || '0', 10);
             humanize.log(`User "${targetUsername}" found (exact match), balance: ${balance}`);
+            humanize.logAction('READ_BALANCE_OK', {
+              selector: 'a.action-plus[data-balance]',
+              value: String(balance),
+              step: 'read_balance',
+              startedAt: new Date(startTime).toISOString(),
+              duration: Date.now() - startTime,
+            });
             return { success: true, balance };
           }
 
-          // Fallback: legacy substring matching, for custom panel profiles that
-          // don't expose data-username. Slower and looser but keeps us working
-          // if the panel's DOM diverges from TíoRico's.
+          // Fallback: exact text equality, for custom panel profiles that don't
+          // expose data-username. Was substring before — that let "ana" match
+          // "ana123"; exact only now to avoid reading the wrong user's balance.
           const rows = document.querySelectorAll('table tbody tr');
           for (const row of rows) {
             const usernameSpan = row.querySelector('span.color, td:first-child span, span.username, span.user-name');
@@ -972,7 +1103,7 @@ window.panelAutomation = {
               ? usernameSpan.textContent.trim().toLowerCase()
               : row.textContent.toLowerCase();
 
-            if (rowText.includes(targetLower)) {
+            if (rowText === targetLower) {
               const actionBtn = row.querySelector('a.action-plus, a.action-minus');
               if (actionBtn) {
                 const balance = parseInt(actionBtn.getAttribute('data-balance') || '0', 10);
@@ -989,6 +1120,15 @@ window.panelAutomation = {
           }
           await new Promise(resolve => setTimeout(resolve, 300));
         }
+        humanize.logAction('READ_BALANCE_NOT_FOUND', {
+          selector: 'table tbody tr',
+          value: targetUsername,
+          step: 'read_balance',
+          success: false,
+          error: 'no apareció la fila del usuario en 15s',
+          startedAt: new Date(startTime).toISOString(),
+          duration: Date.now() - startTime,
+        });
         return { success: false, error: `User "${targetUsername}" not found in search results` };
       }, context);
 
@@ -1007,6 +1147,8 @@ window.panelAutomation = {
       targetUsername: jobData.targetUsername,
       amount: jobData.amount
     };
+    let withdrawBalanceBefore = null;
+    let withdrawUserKingboxId = null;
 
     try {
       humanize.log('Starting chip withdrawal for TioRico panel', jobData);
@@ -1028,7 +1170,7 @@ window.panelAutomation = {
           const allLinks = Array.from(document.querySelectorAll('a'));
           usersLink = allLinks.find(a => a.textContent.toLowerCase().includes('usuario'));
         }
-        if (!usersLink) throw new Error('Users page link not found');
+        if (!usersLink) throw usersLinkMissingError('Users page link not found');
         await humanize.clickElement(usersLink);
         await waitForSPAContent('#filter-input, input[type="search"], table', 10000);
       }, context);
@@ -1045,7 +1187,7 @@ window.panelAutomation = {
         }
         if (!searchInput) throw new Error('Search input not found');
         await humanize.typeIntoElement(searchInput, jobData.targetUsername);
-        await humanize.randomDelay(1000, 2000);
+        await humanize.randomDelay(350, 800);
       }, context);
 
       // Step 3: Click search button
@@ -1084,7 +1226,9 @@ window.panelAutomation = {
             const rowText = usernameSpan
               ? usernameSpan.textContent.trim().toLowerCase()
               : row.textContent.toLowerCase();
-            if (rowText.includes(targetLower)) return;
+            // EXACT equality only — substring here would let the flow proceed to a
+            // wrong-user row in the withdraw step.
+            if (rowText === targetLower) return;
           }
           await new Promise(resolve => setTimeout(resolve, 300));
         }
@@ -1093,24 +1237,65 @@ window.panelAutomation = {
 
       // Step 5: Click action-minus button on the user's row
       await executeStep('click_withdraw_button', async () => {
+        // EXACT match only — never withdraw from a row just because it contains
+        // the target name (same wrong-user risk as loadCredits).
         const rows = document.querySelectorAll('table tbody tr');
         const targetLower = jobData.targetUsername.toLowerCase().trim();
-        let targetRow = null;
+        const escaped = targetLower.replace(/["\\]/g, '\\$&');
 
-        for (const row of rows) {
-          const usernameSpan = row.querySelector('span.color, td:first-child span, span.username, span.user-name');
-          const rowText = usernameSpan
-            ? usernameSpan.textContent.trim().toLowerCase()
-            : row.textContent.toLowerCase();
-          if (rowText.includes(targetLower)) {
-            targetRow = row;
-            break;
+        // Primary: exact data-username on the action-minus button.
+        let minusButton = document.querySelector(
+          `table tbody tr a.action-minus[data-username="${escaped}" i]`
+        );
+        let targetRow = minusButton ? minusButton.closest('tr') : null;
+
+        // Fallback (no data-username): exact text equality of the username cell.
+        if (!targetRow) {
+          for (const row of rows) {
+            const usernameSpan = row.querySelector('span.color, td:first-child span, span.username, span.user-name');
+            const rowText = (usernameSpan ? usernameSpan.textContent : row.textContent)
+              .trim().toLowerCase();
+            if (rowText === targetLower) {
+              targetRow = row;
+              break;
+            }
           }
         }
 
-        if (!targetRow) throw new Error('Target user row not found after search');
+        if (!targetRow) throw new Error(`Target user "${jobData.targetUsername}" not found (exact match) after search`);
 
-        const minusButton = targetRow.querySelector(SELECTORS.SUBTRACT_CREDITS_BUTTON_ROW);
+        // El saldo está en el propio botón de la fila (`data-balance`), así que
+        // se puede revalidar acá sin navegar ni perder tiempo. Hace falta: entre
+        // que se verifica el premio y que un operador aprueba el retiro pueden
+        // pasar minutos u horas, y en el medio el usuario sigue jugando. Sin
+        // esto el bot intenta retirar plata que ya no está, y si el panel lo
+        // permite terminamos transfiriéndole a alguien que gastó las fichas.
+        const balanceAttr =
+          (minusButton && minusButton.getAttribute('data-balance')) ||
+          (targetRow.querySelector('a.action-plus[data-balance]') || {}).getAttribute?.('data-balance');
+        const currentBalance = balanceAttr != null ? parseInt(balanceAttr, 10) : null;
+        if (Number.isFinite(currentBalance)) withdrawBalanceBefore = currentBalance;
+        const rawId = (minusButton || targetRow.querySelector('a.action-plus[data-id]'))?.getAttribute('data-id');
+        if (rawId != null && /^\d+$/.test(rawId.trim())) withdrawUserKingboxId = rawId.trim();
+        const wanted = parseFloat(jobData.amount);
+        if (currentBalance != null && !isNaN(wanted) && currentBalance < wanted) {
+          humanize.logAction('WITHDRAW_ABORTED_LOW_BALANCE', {
+            selector: 'a.action-minus[data-balance]',
+            value: String(currentBalance),
+            step: 'check_balance_before_withdraw',
+            success: false,
+            error: `saldo ${currentBalance} < premio ${wanted}`,
+          });
+          const err = new Error(
+            `El usuario ya no tiene las fichas: le quedan ${currentBalance.toLocaleString('es-AR')} y el premio es de ${wanted.toLocaleString('es-AR')}`,
+          );
+          err.code = 'INSUFFICIENT_USER_BALANCE';
+          throw err;
+        }
+
+        if (!minusButton) {
+          minusButton = targetRow.querySelector(SELECTORS.SUBTRACT_CREDITS_BUTTON_ROW);
+        }
         if (!minusButton) {
           // Fallback: look for fa-minus icon
           const minusIcon = targetRow.querySelector('.fas.fa-minus, .fa.fa-minus, .fa-minus');
@@ -1142,7 +1327,10 @@ window.panelAutomation = {
       }, context);
 
       // Step 7: Fill amount and submit (same modal as add credits)
-      return await this._fillAmountAndSubmit(jobData, context);
+      const filled = await this._fillAmountAndSubmit(jobData, context);
+      // Saldo previo + id del usuario: el guardia de red controla el usuario y, si el
+      // retiro queda en duda, el job-processor lo decide por saldo (igual que las cargas).
+      return { ...filled, balanceBefore: withdrawBalanceBefore, userKingboxId: withdrawUserKingboxId };
 
     } catch (error) {
       humanize.log('Chip withdrawal failed', error.message);
@@ -1185,7 +1373,7 @@ window.panelAutomation = {
             return text.includes('usuario') || text.includes('users');
           });
         }
-        if (!usersLink) throw new Error('Users page link not found');
+        if (!usersLink) throw usersLinkMissingError('Users page link not found');
         await humanize.clickElement(usersLink);
         await waitForSPAContent('#filter-input, input[type="search"], table', 10000);
       }, context);
@@ -1202,7 +1390,7 @@ window.panelAutomation = {
         }
         if (!searchInput) throw new Error('Search input not found');
         await humanize.typeIntoElement(searchInput, jobData.targetUsername);
-        await humanize.randomDelay(1000, 2000);
+        await humanize.randomDelay(350, 800);
       }, context);
 
       // Step 3: Click BUSCAR (aligned with loadCredits' robust approach)
@@ -1268,11 +1456,12 @@ window.panelAutomation = {
                 }
               }
 
-              // Strategy 2: Try span.color or other text-based selectors (fallback)
+              // Strategy 2: Try span.color or other text-based selectors (fallback).
+              // EXACT equality only — never substring.
               const usernameSpan = row.querySelector('span.color, td:first-child span, span.username, span.user-name');
               if (usernameSpan) {
                 const rowText = usernameSpan.textContent.trim().toLowerCase();
-                if (rowText === targetLower || rowText.includes(targetLower)) {
+                if (rowText === targetLower) {
                   humanize.log(`✓ Found user "${jobData.targetUsername}" after ${Date.now() - startTime}ms (via text selector)`);
                   return;
                 }
@@ -1308,20 +1497,26 @@ window.panelAutomation = {
 
       // Step 5: Find the password change button in target row (using span.color like loadCredits)
       await executeStep('find_and_click_password_button', async () => {
+        // EXACT match only — never target a row just because it contains the name.
         const rows = Array.from(document.querySelectorAll('table tbody tr'));
         const targetLower = jobData.targetUsername.toLowerCase().trim();
+        const escaped = targetLower.replace(/["\\]/g, '\\$&');
         let targetRow = null;
         for (const row of rows) {
+          // Prefer exact data-username on any element in the row
+          if (row.querySelector(`[data-username="${escaped}" i]`)) {
+            targetRow = row;
+            break;
+          }
           const usernameSpan = row.querySelector('span.color, td:first-child span, span.username, span.user-name');
-          const rowText = usernameSpan
-            ? usernameSpan.textContent.trim().toLowerCase()
-            : row.textContent.toLowerCase();
-          if (rowText.includes(targetLower)) {
+          const rowText = (usernameSpan ? usernameSpan.textContent : row.textContent)
+            .trim().toLowerCase();
+          if (rowText === targetLower) {
             targetRow = row;
             break;
           }
         }
-        if (!targetRow) throw new Error(`User row not found for "${jobData.targetUsername}"`);
+        if (!targetRow) throw new Error(`User row not found (exact match) for "${jobData.targetUsername}"`);
 
         // Find the password change button (key icon) in this row
         let pwButton = targetRow.querySelector(SELECTORS.CHANGE_PASSWORD_BUTTON);
@@ -1356,7 +1551,7 @@ window.panelAutomation = {
         }
         if (!modal) throw new Error('Password change modal did not appear');
         humanize.log('Password modal appeared');
-        await humanize.randomDelay(500, 1000);
+        await humanize.randomDelay(200, 500);
       }, context);
 
       // Step 7: Fill password fields
@@ -1370,11 +1565,11 @@ window.panelAutomation = {
 
         // First field: new password
         await humanize.typeIntoElement(passwordInputs[0], jobData.newPassword);
-        await humanize.randomDelay(500, 1000);
+        await humanize.randomDelay(200, 500);
 
         // Second field: confirm password
         await humanize.typeIntoElement(passwordInputs[1], jobData.newPassword);
-        await humanize.randomDelay(500, 1000);
+        await humanize.randomDelay(200, 500);
       }, context);
 
       // Click "Aceptar" y verificación los hace el background en MAIN world.
@@ -1438,7 +1633,7 @@ window.panelAutomation = {
             humanize.log('Users page elements found despite URL mismatch — continuing');
             return;
           }
-          throw new Error('Users page link not found in navigation');
+          throw usersLinkMissingError('Users page link not found in navigation');
         }
         await humanize.clickElement(usersLink);
         const searchOrTable = await waitForSPAContent('#filter-input, input[type="search"], table', 10000);
@@ -1505,7 +1700,7 @@ window.panelAutomation = {
       }, context);
 
       // Small pause to let the modal fully render
-      await humanize.randomDelay(500, 1000);
+      await humanize.randomDelay(200, 500);
 
       // Step 4: Fill nickname
       await executeStep('fill_nickname', async () => {
@@ -1525,7 +1720,7 @@ window.panelAutomation = {
         });
 
         await humanize.typeIntoElement(nicknameInput, targetUsername);
-        await humanize.randomDelay(800, 1500);
+        await humanize.randomDelay(300, 700);
       }, { ...context, selector: SELECTORS.NEW_USER_NICKNAME_INPUT });
 
       // Step 5: Fill password
@@ -1545,7 +1740,7 @@ window.panelAutomation = {
         });
 
         await humanize.typeIntoElement(passwordInput, DEFAULT_PASSWORD);
-        await humanize.randomDelay(1000, 2000);
+        await humanize.randomDelay(350, 800);
       }, { ...context, selector: SELECTORS.NEW_USER_PASSWORD_INPUT });
 
       // Step 6: Return — the click will be done by job-processor via MAIN world
@@ -1626,7 +1821,7 @@ window.panelAutomation = {
         document.documentElement.appendChild(script);
         script.remove();
         humanize.log('Injected main-world click script for create user Aceptar button');
-        await humanize.randomDelay(1000, 2000);
+        await humanize.randomDelay(350, 800);
       }, context);
 
       // Step 7: Wait for result (SweetAlert success/error or modal close)
@@ -1753,7 +1948,7 @@ window.panelAutomation = {
         }
 
         if (!usersLink) {
-          throw new Error('Users page link not found in navigation');
+          throw usersLinkMissingError('Users page link not found in navigation');
         }
 
         await humanize.clickElement(usersLink);
@@ -1787,7 +1982,7 @@ window.panelAutomation = {
         }
 
         await humanize.typeIntoElement(searchInput, targetUsername);
-        await humanize.randomDelay(1000, 2000);
+        await humanize.randomDelay(350, 800);
       }, { ...context, selector: SELECTORS.USER_SEARCH_INPUT });
 
       // Step 3: Click "BUSCAR" button
@@ -1824,6 +2019,12 @@ window.panelAutomation = {
       const result = await executeStep('check_search_results', async () => {
         const startTime = Date.now();
         const timeout = 15000;
+        // Grace period before we trust an empty table. Right after the BUSCAR click
+        // the AJAX request hasn't necessarily started: dataTables_processing isn't up
+        // yet and the tbody still shows the PREVIOUS state — often "No data available".
+        // Reading that as a verdict produced discovery answers in ~1s that wrongly
+        // said the user wasn't on the panel.
+        const EMPTY_TABLE_GRACE_MS = 2500;
         // Normalize aggressively to absorb whitespace, case, zero-width chars and
         // common punctuation variations. Keep alphanumeric only — that's enough to
         // identify a panel username uniquely.
@@ -1834,6 +2035,9 @@ window.panelAutomation = {
           .replace(/​|‌|‍|﻿/g, '')
           .replace(/[^a-z0-9]/g, '');
         const targetNorm = normalize(targetUsername);
+        const targetLower = (targetUsername || '').toString().toLowerCase().trim();
+        // Escape for use inside a CSS attribute selector value
+        const escaped = targetLower.replace(/["\\]/g, '\\$&');
 
         while (Date.now() - startTime < timeout) {
           const processing = document.querySelector(SELECTORS.DATATABLE_PROCESSING);
@@ -1842,14 +2046,31 @@ window.panelAutomation = {
             continue;
           }
 
-          // Early exit: DataTables "no data" message means user definitely not found
-          const emptyCell = document.querySelector('table tbody .dataTables_empty, table tbody td[colspan]');
+          // Early exit: DataTables "no data" message means user definitely not found.
+          // Only honoured after the grace period, so a stale pre-search table can't
+          // masquerade as a result.
+          const emptyCell = Date.now() - startTime >= EMPTY_TABLE_GRACE_MS
+            ? document.querySelector('table tbody .dataTables_empty, table tbody td[colspan]')
+            : null;
           if (emptyCell) {
             const emptyText = emptyCell.textContent.toLowerCase();
             if (emptyText.includes('no data') || emptyText.includes('no hay datos') || emptyText.includes('no matching') || emptyText.includes('no entries')) {
               humanize.log(`User "${targetUsername}" not found — table shows empty message: "${emptyCell.textContent.trim()}"`);
               return { found: false, matched: 0, totalRows: 0, reason: 'empty_table' };
             }
+          }
+
+          // Primary: exact match by data-username on the action buttons (same
+          // approach as loadCredits / readUserChipBalance). Avoids the substring
+          // false positive ("ian6" matching "braian65t") that would otherwise
+          // assign the user to the WRONG panel.
+          const exactBtn = document.querySelector(
+            `table tbody tr a.action-plus[data-username="${escaped}" i], table tbody tr a.action-minus[data-username="${escaped}" i]`
+          );
+          if (exactBtn) {
+            const totalRows = document.querySelectorAll('table tbody tr').length;
+            humanize.log(`User "${targetUsername}" found (exact data-username match)`);
+            return { found: true, matched: 1, totalRows };
           }
 
           const rows = document.querySelectorAll('table tbody tr');
@@ -1861,8 +2082,9 @@ window.panelAutomation = {
                 : rows[i].textContent;
               const candidateNorm = normalize(rawCandidate);
 
-              // Try exact match first (most reliable), then includes as fallback.
-              if (candidateNorm === targetNorm || candidateNorm.includes(targetNorm)) {
+              // Fallback for panels without data-username: EXACT normalized
+              // equality only. Never substring (that caused wrong-panel assigns).
+              if (candidateNorm === targetNorm) {
                 humanize.log(`User "${targetUsername}" found in row ${i + 1} (normalized "${candidateNorm}")`);
                 return { found: true, matched: 1, totalRows: rows.length };
               }

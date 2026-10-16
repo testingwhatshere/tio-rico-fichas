@@ -180,15 +180,28 @@ export function openFailureModal(failureId) {
 
         ${(() => {
           const fraudFlags = failure.validationDetails?.fraudFlags || [];
-          if (fraudFlags.length === 0) return '';
+          const verifiedBy = failure.validationDetails?.recipientVerifiedBy;
+          const hasRecipientFlag = fraudFlags.some(f => RECIPIENT_FLAGS.includes(f));
+          if (fraudFlags.length === 0 && !verifiedBy) return '';
           return `
             <div class="flags-section" style="margin-top:12px">
               <h4>Alertas de Validacion</h4>
               <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
                 ${fraudFlags.map(flag => `
-                  <span class="fraud-flag ${flag === 'RECIPIENT_MISMATCH' || flag === 'RECIPIENT_ACCOUNT_MISMATCH' ? 'fraud-flag-warning' : 'fraud-flag-danger'}">${escapeHtml(getFlagLabel(flag))}</span>
+                  <span class="fraud-flag ${RECIPIENT_FLAGS.includes(flag) ? 'fraud-flag-warning' : 'fraud-flag-danger'}">${escapeHtml(getFlagLabel(flag))}</span>
                 `).join('')}
               </div>
+              ${verifiedBy ? `
+                <p class="text-muted" style="margin-top:8px;font-size:0.85em">
+                  Cuenta destino verificada: ${escapeHtml(verifiedBy)}
+                </p>
+              ` : ''}
+              ${hasRecipientFlag ? `
+                <p class="text-muted" style="margin-top:8px;font-size:0.85em">
+                  Chequea en el comprobante que el CBU/CVU/alias o el nombre del titular
+                  sea de alguna de nuestras billeteras antes de aprobar.
+                </p>
+              ` : ''}
             </div>
           `;
         })()}
@@ -304,7 +317,10 @@ export function openFailureModal(failureId) {
   // Retry discovery button (for requests where user was not found on panel)
   const retryDiscoveryBtn = document.getElementById('modal-retry-discovery-btn');
   if (retryDiscoveryBtn) {
-    const requestId = failure.id || failure.requestId;
+    // For JOB_FAILURE entries failure.id is the jobId; retry_failed_request
+    // resolves a Request, so prefer requestId. Validation failures have no
+    // separate requestId and fall back to failure.id (which is the request id).
+    const requestId = failure.requestId || failure.id;
     const isDiscoveryFailure = isPending && (
       (failure.error || '').includes('not found') ||
       (failure.error || '').includes('no encontrado') ||
@@ -353,9 +369,32 @@ import { getFlagLabel } from '../utils.js';
 // APPROVE / REJECT
 // ============================================
 
+// Flags de "no pudimos verificar que el comprobante sea a una cuenta nuestra".
+// No afirman que la plata no llego: piden que el operador mire el comprobante.
+const RECIPIENT_FLAGS = [
+  'RECIPIENT_ACCOUNT_MISMATCH',
+  'RECIPIENT_MISMATCH',
+  'RECIPIENT_UNVERIFIABLE',
+];
+
 export async function approveSelectedFailure() {
   const selectedFailure = getSelectedFailure();
   if (!selectedFailure || selectedFailure.resolvedAt || getIsProcessingFailure()) return;
+
+  // Confirmacion extra cuando la verificacion de billetera propia no cerro. Es el
+  // caso que en agosto 2026 se acreditaba solo sin que nadie lo viera.
+  const flags = selectedFailure.validationDetails?.fraudFlags || [];
+  const unverified = RECIPIENT_FLAGS.filter(f => flags.includes(f));
+  if (unverified.length > 0) {
+    const labels = unverified.map(f => `• ${getFlagLabel(f)}`).join('\n');
+    const ok = confirm(
+      'No pudimos verificar automaticamente que el comprobante sea a una cuenta nuestra.\n\n' +
+      labels + '\n\n' +
+      'Revisa el comprobante y confirma que el CBU/CVU/alias o el nombre del titular ' +
+      'sea de alguna de nuestras billeteras antes de aprobar.\n\n¿Aprobar igual?'
+    );
+    if (!ok) return;
+  }
 
   setIsProcessingFailure(true);
   const approveBtn = document.getElementById('modal-approve-btn');
@@ -372,7 +411,10 @@ export async function approveSelectedFailure() {
     const approvedAmount = (extractedAmt !== undefined && extractedAmt !== null
       && Number(extractedAmt) !== Number(requestedAmt) && Number(extractedAmt) > 0)
       ? Number(extractedAmt) : undefined;
-    const result = await window.api.approveFailure(selectedFailure.id, note, approvedAmount);
+    // Job failures key `id` on the jobId; approve() resolves a Request, so send
+    // the real requestId (validation failures have no separate requestId → id).
+    const approveTargetId = selectedFailure.requestId || selectedFailure.id;
+    const result = await window.api.approveFailure(approveTargetId, note, approvedAmount);
     if (result.success) {
       showToast('Fallo aprobado', 'success');
       selectedFailure.resolvedAt = new Date().toISOString();
@@ -389,6 +431,57 @@ export async function approveSelectedFailure() {
     setIsProcessingFailure(false);
     if (approveBtn) { approveBtn.disabled = false; approveBtn.innerHTML = approveOriginal; }
     if (rejectBtn) rejectBtn.disabled = false;
+  }
+}
+
+export async function markSelectedFailureLoaded() {
+  const selectedFailure = getSelectedFailure();
+  if (!selectedFailure || selectedFailure.resolvedAt || getIsProcessingFailure()) return;
+
+  const confirmed = await showConfirmModal(
+    'Marcar como cargada a mano',
+    'Confirmás que YA cargaste las fichas manualmente en el panel. La solicitud se cierra como completada y NO se manda el bot (para no cargar doble). El usuario recibe el aviso de "fichas cargadas".',
+    'Marcar como cargada',
+  );
+  if (!confirmed) return;
+
+  const currentFailure = getSelectedFailure();
+  if (!currentFailure) {
+    showToast('Error: el fallo fue deseleccionado', 'error');
+    return;
+  }
+
+  setIsProcessingFailure(true);
+  const approveBtn = document.getElementById('modal-approve-btn');
+  const rejectBtn = document.getElementById('modal-reject-btn');
+  const loadedBtn = document.getElementById('modal-mark-loaded-btn');
+  const loadedOriginal = loadedBtn ? loadedBtn.innerHTML : '';
+  if (approveBtn) approveBtn.disabled = true;
+  if (rejectBtn) rejectBtn.disabled = true;
+  if (loadedBtn) { loadedBtn.disabled = true; loadedBtn.innerHTML = '<span class="btn-spinner"></span> Cerrando...'; }
+
+  try {
+    // Job failures key `id` on the jobId; markLoadedManually resolves a Request,
+    // so send the real requestId (validation failures have no separate requestId → id).
+    const targetId = currentFailure.requestId || currentFailure.id;
+    const result = await window.api.markFailureLoaded(targetId, '');
+    if (result.success) {
+      showToast('Carga cerrada como completada', 'success');
+      currentFailure.resolvedAt = new Date().toISOString();
+      currentFailure.resolution = 'LOADED';
+      recentlyActionedFailures.set(currentFailure.id, Date.now());
+      closeAllModals();
+      renderFailuresList();
+      updateDashboard();
+      updateBadges();
+    } else {
+      showToast('Error: ' + (result.error || 'No se pudo cerrar la carga'), 'error');
+    }
+  } finally {
+    setIsProcessingFailure(false);
+    if (approveBtn) approveBtn.disabled = false;
+    if (rejectBtn) rejectBtn.disabled = false;
+    if (loadedBtn) { loadedBtn.disabled = false; loadedBtn.innerHTML = loadedOriginal; }
   }
 }
 

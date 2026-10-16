@@ -449,6 +449,9 @@ export class OutboundPaymentsService {
       },
       include: { prizeClaim: true, withdrawal: true, wallet: true },
       orderBy: { createdAt: 'asc' },
+      // Sin cota, y con tres includes completos (paymentDetails, screenshotUrl).
+      // `findByStatus`, justo abajo, ya usaba take: 50.
+      take: 100,
     });
   }
 

@@ -1,0 +1,21 @@
+{
+  "name": "validador-servidor",
+  "version": "1.1.2",
+  "private": true,
+  "description": "Validador de comprobantes en modo servidor (Render). Mismo pipeline OCR que la app de escritorio, sin Electron.",
+  "license": "MIT",
+  "main": "src/headless.js",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node src/headless.js",
+    "bench": "node server/bench.js"
+  },
+  "dependencies": {
+    "pdf-to-png-converter": "3.18.0",
+    "sharp": "0.34.5",
+    "socket.io-client": "4.8.1",
+    "tesseract.js": "5.1.1"
+  }
+}

@@ -6,9 +6,9 @@ import {
   TouchableOpacity,
   Modal,
   StyleSheet,
-  Dimensions,
 } from 'react-native';
 import colors from '@/constants/colors';
+import { CopyButton } from '@/components/Copyable';
 
 interface Message {
   id: string;
@@ -24,8 +24,12 @@ interface ChatBubbleProps {
   message: Message;
 }
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const MAX_BUBBLE_WIDTH = SCREEN_WIDTH * 0.78;
+// `Dimensions.get()` al importar congela el ancho del primer render: en el
+// browser las burbujas quedaban al 78% del tamaño que tenía la ventana al abrir
+// la página y no reaccionaban al resize. Además, 78% de 1440px es una burbuja
+// de 1100px, ilegible. Ahora es un tope fijo, cómodo de leer en cualquier ancho.
+const MAX_BUBBLE_WIDTH = 560;
+const MAX_IMAGE_SIZE = 420;
 
 function formatTime(dateStr: string): string {
   try {
@@ -162,23 +166,30 @@ export default function ChatBubble({ message }: ChatBubbleProps) {
           </Text>
         ) : null}
 
-        {/* Timestamp */}
-        {time ? (
-          <Text
-            style={[
-              styles.time,
-              isOperator ? styles.timeOperator : styles.timeUser,
-            ]}
-          >
-            {time}
-          </Text>
-        ) : null}
+        {/* Timestamp + copiar. Los mensajes del usuario suelen traer el CBU o
+            el número de operación, que el operador pega en otro lado. */}
+        <View style={styles.footerRow}>
+          {time ? (
+            <Text
+              style={[
+                styles.time,
+                isOperator ? styles.timeOperator : styles.timeUser,
+              ]}
+            >
+              {time}
+            </Text>
+          ) : null}
+          {!!message.content && (
+            <CopyButton value={message.content} label="Mensaje" size={11} />
+          )}
+        </View>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  footerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-end' },
   // Layout rows
   row: {
     marginVertical: 3,
@@ -286,7 +297,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   imageModalFull: {
-    width: SCREEN_WIDTH - 24,
-    height: SCREEN_WIDTH - 24,
+    width: MAX_IMAGE_SIZE,
+    height: MAX_IMAGE_SIZE,
   },
 });

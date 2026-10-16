@@ -9,9 +9,10 @@ import GameLinkCard from '@/components/cards/GameLinkCard';
 import PrizeAmountCard from '@/components/cards/PrizeAmountCard';
 import PrizePaymentCard from '@/components/cards/PrizePaymentCard';
 import PrizeClaimCard from '@/components/cards/PrizeClaimCard';
+import OverpaidOfferCard from '@/components/cards/OverpaidOfferCard';
 
 export interface InteractiveCard {
-  type: 'AMOUNT_SELECTOR' | 'PAYMENT_DETAILS' | 'PROOF_UPLOAD' | 'STATUS_TRACKER' | 'GAME_LINK' | 'PRIZE_AMOUNT' | 'PRIZE_PAYMENT' | 'PRIZE_CLAIM';
+  type: 'AMOUNT_SELECTOR' | 'PAYMENT_DETAILS' | 'PROOF_UPLOAD' | 'STATUS_TRACKER' | 'GAME_LINK' | 'PRIZE_AMOUNT' | 'PRIZE_PAYMENT' | 'PRIZE_CLAIM' | 'OVERPAID_OFFER';
   props: any;
   isDisabled?: boolean;
 }
@@ -210,6 +211,10 @@ function renderInteractiveCard(card: InteractiveCard) {
     case 'PRIZE_CLAIM':
       return (
         <PrizeClaimCard {...commonProps} {...card.props} />
+      );
+    case 'OVERPAID_OFFER':
+      return (
+        <OverpaidOfferCard {...commonProps} {...card.props} />
       );
     default:
       return null;

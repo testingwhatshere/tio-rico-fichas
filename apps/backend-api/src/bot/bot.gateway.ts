@@ -14,6 +14,8 @@ import { ModuleRef } from '@nestjs/core';
 import { OperatorGateway } from '../events/operator.gateway';
 import { JobsService } from '../jobs/jobs.service';
 import { PanelsService } from '../panels/panels.service';
+import { TelegramService } from '../notifications/telegram.service';
+import { BotService } from './bot.service';
 import {
   BOT_PING_INTERVAL_MS,
   BOT_PING_TIMEOUT_MS,
@@ -53,6 +55,45 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     new Map();
   // Track which panels have a busy bot (processing a job)
   private busyPanels: Set<string> = new Set();
+
+  /**
+   * Jobs que un bot aceptó y todavía no reportó, por socket.
+   *
+   * Existe para una sola cosa: si el bot se desconecta con un trabajo en la
+   * mano, el backend se entera en el momento en vez de esperar el timeout.
+   * El 2026-08-28 las extensiones flapeaban cada ~60s y cada verificación de
+   * premio moría así — el bot ACKeaba el job y desaparecía, y el reclamo
+   * quedaba "en curso" media hora sin que el operador pudiera hacer nada.
+   */
+  private jobsByBot: Map<string, Map<string, string>> = new Map();
+
+  /**
+   * Tipos de job que se pueden volver a encolar sin riesgo cuando el bot se
+   * cae: sólo LEEN el panel, no mueven fichas ni plata.
+   *
+   * `LOAD_CREDITS` y `WITHDRAW_CHIPS` NO están y no tienen que estar: el bot
+   * puede haber alcanzado a ejecutar la acción antes de morir, y reintentar
+   * significaría cargar o retirar dos veces. Ver la regla del proyecto: si una
+   * carga falla, para y espera revisión humana.
+   */
+  private static readonly REQUEUE_SAFE_JOB_TYPES = new Set(['VERIFY_CHIPS']);
+
+  /**
+   * Cuántas veces se reencoló cada job, para no rescatarlo eternamente.
+   *
+   * Las extensiones reconectan cada ~70s por diseño (el service worker de
+   * Chrome se duerme). Sin este tope, un job que tarda más que eso entra en
+   * bucle: se reencola, lo toma otro bot, ese también se cae, se reencola…
+   * y como la cola es de a uno, tapa todo lo que viene atrás. Pasó en vivo el
+   * 2026-08-28: la verificación de un premio dejó dos retiros ya aprobados sin
+   * despachar.
+   *
+   * Con un solo rescate se cubre el caso real —el bot muere justo después de
+   * aceptar— y si vuelve a fallar el job sigue el camino de siempre: muere por
+   * timeout y lo levanta una persona.
+   */
+  private requeueCount: Map<string, number> = new Map();
+  private static readonly MAX_REQUEUES_PER_JOB = 1;
   // Enriched heartbeat data per extension
   private extensionHealth = new Map<string, any>();
 
@@ -99,6 +140,23 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
         `Zombie cleanup: removed ${cleaned} dead socket(s). Active: ${this.getTotalBotCount()} bot(s)`,
       );
     }
+  }
+
+  private botService: BotService | null = null;
+
+  /**
+   * BotService por ModuleRef y no por constructor: BotService ya depende de
+   * gateways, y pedirlo en el constructor cierra el círculo.
+   */
+  private getBotService(): BotService | null {
+    if (!this.botService) {
+      try {
+        this.botService = this.moduleRef.get(BotService, { strict: false });
+      } catch {
+        this.logger.warn('BotService no disponible para el heartbeat por WS');
+      }
+    }
+    return this.botService;
   }
 
   private getOperatorGateway(): OperatorGateway | null {
@@ -224,6 +282,20 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // Try to dispatch queued jobs for this panel
     this.tryPushQueuedJobOnReconnect(panelId);
+
+    // Also re-send any in-progress discovery this panel never answered. A panel
+    // that received search_user and then flapped (MV3 SW suspension) would leave
+    // discovery waiting until it times out and fails the request. Re-asking on
+    // reconnect closes that gap. Lazy-load to avoid the circular DI with discovery.
+    try {
+      const { DiscoveryService } = require('../discovery/discovery.service');
+      const discoveryService = this.moduleRef.get(DiscoveryService, {
+        strict: false,
+      });
+      discoveryService?.retryDiscoveryOnPanelReconnect(panelId).catch(() => {});
+    } catch {
+      // DiscoveryService unavailable — non-fatal
+    }
   }
 
   /**
@@ -266,6 +338,9 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.logger.log(
       `Bot disconnected: ${client.id} (panel: ${panelId || 'unknown'})`,
     );
+
+    // Antes que nada: si se fue con un trabajo sin reportar, rescatarlo.
+    void this.requeueJobsOfDeadBot(client.id);
 
     // Clean up maps
     this.socketToPanelId.delete(client.id);
@@ -350,10 +425,52 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // Store enriched heartbeat data
     const panelId = (client.handshake.query?.panelId as string) || 'unknown';
+
+    // Refrescar el estado del bot con lo que antes hacía POST /bot/heartbeat.
+    // Sin esto, `getBotState()` marca el bot 'offline' a los 2 minutos
+    // (BOT_HEARTBEAT_TIMEOUT_MS) y /bot/state, /api/health y el dashboard del
+    // dueño muestran el bot caído aunque esté cargando fichas.
+    //
+    // El despacho de jobs NO depende de esto (usa isBotConnectedForPanel /
+    // isAnyBotConnected), pero la observabilidad sí.
+    const botService = this.getBotService();
+    if (botService) {
+      void botService
+        .handleHeartbeat(
+          {
+            version: data?.version,
+            uptimeMinutes: data?.uptimeMinutes,
+            timestamp: data?.timestamp,
+          },
+          panelId !== 'unknown' ? panelId : undefined,
+        )
+        .catch((err: unknown) => {
+          const motivo = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `No se pudo registrar el heartbeat del panel ${panelId}: ${motivo}`,
+          );
+        });
+    }
+    // El heartbeat reemplaza el registro entero: lo del freno se toma del propio
+    // heartbeat y, si una extensión vieja no lo manda, se conserva lo que había.
+    // Antes se perdía a los pocos segundos y la web dejaba de mostrarlo.
+    const prev = this.extensionHealth.get(panelId);
+    const breakerActive: boolean =
+      typeof data?.circuitBreakerActive === 'boolean'
+        ? data.circuitBreakerActive
+        : !!prev?.circuitBreakerActive;
     const healthData = {
       extensionId: panelId,
       type: data?.type || 'automation',
-      status: this.busyPanels.has(panelId) ? 'busy' : 'online',
+      status: breakerActive
+        ? 'error'
+        : this.busyPanels.has(panelId)
+          ? 'busy'
+          : 'online',
+      circuitBreakerActive: breakerActive,
+      breakerReasons: Array.isArray(data?.breakerReasons)
+        ? data.breakerReasons.slice(-3)
+        : prev?.breakerReasons || [],
       panelId,
       walletId: data?.walletId || null,
       tabStatus: data?.tabStatus || 'unknown',
@@ -401,23 +518,105 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       `Circuit breaker activated for panel ${panelId}: ${data?.errors} errors`,
     );
 
+    const reasons: string[] = Array.isArray(data?.reasons)
+      ? data.reasons.map((r: unknown) => String(r).slice(0, 160)).slice(-3)
+      : [];
+
     // Update extension health
     const health = this.extensionHealth.get(panelId);
     if (health) {
       health.status = 'error';
       health.circuitBreakerActive = true;
+      health.breakerReasons = reasons;
     }
 
-    // Alert operators
+    // Alert operators (la web muestra un cartel fijo con esto)
     const opGateway = this.getOperatorGateway();
     if (opGateway) {
       opGateway.emitToAll('extension:circuit_breaker', {
         extensionId: panelId,
         active: data?.active,
         errors: data?.errors,
+        reasons,
         timestamp: new Date().toISOString(),
       });
     }
+
+    // Y por Telegram: el 2026-10-15 el freno estuvo activo todo el día sin que
+    // nadie lo viera. Es accionable (alguien tiene que mirar la PC del bot).
+    void this.alertBreakerByTelegram(panelId, reasons);
+  }
+
+  private async alertBreakerByTelegram(panelId: string, reasons: string[]) {
+    try {
+      let panelName = panelId;
+      try {
+        const panelsService = this.moduleRef.get(PanelsService, {
+          strict: false,
+        });
+        const panel = await panelsService.findOne(panelId);
+        if (panel?.name) panelName = panel.name;
+      } catch {
+        /* sin nombre: queda el id */
+      }
+      const telegram = this.moduleRef.get(TelegramService, { strict: false });
+      await telegram.alertBotStalled(
+        panelId,
+        `La extensión de <b>${panelName}</b> se pausó por errores seguidos: ese panel no carga nada hasta que alguien la reactive.` +
+          (reasons.length ? `\n\nÚltimo error: ${reasons[reasons.length - 1]}` : '') +
+          `\n\nRevisar la PC del bot (sesión del panel) y tocar <b>Reactivar</b> en la web de operadores.`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo avisar el freno por Telegram: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /** Último aviso de desafío por panel, para no repetirlo en cada intento. */
+  private readonly lastChallengeAlertAt = new Map<string, number>();
+  private static readonly CHALLENGE_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
+
+  /**
+   * El panel mostró un desafío de Cloudflare / captcha en la PC del bot. No se
+   * resuelve solo: avisa a los operadores (cartel + sonido en la web) para que
+   * alguien lo resuelva en esa PC. No va a Telegram (decisión del dueño).
+   */
+  @SubscribeMessage('extension:panel_challenge')
+  async handlePanelChallenge(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { challenge?: string; url?: string } | undefined,
+  ) {
+    const panelId = (client.handshake.query?.panelId as string) || 'unknown';
+    const challenge = String(data?.challenge || 'desconocido').slice(0, 40);
+    this.logger.warn(
+      `Panel ${panelId} shows a verification challenge (${challenge})`,
+    );
+
+    const now = Date.now();
+    const last = this.lastChallengeAlertAt.get(panelId) ?? 0;
+    if (now - last < BotGateway.CHALLENGE_ALERT_COOLDOWN_MS) return;
+    this.lastChallengeAlertAt.set(panelId, now);
+
+    let panelName = panelId;
+    try {
+      const panelsService = this.moduleRef.get(PanelsService, {
+        strict: false,
+      });
+      const panel = await panelsService.findOne(panelId);
+      if (panel?.name) panelName = panel.name;
+    } catch {
+      /* sin nombre: queda el id */
+    }
+
+    const opGateway = this.getOperatorGateway();
+    opGateway?.emitToAll('system_alert', {
+      type: 'panel_challenge',
+      panelId,
+      message: `${panelName}: el panel pide una verificación (${challenge}). Hay que resolverla a mano en la PC del bot; hasta entonces ese panel no carga.`,
+      severity: 'warning',
+      timestamp: new Date().toISOString(),
+    });
   }
 
   @SubscribeMessage('extension:selector_health')
@@ -522,6 +721,19 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // ==========================================
 
   /**
+   * Sockets de un panel, del más nuevo al más viejo.
+   *
+   * Tras un corte de red la extensión abre un socket nuevo mientras el viejo
+   * sigue en el mapa hasta que el ping lo da por muerto (~65 s). Elegir el más
+   * viejo mandaba la carga a uno que no contesta: 5 s de ACK perdidos, y si en
+   * realidad la había recibido, la carga quedaba corriendo en un socket que ya
+   * no reportaba (2026-10-13 16:08). El más nuevo es el que acaba de conectarse.
+   */
+  private botsNewestFirst(panelBots: Map<string, Socket>): [string, Socket][] {
+    return [...panelBots.entries()].reverse();
+  }
+
+  /**
    * Push job to bot for a specific panel.
    * Uses Socket.IO acknowledgement to confirm the bot received the job.
    * If no ACK within timeout, returns false so the job can be requeued.
@@ -557,9 +769,9 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Graceful degradation: if the panel service is down, fall through and try to dispatch.
     }
 
-    // Emit to ONE connected bot only (first connected).
+    // Emit to ONE connected bot only (the newest connected).
     // Sending to multiple bots would cause duplicate execution on the panel.
-    for (const [botId, bot] of panelBots) {
+    for (const [botId, bot] of this.botsNewestFirst(panelBots)) {
       if (bot.connected) {
         this.logger.log(
           `Pushing job ${job.id} to bot ${botId} (panel ${panelId}), waiting for ACK...`,
@@ -602,6 +814,7 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
           if (ackResult.acked) {
             this.markPanelBusy(panelId);
+            this.trackJobOnBot(botId, job);
             return true;
           }
           // ACK timeout — bot may have disconnected, try next bot
@@ -622,22 +835,115 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return false;
   }
 
+  /** El bot aceptó el job: queda anotado hasta que reporte resultado. */
+  private trackJobOnBot(botId: string, job: any) {
+    if (!job?.id) return;
+    const jobs = this.jobsByBot.get(botId) || new Map<string, string>();
+    jobs.set(job.id, job.type || 'LOAD_CREDITS');
+    this.jobsByBot.set(botId, jobs);
+  }
+
+  /**
+   * El job terminó (bien o mal). Lo llama `BotService` al recibir el resultado:
+   * a partir de acá, que el bot se desconecte ya no significa nada.
+   */
+  releaseJobTracking(jobId: string) {
+    this.requeueCount.delete(jobId);
+    for (const [botId, jobs] of this.jobsByBot) {
+      if (jobs.delete(jobId) && jobs.size === 0) {
+        this.jobsByBot.delete(botId);
+      }
+    }
+  }
+
+  /**
+   * El bot se fue con trabajo en la mano.
+   *
+   * Los jobs de sólo lectura vuelven a la cola en el acto —los toma otro bot, o
+   * el mismo cuando reconecte— en vez de morir por timeout cinco minutos
+   * después. Los que tocan fichas se dejan como están: los resuelve una persona.
+   */
+  private async requeueJobsOfDeadBot(botId: string) {
+    const jobs = this.jobsByBot.get(botId);
+    if (!jobs?.size) return;
+    this.jobsByBot.delete(botId);
+
+    for (const [jobId, type] of jobs) {
+      const alreadyRequeued = this.requeueCount.get(jobId) || 0;
+      if (alreadyRequeued >= BotGateway.MAX_REQUEUES_PER_JOB) {
+        this.logger.warn(
+          `Job ${jobId} ya se reencoló ${alreadyRequeued} vez/veces y volvió a caerse — se deja morir por timeout en vez de seguir tapando la cola.`,
+        );
+        continue;
+      }
+      if (!BotGateway.REQUEUE_SAFE_JOB_TYPES.has(type)) {
+        this.logger.warn(
+          `Bot ${botId} se desconectó con el job ${jobId} (${type}) sin reportar — NO se reencola solo: puede haberse ejecutado a medias.`,
+        );
+        continue;
+      }
+      try {
+        const { PrismaService } = require('../prisma/prisma.service');
+        const prisma = this.moduleRef.get(PrismaService, { strict: false });
+        // `updateMany` con el estado esperado: si el resultado llegó justo
+        // ahora y el job ya está COMPLETED, esto no toca nada.
+        const res = await prisma.job.updateMany({
+          where: { id: jobId, status: { in: ['PROCESSING', 'QUEUED'] } },
+          data: { status: 'QUEUED', startedAt: null },
+        });
+        if (res.count === 0) continue;
+
+        this.requeueCount.set(jobId, alreadyRequeued + 1);
+        this.logger.log(
+          `Job ${jobId} (${type}) devuelto a la cola: el bot ${botId} se desconectó sin reportar`,
+        );
+
+        const { JobsService } = require('../jobs/jobs.service');
+        const jobsService = this.moduleRef.get(JobsService, { strict: false });
+        // Sin await: el dispatch busca bot y puede tardar; la desconexión no
+        // tiene que quedar esperándolo.
+        void jobsService
+          ?.tryDispatchNextJob?.()
+          .catch((err: any) =>
+            this.logger.warn(
+              `No se pudo re-despachar el job ${jobId}: ${err?.message || err}`,
+            ),
+          );
+      } catch (err: any) {
+        this.logger.error(
+          `Fallo reencolando el job ${jobId} del bot caído ${botId}: ${err?.message || err}`,
+        );
+      }
+    }
+  }
+
   /**
    * Legacy compatibility — push to any connected bot (used during transition)
    */
-  async pushJobToBot(job: any): Promise<boolean> {
+  /**
+   * Devuelve el panel al que se despachó, no solo si se pudo despachar.
+   *
+   * Un job sin `panelId` (CREATE_USER, CHANGE_PASSWORD) igual termina corriendo
+   * en un panel concreto, y `pushJobToPanel` lo marca busy con ESE panel. Como
+   * la liberación al completar se hace por `job.panelId`, si el llamador no se
+   * entera de cuál fue, el panel queda ocupado para siempre y desaparece del
+   * discovery. El caller persiste el panelId con esto.
+   */
+  async pushJobToBot(job: any): Promise<{ pushed: boolean; panelId?: string }> {
     // If job has panelId, use panel-specific dispatch
     if (job.panelId) {
-      return this.pushJobToPanel(job.panelId, job);
+      const pushed = await this.pushJobToPanel(job.panelId, job);
+      return { pushed, panelId: job.panelId };
     }
     // Fallback: push to first available bot from any panel
     for (const [panelId, panelBots] of this.connectedBots) {
       if (panelBots.size > 0) {
-        return this.pushJobToPanel(panelId, job);
+        const pushed = await this.pushJobToPanel(panelId, job);
+        return { pushed, panelId: pushed ? panelId : undefined };
       }
     }
     this.logger.warn('No bots connected to push job to');
-    return false;
+    return { pushed: false };
   }
 
   // ==========================================
@@ -654,11 +960,24 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     taskId: string,
     targetUsername: string,
     excludePanelId?: string,
+    /**
+     * Paneles que no participan de la busqueda (`Panel.discoverable = false`).
+     * Siguen recibiendo jobs normalmente: lo unico que no hacen es aparecer
+     * como candidatos para un usuario que todavia no tiene panel.
+     */
+    excludePanelIds?: Set<string>,
   ): string[] {
     const sentTo: string[] = [];
 
     for (const [panelId, panelBots] of this.connectedBots) {
       if (panelBots.size === 0) continue;
+
+      if (excludePanelIds?.has(panelId)) {
+        this.logger.log(
+          `Skipping discovery for panel ${panelId} — no participa de la busqueda`,
+        );
+        continue;
+      }
 
       if (excludePanelId && panelId === excludePanelId) {
         this.logger.log(
@@ -675,10 +994,10 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
         continue;
       }
 
-      // Find first CONNECTED socket (cleanup zombies)
+      // Find newest CONNECTED socket (cleanup zombies)
       let bot: any = null;
       const deadSocketIds: string[] = [];
-      for (const [socketId, socket] of panelBots) {
+      for (const [socketId, socket] of this.botsNewestFirst(panelBots)) {
         if (socket.connected) {
           bot = socket;
           break;
@@ -741,10 +1060,10 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
-    // Find first CONNECTED socket (cleanup zombies)
+    // Find newest CONNECTED socket (cleanup zombies)
     let bot: any = null;
     const deadIds: string[] = [];
-    for (const [socketId, socket] of panelBots) {
+    for (const [socketId, socket] of this.botsNewestFirst(panelBots)) {
       if (socket.connected) {
         bot = socket;
         break;
@@ -768,6 +1087,47 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     bot.emit('create_user', data);
     this.logger.log(
       `Sent create_user to panel ${panelId} for "${data.targetUsername}" (task ${data.taskId})`,
+    );
+    return true;
+  }
+
+  /**
+   * Re-send search_user to a SINGLE panel's bot. Used when a panel reconnects
+   * mid-discovery: it may have received the original search_user and then flapped
+   * (SW suspension) before answering, leaving discovery waiting forever. This lets
+   * us re-ask that specific panel without re-querying panels that already answered.
+   * Returns true if the command was pushed to a live, idle socket.
+   */
+  pushDiscoveryToPanel(
+    panelId: string,
+    data: { taskId: string; targetUsername: string },
+  ): boolean {
+    const panelBots = this.connectedBots.get(panelId);
+    if (!panelBots || panelBots.size === 0) return false;
+
+    // Skip busy panels — don't interrupt active jobs
+    if (this.busyPanels.has(panelId)) return false;
+
+    // Find newest CONNECTED socket (cleanup zombies)
+    let bot: any = null;
+    const deadIds: string[] = [];
+    for (const [socketId, socket] of this.botsNewestFirst(panelBots)) {
+      if (socket.connected) {
+        bot = socket;
+        break;
+      } else {
+        deadIds.push(socketId);
+      }
+    }
+    for (const deadId of deadIds) {
+      panelBots.delete(deadId);
+      this.socketToPanelId.delete(deadId);
+    }
+    if (!bot) return false;
+
+    bot.emit('search_user', data);
+    this.logger.log(
+      `Re-sent search_user to reconnected panel ${panelId} for "${data.targetUsername}" (task ${data.taskId})`,
     );
     return true;
   }
@@ -927,7 +1287,9 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return Promise.reject(new Error(`No bot connected for panel ${panelId}`));
     }
 
-    const [, bot] = panelBots.entries().next().value!;
+    const [, bot] =
+      this.botsNewestFirst(panelBots).find(([, sock]) => sock.connected) ??
+      this.botsNewestFirst(panelBots)[0];
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -997,6 +1359,11 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   isPanelBusy(panelId: string): boolean {
     return this.busyPanels.has(panelId);
+  }
+
+  /** Paneles marcados busy. Lo usa la reconciliación periódica de JobsService. */
+  getBusyPanelIds(): string[] {
+    return [...this.busyPanels];
   }
 
   // ==========================================

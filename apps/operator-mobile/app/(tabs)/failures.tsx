@@ -1,9 +1,11 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, Image } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import colors from '@/constants/colors';
+import { useFirstLoad } from '@/hooks/useFirstLoad';
+import { EmptyState } from '@/components/ui';
 import { useOperatorStore, isFailureResolved } from '@/stores/operator.store';
 import { getSocket } from '@/services/socket';
 import { useExport } from '@/hooks/useExport';
@@ -21,6 +23,7 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
 ];
 
 export default function FailuresScreen() {
+  const { isLoadingFirst, isConnected } = useFirstLoad();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const failures = useOperatorStore((s) => s.failures);
@@ -41,10 +44,20 @@ export default function FailuresScreen() {
     setRefreshing(true);
     const socket = getSocket();
     if (socket?.connected) {
-      socket.emit('get_initial_data');
+      // The backend answers get_initial_data via ACK callback, it does NOT
+      // broadcast an `initial_data` event — so a fire-and-forget emit did
+      // nothing and the Fallos list never refreshed. Use the ack callback.
+      socket.emit('get_initial_data', {}, (response: any) => {
+        if (response?.success && response?.data) {
+          useOperatorStore.getState().setInitialData(response.data);
+        }
+        setRefreshing(false);
+      });
+      // Safety timeout in case no ack arrives.
+      setTimeout(() => setRefreshing(false), 8000);
+    } else {
+      setRefreshing(false);
     }
-    // Give the store a moment to update
-    setTimeout(() => setRefreshing(false), 1000);
   }, []);
 
   const handleFailurePress = useCallback(
@@ -54,21 +67,7 @@ export default function FailuresScreen() {
     [router],
   );
 
-  const handleQuickApprove = useCallback(async (failure: any) => {
-    try {
-      await emitWithTimeout('approve_failure', { failureId: failure.id }, 15000);
-      hapticSuccess();
-      toast.success('Aprobado');
-    } catch (err: any) {
-      hapticError();
-      toast.error(err?.message || 'Error al aprobar');
-    }
-  }, []);
 
-  const handleQuickReject = useCallback((failure: any) => {
-    // Navigate to detail view for proper rejection with reason
-    router.push(`/failure/${failure.id}`);
-  }, [router]);
 
   const renderItem = useCallback(
     ({ item }: { item: any }) => (
@@ -91,7 +90,7 @@ export default function FailuresScreen() {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Image source={require('@/assets/icon.png')} style={{ width: 32, height: 32, borderRadius: 8 }} />
+            <Image source={require('@/assets/logo.png')} style={{ width: 32, height: 32, borderRadius: 8 }} />
             <Text style={styles.headerTitle}>Fallos</Text>
           </View>
           <Text style={styles.headerSubtitle}>
@@ -153,6 +152,9 @@ export default function FailuresScreen() {
           />
         }
         ListEmptyComponent={
+          isLoadingFirst ? (
+            <EmptyState loading connected={isConnected} title="" />
+          ) : (
           <View style={styles.emptyState}>
             <View style={styles.emptyIconContainer}>
               <Ionicons
@@ -174,6 +176,7 @@ export default function FailuresScreen() {
                 : 'Los fallos apareceran aqui cuando ocurran'}
             </Text>
           </View>
+          )
         }
       />
     </View>

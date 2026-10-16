@@ -1,217 +1,89 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useOperatorStore } from '@/stores/operator.store';
-import colors from '@/constants/colors';
+import { useNav, type NavItem } from '@/hooks/useNav';
+import { colors, space, radius, text } from '@/constants/theme';
 
-interface MenuItemProps {
-  icon: string;
-  label: string;
-  subtitle: string;
-  onPress: () => void;
-  badge?: number;
-}
-
-function MenuItem({ icon, label, subtitle, onPress, badge }: MenuItemProps) {
+/**
+ * "Más" — sólo existe en celular.
+ *
+ * La tab bar horizontal no entra más de cuatro items legibles: con las nueve
+ * pantallas quedaban a 43px cada una y la etiqueta recortada a 33px de ancho.
+ * Acá van las secundarias.
+ *
+ * La lista sale de `useNav()`, la misma que arma la sidebar de escritorio. No
+ * se escribe a mano: la versión anterior de este archivo ofrecía Pagos, Jobs,
+ * Solicitudes y Paneles —rutas que ya no están en la navegación— y no ofrecía
+ * ninguna de las actuales.
+ */
+function Item({ item, onPress }: { item: NavItem; onPress: () => void }) {
   return (
-    <TouchableOpacity style={styles.menuItem} onPress={onPress} activeOpacity={0.7}>
-      <View style={styles.menuIconContainer}>
-        <Ionicons name={icon as any} size={22} color={colors.primary} />
+    <Pressable style={s.item} onPress={onPress}>
+      <View style={s.icon}>
+        <Ionicons name={item.icon} size={20} color={colors.primary} />
       </View>
-      <View style={styles.menuTextContainer}>
-        <Text style={styles.menuLabel}>{label}</Text>
-        <Text style={styles.menuSubtitle}>{subtitle}</Text>
-      </View>
-      {badge && badge > 0 ? (
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
+      <Text style={s.label}>{item.label}</Text>
+      {!!item.badge && (
+        <View style={s.badge}>
+          <Text style={s.badgeText}>{item.badge > 99 ? '99+' : item.badge}</Text>
         </View>
-      ) : null}
+      )}
       <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
 export default function MoreScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const pendingPayments = useOperatorStore((s) =>
-    s.outboundPayments.filter((p: any) => p.status === 'PENDING' || p.status === 'CONFIRMED').length
-  );
+  const { secondary } = useNav();
 
   return (
-    <ScrollView style={[styles.container, { paddingTop: insets.top + 8 }]} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <Image source={require('@/assets/icon.png')} style={styles.headerIcon} />
-        <View>
-          <Text style={styles.headerTitle}>Tio Rico</Text>
-          <Text style={styles.headerSubtitle}>Mas opciones</Text>
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Operaciones</Text>
-        <MenuItem
-          icon="cash-outline"
-          label="Pagos"
-          subtitle="Pagos salientes de premios"
-          onPress={() => router.push('/(tabs)/payments')}
-          badge={pendingPayments}
-        />
-        <MenuItem
-          icon="briefcase-outline"
-          label="Jobs"
-          subtitle="Cola de carga de créditos"
-          onPress={() => router.push('/(tabs)/jobs')}
-        />
-        <MenuItem
-          icon="documents-outline"
-          label="Solicitudes"
-          subtitle="Historial completo de pedidos"
-          onPress={() => router.push('/(tabs)/requests')}
-        />
-        <MenuItem
-          icon="time-outline"
-          label="Actividad"
-          subtitle="Historial de acciones del sistema"
-          onPress={() => router.push('/(tabs)/activity')}
-        />
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Gestion</Text>
-        <MenuItem
-          icon="wallet-outline"
-          label="Wallets"
-          subtitle="Billeteras de pago configuradas"
-          onPress={() => router.push('/(tabs)/wallets')}
-        />
-        <MenuItem
-          icon="people-outline"
-          label="Usuarios"
-          subtitle="Clientes registrados"
-          onPress={() => router.push('/(tabs)/users')}
-        />
-        <MenuItem
-          icon="cloud-upload-outline"
-          label="Pre-cargar usuarios"
-          subtitle="Importar CSV / Google Contacts"
-          onPress={() => router.push('/(tabs)/preload-users')}
-        />
-        <MenuItem
-          icon="desktop-outline"
-          label="Paneles"
-          subtitle="Gestionar paneles del casino"
-          onPress={() => router.push('/(tabs)/panels')}
-        />
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Sistema</Text>
-        <MenuItem
-          icon="extension-puzzle-outline"
-          label="Extensiones"
-          subtitle="Monitoreo de bots y verificadores"
-          onPress={() => router.push('/(tabs)/extensions')}
-        />
-        <MenuItem
-          icon="settings-outline"
-          label="Configuracion"
-          subtitle="Conexion, notificaciones y ajustes"
-          onPress={() => router.push('/(tabs)/settings')}
-        />
+    <ScrollView
+      style={s.screen}
+      contentContainerStyle={[s.content, { paddingTop: insets.top + space.lg }]}
+    >
+      <Text style={s.title}>Más</Text>
+      <View style={s.list}>
+        {secondary.map((item) => (
+          <Item
+            key={item.route}
+            item={item}
+            onPress={() => router.push(`/(tabs)/${item.route}` as any)}
+          />
+        ))}
       </View>
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    paddingBottom: 100,
-  },
-  header: {
+const s = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.background },
+  content: { paddingHorizontal: space.lg, paddingBottom: space.xl },
+  title: { ...text.display, color: colors.textPrimary, marginBottom: space.lg },
+  list: { gap: space.sm },
+  item: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    gap: 12,
+    gap: space.md,
+    backgroundColor: colors.cardBackground,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.lg,
   },
-  headerIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: colors.primary,
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    paddingHorizontal: 20,
-    marginBottom: 8,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.separator,
-  },
-  menuIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: colors.primaryGlow,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
-  },
-  menuTextContainer: {
-    flex: 1,
-  },
-  menuLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  menuSubtitle: {
-    fontSize: 12,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
+  icon: { width: 28, alignItems: 'center' },
+  label: { ...text.body, color: colors.textPrimary, flex: 1 },
   badge: {
-    backgroundColor: colors.unreadBadge,
-    borderRadius: 10,
-    minWidth: 22,
-    height: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
+    minWidth: 20,
     paddingHorizontal: 6,
-    marginRight: 8,
+    paddingVertical: 1,
+    borderRadius: radius.full,
+    backgroundColor: colors.unreadBadge,
+    alignItems: 'center',
   },
-  badgeText: {
-    color: colors.white,
-    fontSize: 11,
-    fontWeight: '700',
-  },
+  badgeText: { ...text.caption, color: colors.white, fontWeight: '700' },
 });

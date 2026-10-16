@@ -56,6 +56,12 @@ const PRIZE_PRESET_AMOUNTS = [3000, 5000, 10000, 25000];
 const MIN_PRIZE_AMOUNT = 3000;
 const CONVERSATION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
+// Polling recovery. The 409 race with the outgoing instance during a deploy clears
+// within seconds, so the first retries land fast; the backoff then stretches out in
+// case something is genuinely wrong (5s, 10s, 20s, 40s, 80s, 160s ≈ 5 min total).
+const TELEGRAM_POLLING_RETRY_BASE_MS = 5_000;
+const TELEGRAM_POLLING_MAX_RETRIES = 6;
+
 // ==========================================
 // SERVICE
 // ==========================================
@@ -67,6 +73,8 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   private enabled = false;
   private webhookSecret: string;
   private timeoutInterval: ReturnType<typeof setInterval> | null = null;
+  private pollingRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private shuttingDown = false;
 
   constructor(
     private readonly configService: ConfigService,
@@ -136,15 +144,50 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('Telegram user bot initialized');
   }
 
-  private startPolling() {
-    if (!this.bot) return;
-    this.bot.start({
-      onStart: () => this.logger.log('Telegram bot polling started'),
-      drop_pending_updates: true,
-    });
+  private startPolling(attempt = 0) {
+    if (!this.bot || this.shuttingDown) return;
+    // bot.start() runs the long-polling loop and returns a promise that rejects
+    // on a fatal polling error. A 409 "Conflict: terminated by other getUpdates
+    // request" happens briefly during zero-downtime deploys, when the outgoing
+    // instance is still polling as the new one starts. Without this .catch() it
+    // surfaces as an Unhandled Rejection that can crash the whole process.
+    this.bot
+      .start({
+        onStart: () => this.logger.log('Telegram bot polling started'),
+        drop_pending_updates: true,
+      })
+      .catch((err: any) => {
+        this.logger.error(`Telegram polling stopped: ${err?.message ?? err}`);
+
+        // Retry with backoff. Logging alone left the bot dead until the next
+        // restart: on every deploy the outgoing instance wins the 409 race, the
+        // new one gave up after a single attempt, and operator alerts silently
+        // stopped arriving with nothing in the logs to say so.
+        if (this.shuttingDown) return;
+        if (attempt >= TELEGRAM_POLLING_MAX_RETRIES) {
+          this.logger.error(
+            `Telegram polling gave up after ${attempt} retries — operator alerts are DOWN until restart`,
+          );
+          return;
+        }
+        const delayMs = TELEGRAM_POLLING_RETRY_BASE_MS * 2 ** attempt;
+        this.logger.warn(
+          `Retrying Telegram polling in ${delayMs / 1000}s (attempt ${attempt + 1}/${TELEGRAM_POLLING_MAX_RETRIES})`,
+        );
+        this.pollingRetryTimer = setTimeout(() => {
+          this.startPolling(attempt + 1);
+        }, delayMs);
+      });
   }
 
   async onModuleDestroy() {
+    // Set first: stops a pending retry from resurrecting polling mid-shutdown,
+    // which would re-create the very 409 race on the incoming instance.
+    this.shuttingDown = true;
+    if (this.pollingRetryTimer) {
+      clearTimeout(this.pollingRetryTimer);
+      this.pollingRetryTimer = null;
+    }
     if (this.timeoutInterval) {
       clearInterval(this.timeoutInterval);
     }
@@ -1262,7 +1305,8 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     const labels: Record<string, string> = {
       PENDING_PROOF: '📤 Esperando comprobante',
       VALIDATING: '🔍 Validando',
-      PENDING_MP_VERIFICATION: '🏦 Verificando pago',
+      // Estado legado: ya no se entra acá, sólo lo tienen requests viejos colgados.
+      PENDING_MP_VERIFICATION: '⚠️ En revisión',
       VALIDATION_FAILED: '⚠️ En revisión',
       APPROVED: '✅ Aprobada',
       PROCESSING: '🔄 Procesando',
@@ -1441,6 +1485,11 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     keyboard?: InlineKeyboard,
   ) {
     if (!this.bot || !this.enabled) return;
+    // Some job events fire without a userId (e.g. WITHDRAW_CHIPS / CREATE_USER
+    // completions emit only { jobId, panelId }). Guard against it — otherwise
+    // findUnique({ where: { id: undefined } }) throws a Prisma validation error
+    // and logs a spurious "TG notification failed for user undefined".
+    if (!userId) return;
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },

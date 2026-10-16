@@ -13,8 +13,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useOperatorStore, DEFAULT_QUICK_REPLIES } from '@/stores/operator.store';
+import { useAuthStore } from '@/stores/auth.store';
 import { getSocket, emitWithTimeout, isConnected } from '@/services/socket';
 import { useNetwork } from '@/hooks/useNetwork';
 import ChatBubble from '@/components/ChatBubble';
@@ -49,6 +50,8 @@ export default function ChatDetailScreen() {
   const hasMore = useOperatorStore((s) => s.chatMessageHasMore[chatId!] ?? true);
   const cursor = useOperatorStore((s) => s.chatMessageCursors[chatId!]);
   const setSelectedChat = useOperatorStore((s) => s.setSelectedChat);
+  const markChatRead = useOperatorStore((s) => s.markChatRead);
+  const socketReady = useAuthStore((s) => s.isConnected);
   const setChatMessages = useOperatorStore((s) => s.setChatMessages);
   const appendOlderMessages = useOperatorStore((s) => s.appendOlderMessages);
   const addMessage = useOperatorStore((s) => s.addMessage);
@@ -56,6 +59,7 @@ export default function ChatDetailScreen() {
 
   // Local state
   const [isLoadingInitial, setIsLoadingInitial] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [userTyping, setUserTyping] = useState(false);
   const [panelInfo, setPanelInfo] = useState<{
@@ -78,9 +82,14 @@ export default function ChatDetailScreen() {
 
     setSelectedChat(chatId);
 
-    // Mark as read via socket
-    const socket = getSocket();
-    if (socket?.connected) {
+    // Marcar leído.
+    //
+    // El store se actualiza acá mismo y no esperando el broadcast `messages:read`
+    // del servidor: si ese evento no vuelve, el chat quedaba con el globo de
+    // "sin leer" para siempre, y la bandeja seguía mostrándolo como pendiente
+    // aunque el operador ya lo hubiera abierto y contestado.
+    markChatRead(chatId);
+    if (socketReady) {
       emitWithTimeout('mark_read', { chatId }).catch(() => {});
     }
 
@@ -92,7 +101,7 @@ export default function ChatDetailScreen() {
         typingTimeoutRef.current = null;
       }
     };
-  }, [chatId, setSelectedChat]);
+  }, [chatId, setSelectedChat, socketReady, markChatRead]);
 
   // ---- Load panel-game credentials for this user (support visibility) ----
   useEffect(() => {
@@ -118,10 +127,16 @@ export default function ChatDetailScreen() {
   }, [chat?.user?.id]);
 
   // ---- Load initial messages ----
+  // Espera a que el socket esté conectado.
+  //
+  // Entrando por link directo este efecto corría al montar, ~2s antes de que el
+  // socket conectara: el emit fallaba, el catch lo tragaba y el chat quedaba en
+  // "No hay mensajes aún" para siempre, porque nadie reintentaba. Desde la
+  // bandeja no se notaba, ahí el socket ya venía conectado.
   useEffect(() => {
-    if (!chatId) return;
+    if (!chatId || !socketReady) return;
     loadInitialMessages();
-  }, [chatId]);
+  }, [chatId, socketReady]);
 
   // ---- Socket event listeners for this chat ----
   useEffect(() => {
@@ -131,6 +146,19 @@ export default function ChatDetailScreen() {
     const handleNewMessage = (data: any) => {
       if (!data || data.chatId !== chatIdRef.current) return;
       addMessage(data.chatId, data.message || data);
+
+      // Marcar leído lo que entra con el chat ABIERTO.
+      //
+      // El `mark_read` del montaje sólo cubre lo que ya estaba. Un mensaje que
+      // llega mientras el operador lo está leyendo quedaba `isRead: false` en la
+      // DB: el contador local no subía (el chat está seleccionado), pero al
+      // recargar volvía el globito, y en las pantallas de los demás aparecía
+      // como pendiente un chat que alguien estaba atendiendo.
+      const isFromUser = data.type === 'USER' || data.senderType === 'USER';
+      if (isFromUser) {
+        emitWithTimeout('mark_read', { chatId: data.chatId }).catch(() => {});
+      }
+
       // Auto-scroll to bottom on new message
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
@@ -183,8 +211,12 @@ export default function ChatDetailScreen() {
       // Messages come newest-first from backend; store in chronological order
       const chronological = [...msgs].reverse();
       setChatMessages(chatId, chronological, nextCursor, moreAvailable);
-    } catch (err) {
+      setLoadError(null);
+    } catch (err: any) {
+      // Un chat vacío y un chat que no cargó se veían igual ("No hay mensajes
+      // aun"): el operador respondía sin haber leído lo que el usuario pidió.
       console.warn('[Chat] Failed to load messages:', err);
+      setLoadError(err?.message || 'No se pudieron cargar los mensajes');
     } finally {
       setIsLoadingInitial(false);
     }
@@ -226,7 +258,7 @@ export default function ChatDetailScreen() {
 
       if (!isConnected()) {
         Alert.alert('Sin conexion', 'No se puede enviar el mensaje. Verifica tu conexion.');
-        return;
+        return false;
       }
 
       try {
@@ -237,13 +269,15 @@ export default function ChatDetailScreen() {
 
         if (response?.error || response?.success === false) {
           hapticError();
-          toast.error(response?.error || 'No se pudo enviar el mensaje');
-        } else {
-          hapticLight();
+          toast.error(response?.error || 'No se pudo enviar el mensaje — te lo dejo escrito para reintentar');
+          return false;
         }
+        hapticLight();
+        return true;
       } catch (err: any) {
         hapticError();
-        toast.error(err?.message || 'No se pudo enviar el mensaje');
+        toast.error((err?.message || 'No se pudo enviar el mensaje') + ' — te lo dejo escrito para reintentar');
+        return false;
       }
     },
     [chatId],
@@ -334,9 +368,16 @@ export default function ChatDetailScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerCenter}>
-            <Text style={styles.headerUsername} numberOfLines={1}>
-              {username}
-            </Text>
+            {/* El nombre lleva a su ficha: desde el chat es donde más seguido
+                hace falta cargarle algo o mirar qué pasó con su última carga. */}
+            <TouchableOpacity
+              onPress={() => chat?.user?.id && router.push(`/user/${chat.user.id}` as any)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.headerUsername} numberOfLines={1}>
+                {username}
+              </Text>
+            </TouchableOpacity>
             {userTyping && (
               <Text style={styles.typingText}>escribiendo...</Text>
             )}
@@ -434,9 +475,23 @@ export default function ChatDetailScreen() {
             showsVerticalScrollIndicator={false}
             ListEmptyComponent={
               <View style={styles.emptyMessages}>
-                <Text style={styles.emptyMessagesText}>
-                  No hay mensajes aun
-                </Text>
+                {loadError ? (
+                  <>
+                    <Text style={styles.emptyMessagesText}>
+                      No se pudo cargar la conversacion
+                    </Text>
+                    <Text style={styles.emptyMessagesHint}>
+                      Puede haber mensajes que no estas viendo. No respondas sin leerlos.
+                    </Text>
+                    <TouchableOpacity onPress={loadInitialMessages} style={styles.retryChat}>
+                      <Text style={styles.retryChatText}>Reintentar</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <Text style={styles.emptyMessagesText}>
+                    No hay mensajes aun
+                  </Text>
+                )}
               </View>
             }
           />
@@ -459,6 +514,7 @@ export default function ChatDetailScreen() {
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
+            style={styles.quickRepliesBar}
             contentContainerStyle={styles.quickRepliesContainer}
             keyboardShouldPersistTaps="handled"
           >
@@ -647,6 +703,28 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 15,
   },
+  emptyMessagesHint: {
+    color: colors.textMuted,
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 8,
+    paddingHorizontal: 32,
+    lineHeight: 18,
+  },
+  retryChat: {
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.cardBackground,
+  },
+  retryChatText: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
 
   // Typing indicator bar
   typingBar: {
@@ -684,9 +762,20 @@ const styles = StyleSheet.create({
   },
 
   // Quick replies
+  //
+  // Un ScrollView horizontal sin alto explicito, metido en una columna flex,
+  // se colapsa en web: las chips quedaban cortadas a la mitad detras del input.
+  quickRepliesBar: {
+    flexGrow: 0,
+    flexShrink: 0,
+    height: 52,
+    backgroundColor: colors.backgroundSecondary,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
   quickRepliesContainer: {
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: colors.backgroundSecondary,
+    alignItems: 'center',
+    gap: 8,
   },
 });

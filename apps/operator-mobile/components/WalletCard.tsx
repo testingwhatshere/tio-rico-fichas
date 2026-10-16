@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import colors from '@/constants/colors';
+import { CopyableText } from '@/components/Copyable';
 import { parseAmount, formatAmount } from '@/utils/amount';
 
 interface WalletCardProps {
@@ -82,9 +83,13 @@ export default function WalletCard({ wallet, onSelect, onEdit, onEmpty, onDelete
           <Text style={styles.identifierLabel}>
             {wallet.type === 'MERCADOPAGO' ? 'Alias' : wallet.type === 'CBU' ? 'CBU' : 'CVU'}
           </Text>
-          <Text style={styles.identifierValue} numberOfLines={1} selectable>
-            {displayIdentifier}
-          </Text>
+          {/* La billetera propia: el operador la pega cuando le pasa los datos
+              de cobro a un cliente. */}
+          <CopyableText
+            value={displayIdentifier}
+            label={wallet.type === 'MERCADOPAGO' ? 'Alias' : wallet.type === 'CBU' ? 'CBU' : 'CVU'}
+            style={styles.identifierValue}
+          />
         </View>
       )}
 

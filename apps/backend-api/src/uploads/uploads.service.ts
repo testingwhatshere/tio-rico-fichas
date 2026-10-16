@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import { PrismaService } from '../prisma/prisma.service';
 import { FILE_SIZE_LIMIT_BYTES } from '../common/constants/timeouts';
+import { toDeliverableProofUrl } from '../common/utils/proof-url';
 
 export interface UploadedFile {
   id: string;
@@ -354,32 +355,11 @@ export class UploadsService {
   }
 
   /**
-   * Normalize a Cloudinary URL so PDFs are delivered as a JPG of the first page.
-   * Cloudinary's "Restricted media types" setting blocks delivery of raw PDFs (returns 401),
-   * but allows transformation results. Inserting `f_jpg,pg_1` after `/upload/` makes
-   * Cloudinary render the PDF's first page as JPEG, which always succeeds.
-   *
-   * Idempotent: if the URL already contains the transformation, it's returned unchanged.
-   * For non-PDF URLs or non-Cloudinary URLs, returns the input as-is.
+   * Normaliza un URL de Cloudinary para que los PDFs se entreguen como JPG de la
+   * primera pagina. La logica vive en `common/utils/proof-url.ts` para que los
+   * gateways y services que no inyectan este service tambien puedan usarla.
    */
   toDeliverableUrl(url: string, mimeType?: string): string {
-    if (!url || typeof url !== 'string') return url;
-    if (!url.includes('res.cloudinary.com')) return url;
-
-    const isPdf =
-      mimeType === 'application/pdf' ||
-      url.toLowerCase().endsWith('.pdf') ||
-      url.includes('/raw/upload/');
-    if (!isPdf) return url;
-
-    if (url.includes('/f_jpg,pg_1/') || url.includes('/pg_1,f_jpg/')) {
-      return url;
-    }
-
-    // Legacy assets uploaded with resource_type='raw' need both the resource_type swap
-    // AND the transformation; assets uploaded as 'image' just need the transformation.
-    let out = url.replace('/raw/upload/', '/image/upload/');
-    out = out.replace('/image/upload/', '/image/upload/f_jpg,pg_1/');
-    return out;
+    return toDeliverableProofUrl(url, mimeType);
   }
 }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import colors from '@/constants/colors';
+import { CopyButton } from '@/components/Copyable';
 
 interface ChatListItemProps {
   chat: any;
@@ -90,6 +91,9 @@ export default function ChatListItem({ chat, onPress }: ChatListItemProps) {
           >
             {username}
           </Text>
+          {/* El ícono va aparte del texto: tocar la fila abre el chat, que es
+              lo que el operador quiere el 95% de las veces. */}
+          <CopyButton value={username} label="Usuario" size={12} />
           <Text style={[styles.timestamp, unreadCount > 0 && styles.timestampUnread]}>
             {timestamp}
           </Text>

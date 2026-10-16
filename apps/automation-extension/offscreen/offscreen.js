@@ -10,3 +10,9 @@ setInterval(() => {
     // SW might be restarting — ignore errors
   });
 }, KEEPALIVE_INTERVAL_MS);
+
+// El service worker no recibe los eventos de red del navegador; este documento
+// sí. Cuando vuelve la conexión le avisa para que reconecte ya.
+window.addEventListener('online', () => {
+  chrome.runtime.sendMessage({ type: 'NETWORK_ONLINE' }).catch(() => {});
+});

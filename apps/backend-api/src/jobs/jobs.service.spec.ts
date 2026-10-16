@@ -112,7 +112,7 @@ describe('JobsService', () => {
 
     botGateway = {
       isAnyBotConnected: jest.fn().mockReturnValue(false),
-      pushJobToBot: jest.fn().mockReturnValue(true),
+      pushJobToBot: jest.fn().mockResolvedValue({ pushed: true }),
       getConnectedPanelIds: jest.fn().mockReturnValue([]),
       isBotConnectedForPanel: jest.fn().mockReturnValue(false),
       pushJobToPanel: jest.fn().mockResolvedValue(true),
@@ -340,7 +340,7 @@ describe('JobsService', () => {
       prisma.$transaction.mockResolvedValue(claimedJob);
 
       botGateway.isAnyBotConnected.mockReturnValue(true);
-      botGateway.pushJobToBot.mockReturnValue(true);
+      botGateway.pushJobToBot.mockResolvedValue({ pushed: true });
 
       const result = await service.tryDispatchNextJob();
 
@@ -442,7 +442,7 @@ describe('JobsService', () => {
       };
       prisma.$transaction.mockResolvedValue(claimedJob);
       botGateway.isAnyBotConnected.mockReturnValue(true);
-      botGateway.pushJobToBot.mockReturnValue(false); // push failed (no ACK or rejected)
+      botGateway.pushJobToBot.mockResolvedValue({ pushed: false }); // push failed (no ACK or rejected)
 
       const result = await service.tryDispatchNextJob();
 

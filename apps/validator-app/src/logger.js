@@ -1,10 +1,29 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const { app } = require('electron');
+
+/**
+ * Directorio donde escribir los logs.
+ *
+ * Dentro de la app es el userData de Electron. Fuera (las herramientas de
+ * tools/, que cargan el pipeline OCR sin levantar Electron) no hay userData:
+ * ahí alcanza con un directorio temporal, porque esos logs no se leen.
+ */
+function resolveLogsDir() {
+  try {
+    const { app } = require('electron');
+    if (app && typeof app.getPath === 'function') {
+      return path.join(app.getPath('userData'), 'logs');
+    }
+  } catch (_) {
+    /* sin Electron */
+  }
+  return path.join(os.tmpdir(), 'validator-app-logs');
+}
 
 class Logger {
   constructor() {
-    this.logsDir = path.join(app.getPath('userData'), 'logs');
+    this.logsDir = resolveLogsDir();
     this.ensureLogsDir();
     this.currentLogFile = this.getLogFileName();
     this.backendUrl = null;
@@ -20,8 +39,23 @@ class Logger {
     this.isFlushing = false;
     this.consecutiveFlushFailures = 0;
 
+    // Modo servidor (headless.js): una línea JSON por evento en stdout (la recoge
+    // Render) y sin archivos (el disco del contenedor es efímero).
+    this.jsonStdout = false;
+    this.writeFiles = true;
+
     // Start flush timer
     this.startFlushTimer();
+  }
+
+  configure({ jsonStdout, writeFiles, logsDir } = {}) {
+    if (typeof jsonStdout === 'boolean') this.jsonStdout = jsonStdout;
+    if (typeof writeFiles === 'boolean') this.writeFiles = writeFiles;
+    if (logsDir) {
+      this.logsDir = logsDir;
+      if (this.writeFiles) this.ensureLogsDir();
+      this.currentLogFile = this.getLogFileName();
+    }
   }
 
   startFlushTimer() {
@@ -29,6 +63,8 @@ class Logger {
       clearInterval(this.flushTimer);
     }
     this.flushTimer = setInterval(() => this.flushLogs(), this.flushIntervalMs);
+    // Que el envío de logs no mantenga vivo el proceso por sí solo.
+    if (typeof this.flushTimer.unref === 'function') this.flushTimer.unref();
   }
 
   stopFlushTimer() {
@@ -65,6 +101,7 @@ class Logger {
   }
 
   writeToFile(entry) {
+    if (!this.writeFiles) return;
     try {
       // Check if we need a new log file (new day)
       const expectedFile = this.getLogFileName();
@@ -105,14 +142,16 @@ class Logger {
     this.logBuffer = [];
 
     try {
-      await fetch(`${this.backendUrl}/api/validator/logs/batch`, {
+      const resp = await fetch(`${this.backendUrl}/api/validator/logs/batch`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Validator-API-Key': this.apiKey,
         },
         body: JSON.stringify({ logs: logsToSend }),
+        signal: AbortSignal.timeout(10_000),
       });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
       // On success, reset backoff
       if (this.consecutiveFlushFailures > 0) {
@@ -159,6 +198,13 @@ class Logger {
 
     // Send to backend (non-blocking)
     this.sendToBackend(entry);
+
+    if (this.jsonStdout) {
+      try {
+        process.stdout.write(JSON.stringify(entry) + '\n');
+      } catch (_) {}
+      return entry;
+    }
 
     // Console output
     const color = {
@@ -216,6 +262,12 @@ class Logger {
     const level = result.isValid ? 'SUCCESS' : 'WARN';
     return this.log(level, 'VALIDATION', `Validation completed: ${result.isValid ? 'APPROVED' : 'REJECTED'}`, {
       id,
+      requestId: result.requestId,
+      durationMs: result.durationMs,
+      validationMethod: result.validationMethod,
+      ocrPasses: result.ocrPasses,
+      ocrTruncated: result.ocrTruncated,
+      rssMb: result.rssMb,
       isValid: result.isValid,
       confidence: result.confidence,
       extractedAmount: result.extractedAmount,

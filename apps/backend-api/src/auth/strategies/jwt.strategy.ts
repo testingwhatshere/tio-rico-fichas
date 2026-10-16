@@ -23,7 +23,21 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
+  /**
+   * Cada request HTTP autenticado buscaba al usuario en la base (~4.500 por
+   * dia contra Supabase, que cobra cada viaje). Se reusa 30 s: es lo maximo
+   * que tarda en hacer efecto desactivar a alguien o cambiarle el alias.
+   */
+  private static readonly USER_TTL_MS = 30_000;
+  private static readonly userCache = new Map<
+    string,
+    { at: number; user: CurrentUserPayload }
+  >();
+
   async validate(payload: JwtPayload): Promise<CurrentUserPayload> {
+    const hit = JwtStrategy.userCache.get(payload.sub);
+    if (hit && Date.now() - hit.at < JwtStrategy.USER_TTL_MS) return hit.user;
+
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       select: {
@@ -41,7 +55,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     // Return CurrentUserPayload - must include both sub and id
-    return {
+    const result: CurrentUserPayload = {
       sub: user.id, // JWT standard field for user ID
       id: user.id, // Duplicate for convenience
       email: user.email ?? undefined,
@@ -49,5 +63,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       savedTargetUsername: user.savedTargetUsername ?? undefined,
       role: user.role,
     };
+    if (JwtStrategy.userCache.size > 5000) JwtStrategy.userCache.clear();
+    JwtStrategy.userCache.set(user.id, { at: Date.now(), user: result });
+    return result;
   }
 }

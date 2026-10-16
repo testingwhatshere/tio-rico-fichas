@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, Image } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import colors from '@/constants/colors';
 import { useOperatorStore, isFailureResolved } from '@/stores/operator.store';
@@ -82,7 +82,7 @@ export default function DashboardScreen() {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Image source={require('@/assets/icon.png')} style={{ width: 36, height: 36, borderRadius: 10 }} />
+            <Image source={require('@/assets/logo.png')} style={{ width: 36, height: 36, borderRadius: 10 }} />
             <Text style={styles.headerTitle}>Tio Rico</Text>
           </View>
           <Text style={styles.headerSubtitle}>Panel de Operadores</Text>

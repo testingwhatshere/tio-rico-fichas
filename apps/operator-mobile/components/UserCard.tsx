@@ -1,194 +1,242 @@
 import React, { useState } from 'react';
-import { View, Text, Switch, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import colors from '@/constants/colors';
-import { parseAmount, formatAmount } from '@/utils/amount';
-import StatusBadge from './StatusBadge';
+import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useRouter } from 'expo-router';
+import { toast } from './Toast';
+import { formatMoney } from '@/utils/amount';
+import { timeAgo } from '@/utils/time';
+import { colors, space, radius, text, alpha } from '@/constants/theme';
+import { CopyableText, CopyButton } from '@/components/Copyable';
 
 interface UserCardProps {
   user: any;
   onToggleActive: (userId: string, isActive: boolean) => void;
+  onEditPhone?: (user: any) => void;
 }
 
-const ROLE_LABELS: Record<string, string> = {
-  CLIENT: 'Cliente',
-  OPERATOR: 'Operador',
-  SENIOR_OPERATOR: 'Senior',
-  ADMIN: 'Admin',
-};
+/** El CBU/CVU/alias vive en `payoutDetails`, que es Json y cambia de forma según
+ *  cómo lo cargó el usuario. */
+function extractPayout(details: any): { label: string; value: string } | null {
+  if (!details) return null;
+  if (typeof details === 'string') return { label: 'CBU', value: details };
+  const keys = ['cbu', 'CBU', 'cvu', 'CVU', 'cbuCvu', 'alias', 'ALIAS', 'account'];
+  for (const k of keys) {
+    if (details[k]) {
+      const label = /alias/i.test(k) ? 'Alias' : 'CBU';
+      return { label, value: String(details[k]) };
+    }
+  }
+  const first = Object.entries(details).find(([, v]) => v);
+  return first ? { label: String(first[0]), value: String(first[1]) } : null;
+}
 
-const ROLE_COLORS: Record<string, string> = {
-  CLIENT: colors.textMuted,
-  OPERATOR: colors.info,
-  SENIOR_OPERATOR: colors.primary,
-  ADMIN: colors.warning,
-};
+/** Teléfono argentino canónico ("5493755690960") a algo leíble. */
+function prettyPhone(raw?: string): string {
+  if (!raw) return 'sin teléfono';
+  const d = raw.replace(/\D/g, '');
+  const m = d.match(/^54(9)?(\d{2,4})(\d{6,8})$/);
+  if (!m) return raw;
+  return `${m[2]} ${m[3]}`;
+}
 
-export default function UserCard({ user, onToggleActive }: UserCardProps) {
-  const balance = parseAmount(user.balance || user.wallet?.balance);
-  const role = user.role || 'CLIENT';
+export default function UserCard({ user, onToggleActive, onEditPhone }: UserCardProps) {
+  const router = useRouter();
+  const [hovered, setHovered] = useState(false);
   const isActive = user.isActive !== false;
-  const username = user.username || user.name || user.email?.split('@')[0] || '-';
-  const email = user.email || '-';
-  const roleColor = ROLE_COLORS[role] || colors.textMuted;
-  const roleLabel = ROLE_LABELS[role] || role;
+  const username = user.username || user.email?.split('@')[0] || '—';
+  const payout = extractPayout(user.payoutDetails);
+  // El nickname del panel casi siempre es igual al usuario: repetirlo es ruido.
+  // Los dos nombres tienen que ser iguales: `savedTargetUsername` es lo que la
+  // extensión busca en el panel de juego. Si difieren, el bot busca un nombre
+  // que no existe, así que se marca en rojo en vez de mostrarse como un dato más.
+  const panelNick =
+    user.savedTargetUsername && user.savedTargetUsername !== username
+      ? user.savedTargetUsername
+      : null;
 
-  const [toggling, setToggling] = useState(false);
-
-  const handleToggle = (value: boolean) => {
-    setToggling(true);
-    onToggleActive(user.id, value);
-    // Reset toggling state after a brief delay (the store update will re-render)
-    setTimeout(() => setToggling(false), 1500);
-  };
+  const hover =
+    Platform.OS === 'web'
+      ? { onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false) }
+      : {};
 
   return (
-    <View style={[styles.card, !isActive && styles.cardInactive]}>
-      {/* Avatar */}
-      <View style={[styles.avatar, { borderColor: isActive ? colors.primary + '40' : colors.textMuted + '30' }]}>
-        <Ionicons
-          name="person"
-          size={22}
-          color={isActive ? colors.primary : colors.textMuted}
-        />
+    <View style={[s.card, hovered && s.cardHover, !isActive && s.cardBlocked]} {...(hover as any)}>
+      <View style={s.head}>
+        <View style={[s.avatar, !isActive && { backgroundColor: alpha(colors.error, 0.15) }]}>
+          <Text style={[s.avatarText, !isActive && { color: colors.error }]}>
+            {username.charAt(0).toUpperCase()}
+          </Text>
+        </View>
+
+        <View style={s.identity}>
+          <CopyableText value={username} label="Usuario" style={s.username} iconSize={12} />
+          {/* Se copia el teléfono completo, no el formateado: lo que sirve para
+              pegar en WhatsApp es el número con código de país. */}
+          <CopyableText
+            value={user.phone}
+            display={prettyPhone(user.phone)}
+            label="Teléfono"
+            style={s.phone}
+            iconSize={11}
+          />
+        </View>
+
+        {!isActive && <Text style={s.blocked}>bloqueado</Text>}
       </View>
 
-      {/* Info */}
-      <View style={styles.centerSection}>
-        <View style={styles.nameRow}>
-          <Text style={[styles.username, !isActive && styles.textInactive]} numberOfLines={1}>
-            {username}
-          </Text>
-          <View style={[styles.roleBadge, { backgroundColor: roleColor + '20' }]}>
-            <Text style={[styles.roleText, { color: roleColor }]}>{roleLabel}</Text>
-          </View>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Ionicons name="mail-outline" size={12} color={colors.textMuted} />
-          <Text style={styles.detailText} numberOfLines={1}>
-            {email}
-          </Text>
-        </View>
-
-        <View style={styles.balanceRow}>
-          <Ionicons name="wallet-outline" size={12} color={colors.primary} />
-          <Text style={styles.balanceSymbol}>$</Text>
-          <Text style={styles.balanceValue}>{formatAmount(balance)}</Text>
-        </View>
-
-        {user.savedTargetUsername && (
-          <View style={styles.detailRow}>
-            <Ionicons name="game-controller-outline" size={12} color={colors.textMuted} />
-            <Text style={styles.detailText} numberOfLines={1}>
-              {user.savedTargetUsername}
-            </Text>
-          </View>
+      {/* Dónde cobrarle: el dato que el operador necesita a mano. */}
+      <View style={[s.payout, !payout && s.payoutEmpty]}>
+        <Ionicons
+          name="card-outline"
+          size={13}
+          color={payout ? colors.primary : colors.textMuted}
+        />
+        <Text style={[s.payoutTag, !payout && { color: colors.textMuted }]}>
+          {payout ? payout.label : 'CBU'}
+        </Text>
+        {payout ? (
+          <CopyableText value={payout.value} label={payout.label} mono style={s.payoutValue} />
+        ) : (
+          <Text style={[s.payoutValue, s.payoutValueEmpty]}>sin cargar</Text>
         )}
       </View>
 
-      {/* Toggle */}
-      <View style={styles.rightSection}>
-        <StatusBadge status={isActive ? 'active' : 'inactive'} size="sm" />
-        <Switch
-          value={isActive}
-          onValueChange={handleToggle}
-          disabled={toggling}
-          trackColor={{ false: colors.backgroundTertiary, true: colors.success + '60' }}
-          thumbColor={isActive ? colors.success : colors.textMuted}
-          ios_backgroundColor={colors.backgroundTertiary}
-          style={styles.switch}
-        />
+      <View style={s.meta}>
+          {!!panelNick && (
+            <View style={s.mismatch}>
+              <Ionicons name="warning-outline" size={12} color={colors.error} />
+              <CopyableText
+                value={panelNick}
+                display={`en el panel figura “${panelNick}”`}
+                label="Nombre en el panel"
+                style={s.mismatchText}
+                iconSize={11}
+              />
+            </View>
+          )}
+          {user.panel?.name ? (
+            <Meta icon="server-outline" value={user.panel.name} />
+          ) : (
+            // Sin panel no es un error: la primera carga dispara discovery y lo
+            // resuelve. Se muestra igual porque explica por que el bot "lo busca
+            // en el panel equivocado" — todavia no tiene panel propio.
+            <Meta icon="help-circle-outline" value="sin panel · se define en la 1ª carga" />
+          )}
+          {!!user.completedCount && (
+            <Meta
+              icon="checkmark-done-outline"
+              value={`${user.completedCount} · ${formatMoney(user.totalLoaded || 0)}`}
+            />
+          )}
+          {!!user.lastLoadAt && <Meta icon="time-outline" value={timeAgo(user.lastLoadAt)} />}
+      </View>
+
+      <View style={s.actions}>
+        {/* La ficha es donde está todo lo suyo — sus cargas, sus premios, su
+            chat — y desde donde se le puede cargar sin depender de un pedido. */}
+        <Pressable onPress={() => router.push(`/user/${user.id}` as any)} style={s.action}>
+          <Ionicons name="albums-outline" size={13} color={colors.textSecondary} />
+          <Text style={s.actionText}>Ficha</Text>
+        </Pressable>
+        {onEditPhone && (
+          <Pressable onPress={() => onEditPhone(user)} style={s.action}>
+            <Ionicons name="pencil" size={13} color={colors.textSecondary} />
+            <Text style={s.actionText}>Editar</Text>
+          </Pressable>
+        )}
+        <View style={{ flex: 1 }} />
+        <Pressable
+          onPress={() => onToggleActive(user.id, !isActive)}
+          style={[s.action, isActive ? s.blockBtn : s.unblockBtn]}
+        >
+          <Ionicons
+            name={isActive ? 'ban-outline' : 'checkmark-circle-outline'}
+            size={13}
+            color={isActive ? colors.error : colors.success}
+          />
+          <Text style={[s.actionText, { color: isActive ? colors.error : colors.success }]}>
+            {isActive ? 'Bloquear' : 'Desbloquear'}
+          </Text>
+        </Pressable>
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+function Meta({ icon, value }: { icon: any; value: string }) {
+  return (
+    <View style={s.metaItem}>
+      <Ionicons name={icon} size={11} color={colors.textMuted} />
+      <Text style={s.metaText} numberOfLines={1}>{value}</Text>
+    </View>
+  );
+}
+
+const s = StyleSheet.create({
   card: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flex: 1,
     backgroundColor: colors.cardBackground,
-    borderRadius: 12,
-    padding: 14,
-    marginHorizontal: 16,
-    marginBottom: 10,
-    gap: 12,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    padding: space.lg,
+    gap: space.md,
   },
-  cardInactive: {
-    opacity: 0.65,
-  },
+  cardHover: { borderColor: colors.borderStrong },
+  cardBlocked: { opacity: 0.6 },
+
+  head: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.backgroundTertiary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
+    width: 34, height: 34, borderRadius: radius.full,
+    backgroundColor: alpha(colors.primary, 0.15),
+    alignItems: 'center', justifyContent: 'center',
   },
-  centerSection: {
-    flex: 1,
-    gap: 3,
+  avatarText: { ...text.bodyStrong, fontSize: 15, color: colors.primary },
+  identity: { flex: 1, minWidth: 0, gap: 1 },
+  username: { ...text.bodyStrong, fontSize: 15, color: colors.textPrimary },
+  inline: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  phone: { ...text.caption, color: colors.textSecondary },
+  blocked: {
+    ...text.caption, color: colors.error, textTransform: 'uppercase', fontWeight: '700',
+    backgroundColor: alpha(colors.error, 0.14),
+    paddingHorizontal: space.sm, paddingVertical: 2, borderRadius: radius.sm,
   },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+
+  payout: {
+    flexDirection: 'row', alignItems: 'center', gap: space.sm,
+    paddingHorizontal: space.md, paddingVertical: space.sm,
+    borderRadius: radius.md,
+    backgroundColor: alpha(colors.primary, 0.08),
+    borderWidth: 1, borderColor: alpha(colors.primary, 0.18),
   },
-  username: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.textPrimary,
-    flexShrink: 1,
+  payoutEmpty: {
+    backgroundColor: colors.surfaceElevated,
+    borderColor: 'transparent',
   },
-  textInactive: {
-    color: colors.textMuted,
+  payoutTag: { ...text.caption, color: colors.primary, fontWeight: '700' },
+  payoutValue: { ...text.mono, color: colors.textPrimary, flex: 1 },
+  payoutValueEmpty: { ...text.caption, color: colors.textMuted, fontFamily: undefined },
+
+  meta: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
+  mismatch: {
+    flexDirection: 'row', alignItems: 'center', gap: space.xs,
+    paddingHorizontal: space.sm, paddingVertical: 2,
+    borderRadius: radius.sm, backgroundColor: alpha(colors.error, 0.12),
   },
-  roleBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 8,
+  mismatchText: { ...text.caption, color: colors.error, fontWeight: '600' },
+  metaItem: { flexDirection: 'row', alignItems: 'center', gap: space.xs, maxWidth: '100%' },
+  metaText: { ...text.caption, color: colors.textMuted },
+
+  actions: {
+    flexDirection: 'row', alignItems: 'center', gap: space.sm,
+    borderTopWidth: 1, borderTopColor: colors.borderSubtle, paddingTop: space.md,
   },
-  roleText: {
-    fontSize: 10,
-    fontWeight: '700',
+  action: {
+    flexDirection: 'row', alignItems: 'center', gap: space.xs,
+    paddingHorizontal: space.md, paddingVertical: space.sm,
+    borderRadius: radius.md, backgroundColor: colors.surfaceElevated,
   },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  detailText: {
-    fontSize: 11,
-    color: colors.textMuted,
-    flex: 1,
-  },
-  balanceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  balanceSymbol: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  balanceValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  rightSection: {
-    alignItems: 'center',
-    gap: 6,
-  },
-  switch: {
-    transform: [{ scaleX: 0.85 }, { scaleY: 0.85 }],
-  },
+  actionText: { ...text.caption, color: colors.textSecondary, fontWeight: '600' },
+  blockBtn: { backgroundColor: alpha(colors.error, 0.12) },
+  unblockBtn: { backgroundColor: alpha(colors.success, 0.12) },
 });

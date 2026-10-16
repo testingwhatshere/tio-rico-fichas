@@ -1,13 +1,15 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, Alert, Image } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import colors from '@/constants/colors';
 import { useOperatorStore } from '@/stores/operator.store';
 import { getSocket, emitWithTimeout } from '@/services/socket';
 import PaymentCard from '@/components/PaymentCard';
 import { hapticSuccess, hapticError } from '@/utils/haptics';
 import { toast } from '@/components/Toast';
+import { ConfirmDialog, PageHeader, EmptyState } from '@/components/ui';
+import { colors as themeColors, space, radius, text as themeText } from '@/constants/theme';
 
 type FilterTab = 'pending' | 'processing' | 'completed' | 'failed' | 'all';
 
@@ -72,34 +74,33 @@ export default function PaymentsScreen() {
     }
   }, []);
 
+  // `Alert.prompt` solo existe en iOS: en web y en Android cancelar un pago
+  // simplemente no hacia nada. Va un diálogo propio.
+  const [cancelTarget, setCancelTarget] = useState<any>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+
   const handleCancel = useCallback((payment: any) => {
-    Alert.prompt(
-      'Cancelar pago',
-      'Ingresa el motivo de la cancelacion:',
-      [
-        { text: 'Volver', style: 'cancel' },
-        {
-          text: 'Cancelar pago',
-          style: 'destructive',
-          onPress: async (reason) => {
-            try {
-              await emitWithTimeout('cancel_outbound_payment', {
-                paymentId: payment.id,
-                reason: reason || 'Cancelado por operador',
-              }, 15000);
-              hapticSuccess();
-              toast.success('Pago cancelado');
-            } catch (err: any) {
-              hapticError();
-              toast.error(err?.message || 'Error al cancelar');
-            }
-          },
-        },
-      ],
-      'plain-text',
-      '',
-    );
+    setCancelReason('');
+    setCancelTarget(payment);
   }, []);
+
+  const confirmCancel = useCallback(async () => {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    try {
+      await emitWithTimeout('cancel_outbound_payment', {
+        paymentId: cancelTarget.id,
+        reason: cancelReason.trim() || 'Cancelado por operador',
+      }, 15000);
+      toast.success('Pago cancelado');
+      setCancelTarget(null);
+    } catch (err: any) {
+      toast.error(err?.message || 'Error al cancelar');
+    } finally {
+      setCancelling(false);
+    }
+  }, [cancelTarget, cancelReason]);
 
   const renderItem = useCallback(
     ({ item }: { item: any }) => (
@@ -123,17 +124,14 @@ export default function PaymentsScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
       {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Image source={require('@/assets/icon.png')} style={{ width: 32, height: 32, borderRadius: 8 }} />
-            <Text style={styles.headerTitle}>Pagos</Text>
-          </View>
-          <Text style={styles.headerSubtitle}>
-            {pendingCount} pendiente{pendingCount !== 1 ? 's' : ''}
-          </Text>
-        </View>
-      </View>
+      <PageHeader
+        title="Pagos"
+        subtitle={
+          pendingCount
+            ? `${pendingCount} pendiente${pendingCount !== 1 ? 's' : ''} de transferir`
+            : 'Transferencias salientes a los usuarios'
+        }
+      />
 
       {/* Filter tabs */}
       <View style={styles.filterRow}>
@@ -181,34 +179,54 @@ export default function PaymentsScreen() {
           />
         }
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIconContainer}>
-              <Ionicons
-                name={activeFilter === 'pending' ? 'checkmark-circle' : 'cash-outline'}
-                size={56}
-                color={activeFilter === 'pending' ? colors.success : colors.textMuted}
-              />
-            </View>
-            <Text style={styles.emptyTitle}>
-              {activeFilter === 'pending'
+          <EmptyState
+            icon={activeFilter === 'pending' ? 'checkmark-circle-outline' : 'cash-outline'}
+            title={
+              activeFilter === 'pending'
                 ? 'Sin pagos pendientes'
                 : activeFilter === 'failed'
                   ? 'Sin pagos fallidos'
                   : activeFilter === 'completed'
                     ? 'Sin pagos completados'
-                    : 'Sin pagos registrados'}
-            </Text>
-            <Text style={styles.emptySubtitle}>
-              {activeFilter === 'pending'
-                ? 'Los pagos de premios apareceran aqui'
-                : 'Los pagos apareceran aqui cuando se generen'}
-            </Text>
-          </View>
+                    : 'Sin pagos registrados'
+            }
+            subtitle="Los pagos de premios aparecen acá cuando se generan"
+          />
         }
       />
+
+      <ConfirmDialog
+        visible={!!cancelTarget}
+        title="Cancelar pago"
+        message={cancelTarget ? `Se cancela el pago a ${cancelTarget.prizeClaim?.targetUsername || 'este usuario'}.` : ''}
+        confirmLabel="Cancelar pago"
+        tone="danger"
+        loading={cancelling}
+        onConfirm={confirmCancel}
+        onCancel={() => setCancelTarget(null)}
+      >
+        <TextInput
+          style={cancelInputStyle}
+          placeholder="Motivo (opcional)"
+          placeholderTextColor={themeColors.placeholder}
+          value={cancelReason}
+          onChangeText={setCancelReason}
+        />
+      </ConfirmDialog>
     </View>
   );
 }
+
+const cancelInputStyle = {
+  ...themeText.body,
+  color: themeColors.textPrimary,
+  backgroundColor: themeColors.input,
+  borderWidth: 1,
+  borderColor: themeColors.inputBorder,
+  borderRadius: radius.md,
+  paddingHorizontal: space.md,
+  paddingVertical: space.md,
+} as const;
 
 const styles = StyleSheet.create({
   container: {

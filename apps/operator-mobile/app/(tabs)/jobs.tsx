@@ -1,10 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, Alert, Image } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { hapticSuccess, hapticError } from '@/utils/haptics';
 import { toast } from '@/components/Toast';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import colors from '@/constants/colors';
+import { useFirstLoad } from '@/hooks/useFirstLoad';
+import { EmptyState } from '@/components/ui';
 import { useOperatorStore } from '@/stores/operator.store';
 import { getSocket, emitWithTimeout } from '@/services/socket';
 import { useExport } from '@/hooks/useExport';
@@ -27,6 +29,7 @@ const FILTER_STATUSES: Record<FilterTab, string[]> = {
 };
 
 export default function JobsScreen() {
+  const { isLoadingFirst, isConnected } = useFirstLoad();
   const insets = useSafeAreaInsets();
   const jobs = useOperatorStore((s) => s.jobs);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
@@ -114,7 +117,7 @@ export default function JobsScreen() {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Image source={require('@/assets/icon.png')} style={{ width: 32, height: 32, borderRadius: 8 }} />
+            <Image source={require('@/assets/logo.png')} style={{ width: 32, height: 32, borderRadius: 8 }} />
             <Text style={styles.headerTitle}>Jobs</Text>
           </View>
           <Text style={styles.headerSubtitle}>
@@ -176,6 +179,9 @@ export default function JobsScreen() {
           />
         }
         ListEmptyComponent={
+          isLoadingFirst ? (
+            <EmptyState loading connected={isConnected} title="" />
+          ) : (
           <View style={styles.emptyState}>
             <View style={styles.emptyIconContainer}>
               <Ionicons name={emptyIcon as any} size={56} color={colors.textMuted} />
@@ -183,6 +189,7 @@ export default function JobsScreen() {
             <Text style={styles.emptyTitle}>{emptyTitle}</Text>
             <Text style={styles.emptySubtitle}>{emptySubtitle}</Text>
           </View>
+          )
         }
       />
     </View>

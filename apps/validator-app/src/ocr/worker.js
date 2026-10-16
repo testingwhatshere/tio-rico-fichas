@@ -11,7 +11,8 @@
 const path = require('path');
 const fs = require('fs');
 const logger = require('../logger');
-const { generateOCRVariants, isAvailable: isSharpAvailable } = require('./preprocess');
+const { generateOCRVariantsLazy, isAvailable: isSharpAvailable } = require('./preprocess');
+const { extractAllAmounts } = require('./patterns/_helpers');
 
 const OCR_RECOGNIZE_TIMEOUT_MS = 30000; // 30s per recognition call
 
@@ -78,6 +79,11 @@ function ensureTrainedDataInUserData(sendToRenderer) {
     if (sendToRenderer) sendToRenderer('log', { message: 'No se encontro el modelo de español bundleado. Tesseract intentara descargarlo.', type: 'warning' });
     return null;
   } catch (err) {
+    // Fuera de Electron no hay userData (p. ej. el harness de evaluación en
+    // tools/eval-corpus.js). Alcanza con apuntar Tesseract al traineddata que viene
+    // en el repo: así el harness corre exactamente el mismo OCR que producción.
+    const bundled = findBundledTrainedData();
+    if (bundled) return path.dirname(bundled);
     logger.error('OCR', `ensureTrainedDataInUserData failed: ${err.message}`);
     return null;
   }
@@ -135,12 +141,25 @@ async function resetOCRWorker(sendToRenderer) {
  * Run worker.recognize with a timeout to prevent hangs.
  */
 async function recognizeWithTimeout(worker, buffer, timeoutMs = OCR_RECOGNIZE_TIMEOUT_MS) {
-  return Promise.race([
-    worker.recognize(buffer),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`OCR recognize timeout (${timeoutMs}ms)`)), timeoutMs)
-    ),
-  ]);
+  let timer = null;
+  try {
+    return await Promise.race([
+      worker.recognize(buffer),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`OCR recognize timeout (${timeoutMs}ms)`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// ¿Alcanza el tiempo para otra pasada? Se estima con la pasada más lenta hasta
+// ahora (+20%). La primera pasada siempre corre: sin ella no hay nada que decidir.
+function hayTiempoParaOtraPasada(deadline, duraciones) {
+  if (!deadline || duraciones.length === 0) return true;
+  const estimada = Math.max(...duraciones) * 1.2;
+  return Date.now() + estimada < deadline;
 }
 
 /**
@@ -148,9 +167,18 @@ async function recognizeWithTimeout(worker, buffer, timeoutMs = OCR_RECOGNIZE_TI
  *
  * @param {Buffer} imageBuffer — Raw image buffer
  * @param {Function} sendToRenderer — For UI feedback
+ * @param {object} [options]
+ * @param {(text: string) => boolean} [options.yaAlcanza] — Se consulta después de cada
+ *   variante con el texto que salió. Si devuelve true se corta y se usa ese resultado.
+ *   Sirve para no gastar las 9 pasadas restantes cuando la primera ya leyó todo: son
+ *   ~3s cada una, y el 95% de los comprobantes son legibles de entrada. Sin esta
+ *   opción el comportamiento es el de siempre (todas las variantes, gana la de mejor score).
  * @returns {Promise<{text: string, confidence: number, method: string}>}
  */
-async function recognizeWithMultiPass(imageBuffer, sendToRenderer) {
+async function recognizeWithMultiPass(imageBuffer, sendToRenderer, options = {}) {
+  // deadline (epoch ms, opcional): no se arranca una pasada nueva si no termina
+  // antes. El resultado sale con `truncated: true` y con lo leído hasta ahí.
+  const { yaAlcanza, deadline } = options;
   // Auto-recovery: si pasaron 5 min desde la última desactivación, reintentamos.
   if (ocrDisabled) {
     const sinceDisabled = Date.now() - ocrDisabledAt;
@@ -180,14 +208,29 @@ async function recognizeWithMultiPass(imageBuffer, sendToRenderer) {
     return null;
   }
 
-  // Generate preprocessed variants
-  const variants = await generateOCRVariants(imageBuffer);
+  // Variantes de preprocesado: cada una se arma recién antes de su pasada.
+  const variants = await generateOCRVariantsLazy(imageBuffer);
 
   let bestResult = null;
   let bestScore = -1;
   let workerFailed = false;
+  // Se guarda lo que leyó CADA variante, no sólo la ganadora. Cuesta cero (ese OCR ya se
+  // corrió) y es la única forma de resolver un monto dudoso: si nueve variantes leen
+  // $1.000 y una lee $51.000, la discrepancia es visible sólo mirándolas juntas.
+  const variantTexts = [];
+  // Texto de cada pasada de la primera vuelta, para no volver a correrla en el
+  // rescate de monto de más abajo (mismos parámetros → mismo texto).
+  const textoPorVariante = new Map();
+  const duraciones = [];
+  let truncated = false;
 
   for (const variant of variants) {
+    if (!hayTiempoParaOtraPasada(deadline, duraciones)) {
+      truncated = true;
+      logger.warn('OCR', `Tope de tiempo: se cortan ${variants.length - variants.indexOf(variant)} pasadas (antes de "${variant.name}")`);
+      break;
+    }
+    const t0 = Date.now();
     try {
       const params = {
         tessedit_pageseg_mode: String(variant.psm),
@@ -205,9 +248,12 @@ async function recognizeWithMultiPass(imageBuffer, sendToRenderer) {
       }
       await worker.setParameters(params);
 
-      const { data } = await recognizeWithTimeout(worker, variant.buffer);
+      const buffer = await variant.getBuffer();
+      const { data } = await recognizeWithTimeout(worker, buffer);
+      duraciones.push(Date.now() - t0);
       const text = data.text || '';
       const confidence = (data.confidence || 0) / 100;
+      textoPorVariante.set(variant.name, text);
 
       // Log a short preview of each variant's output so we can see which
       // one actually saw the amount when debugging. Mirror to UI for operator visibility.
@@ -222,6 +268,18 @@ async function recognizeWithMultiPass(imageBuffer, sendToRenderer) {
       if (score > bestScore) {
         bestScore = score;
         bestResult = { text, confidence, method: variant.name };
+      }
+
+      if (text) {
+        variantTexts.push({ name: variant.name, text, confidence });
+      }
+
+      // Corte temprano: si esta variante ya leyó el comprobante entero, las que faltan
+      // no pueden mejorar el resultado, sólo sumar segundos de espera al usuario.
+      if (yaAlcanza && bestResult && bestResult.method === variant.name && yaAlcanza(text)) {
+        const restantes = variants.length - variants.indexOf(variant) - 1;
+        logger.info('OCR', `Corte temprano en "${variant.name}": comprobante leído completo, se saltean ${restantes} variantes`);
+        break;
       }
     } catch (err) {
       logger.warn('OCR', `Variant "${variant.name}" failed: ${err.message}`);
@@ -247,33 +305,66 @@ async function recognizeWithMultiPass(imageBuffer, sendToRenderer) {
 
   // If multi-pass found something, try merging amount from other passes that
   // saw a clearer number than the best-scoring variant.
-  // Permissive regex: accepts OCR-confused digits ([0-9OoIlS]), spaces between
-  // thousand groups, both ARS and US decimal notations.
-  const AMOUNT_RE = /\$\s*([0-9OoIlS]{1,3}(?:[\s.,][0-9OoIlS]{3})*(?:[.,][0-9OoIlS]{1,2})?|[0-9OoIlS]{3,8}(?:[.,][0-9OoIlS]{1,2})?)/;
+  //
+  // Quién "tiene monto" lo decide `extractAllAmounts`, el mismo extractor que corre
+  // después sobre el texto final. Antes se usaba una regex propia que exigía un `$`
+  // literal, y eso hacía lo contrario de lo que promete el nombre: un titular leído como
+  // "s1.000" (el `$` sale como letra en la fuente grande) no matcheaba, así que la
+  // variante buena contaba como "sin monto" y se le inyectaba arriba el número de otra
+  // variante — típicamente `number-focused`, que en ese comprobante corría con 5% de
+  // confianza. El monto inyectado ganaba y el pedido se aprobaba por el valor equivocado.
+  //
+  // Con el extractor real, si la mejor variante ya vio un monto no se toca nada.
   if (bestResult && variants.length > 1 && !workerFailed && worker) {
-    for (const variant of variants) {
-      if (variant.name === bestResult.method) continue;
-      try {
-        const params = { tessedit_pageseg_mode: String(variant.psm) };
-        if (variant.name === 'number-focused') {
-          params.tessedit_char_whitelist = '0123456789.,$ ARSpesos';
-        } else {
-          params.tessedit_char_whitelist = '';
+    const bestHasAmount = extractAllAmounts(bestResult.text).length > 0;
+    if (bestHasAmount) {
+      logger.info('OCR', 'Merge de monto innecesario: la mejor variante ya trae monto');
+    } else {
+      for (const variant of variants) {
+        if (variant.name === bestResult.method) continue;
+        // Ya leída en la primera vuelta con los mismos parámetros: se usa ese texto.
+        // digits-only es la excepción: acá corre SIN su whitelist (ver abajo), así
+        // que su texto sería otro y se sigue corriendo como siempre.
+        if (variant.name !== 'digits-only' && textoPorVariante.has(variant.name)) {
+          const linea = textoPorVariante.get(variant.name).split('\n').find((l) => extractAllAmounts(l).length > 0);
+          if (linea) {
+            bestResult.text = linea.trim() + '\n' + bestResult.text;
+            bestResult.method += '+' + variant.name;
+            logger.info('OCR', `Merged amount line "${linea.trim()}" from variant "${variant.name}" (texto ya leído)`);
+            break;
+          }
+          continue;
         }
-        await worker.setParameters(params);
-        const { data } = await recognizeWithTimeout(worker, variant.buffer);
-        const text = data.text || '';
-
-        const amountMatch = text.match(AMOUNT_RE);
-        const bestHasAmount = bestResult.text.match(AMOUNT_RE);
-
-        if (amountMatch && !bestHasAmount) {
-          bestResult.text = amountMatch[0].trim() + '\n' + bestResult.text;
-          bestResult.method += '+' + variant.name;
-          logger.info('OCR', `Merged amount "${amountMatch[0]}" from variant "${variant.name}"`);
+        if (!hayTiempoParaOtraPasada(deadline, duraciones)) {
+          truncated = true;
+          logger.warn('OCR', 'Tope de tiempo: se corta el rescate de monto entre variantes');
           break;
         }
-      } catch {}
+        const t0 = Date.now();
+        try {
+          const params = { tessedit_pageseg_mode: String(variant.psm) };
+          if (variant.name === 'number-focused') {
+            params.tessedit_char_whitelist = '0123456789.,$ ARSpesos';
+          } else {
+            params.tessedit_char_whitelist = '';
+          }
+          await worker.setParameters(params);
+          const buffer = await variant.getBuffer();
+          const { data } = await recognizeWithTimeout(worker, buffer);
+          duraciones.push(Date.now() - t0);
+          const text = data.text || '';
+
+          // Se rescata la línea donde esa variante vio el monto, no el texto entero:
+          // el resto de esa lectura es peor que la que ya tenemos.
+          const linea = text.split('\n').find((l) => extractAllAmounts(l).length > 0);
+          if (linea) {
+            bestResult.text = linea.trim() + '\n' + bestResult.text;
+            bestResult.method += '+' + variant.name;
+            logger.info('OCR', `Merged amount line "${linea.trim()}" from variant "${variant.name}"`);
+            break;
+          }
+        } catch {}
+      }
     }
   }
 
@@ -282,7 +373,33 @@ async function recognizeWithMultiPass(imageBuffer, sendToRenderer) {
     try { await worker.setParameters({ tessedit_pageseg_mode: '6' }); } catch {}
   }
 
+  if (bestResult) {
+    bestResult.variantTexts = variantTexts;
+    bestResult.passes = duraciones.length;
+    bestResult.truncated = truncated;
+  } else if (truncated || duraciones.length > 0) {
+    // Corrió pero no salió texto útil: se distingue de "OCR no disponible" (null).
+    return { text: '', confidence: 0, method: 'none', variantTexts, passes: duraciones.length, truncated };
+  }
   return bestResult;
+}
+
+/**
+ * La memoria del worker de Tesseract (WASM) crece con cada imagen grande y nunca
+ * se devuelve: en un contenedor de 512 MB terminaba matado por falta de memoria
+ * cada ~25 comprobantes. Si el proceso pasa `limiteMb`, se descarta el worker
+ * (libera toda esa memoria) y el próximo comprobante arma uno nuevo (<1 s).
+ * Se llama ENTRE comprobantes, nunca durante uno.
+ */
+async function reciclarSiPasa(limiteMb) {
+  if (!ocrWorker || !(limiteMb > 0)) return false;
+  const rssMb = Math.round(process.memoryUsage().rss / 1048576);
+  if (rssMb <= limiteMb) return false;
+  try { await ocrWorker.terminate(); } catch (_) {}
+  ocrWorker = null;
+  const despuesMb = Math.round(process.memoryUsage().rss / 1048576);
+  logger.info('MEMORY', `Worker de OCR reciclado (${rssMb} MB > ${limiteMb} MB, queda ${despuesMb} MB)`);
+  return true;
 }
 
 function resetOCRDisabled() {
@@ -301,4 +418,4 @@ function getOCRStatus() {
   };
 }
 
-module.exports = { initOCRWorker, resetOCRWorker, recognizeWithMultiPass, resetOCRDisabled, getOCRStatus };
+module.exports = { initOCRWorker, resetOCRWorker, recognizeWithMultiPass, resetOCRDisabled, getOCRStatus, reciclarSiPasa };

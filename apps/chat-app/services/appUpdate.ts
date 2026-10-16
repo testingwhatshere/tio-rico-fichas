@@ -2,10 +2,10 @@ import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import Constants from 'expo-constants';
 
-// EXPO_PUBLIC_API_URL ya incluye el sufijo /api (ej: https://tiorico-api.onrender.com/api).
+// EXPO_PUBLIC_API_URL ya incluye el sufijo /api (ej: https://tiorico-api-axfb.onrender.com/api).
 // Antes el código pegaba /api/settings/... arriba y resultaba en /api/api/settings/check-update → 404
 // silencioso, así que los APK nunca recibían el aviso de actualización.
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://tiorico-api.onrender.com/api';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://tiorico-api-axfb.onrender.com/api';
 const APP_NAME = 'chat';
 
 export interface UpdateInfo {

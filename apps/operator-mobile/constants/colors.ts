@@ -1,83 +1,56 @@
 /**
- * Tio Rico Operator Panel Color Theme
- * Casino gold/dark aesthetic — matches desktop operator panel
+ * Capa de compatibilidad. Los tokens reales viven en `constants/theme.ts`.
+ *
+ * Las pantallas viejas importan `colors` desde acá con nombres que ya no
+ * describen nada (`buttonPrimaryHover`, `chipPending`, `feltGreen`, `surfaceLight`,
+ * varios alias del mismo valor). Se mantienen mapeados al tema nuevo para no
+ * romper nada, y se van borrando a medida que cada pantalla se migra a `theme`.
+ *
+ * En código nuevo: importar de `constants/theme`.
  */
+import { colors as t, alpha } from './theme';
+
 export const colors = {
-  // Gold accent system
-  primary: '#F6AD55',
-  primaryDark: '#D4A017',
-  primaryLight: '#FBD38D',
+  ...t,
 
-  // Casino dark backgrounds (deeper than before)
-  background: '#0B0F15',
-  backgroundSecondary: '#141B24',
-  backgroundTertiary: '#1E2A38',
-
-  // Warm cream text
-  textPrimary: '#F0E6D3',
-  textSecondary: '#9CA3AF',
-  textMuted: '#6B7280',
-  textOnPrimary: '#1A202C',
-
-  // Status
-  success: '#48BB78',
-  error: '#F56565',
-  warning: '#ED8936',
-  info: '#4299E1',
-
-  // Borders (gold-tinted)
-  border: 'rgba(212, 160, 23, 0.12)',
-  borderLight: 'rgba(212, 160, 23, 0.08)',
-  borderGold: 'rgba(212, 160, 23, 0.25)',
-
-  shadow: 'rgba(0, 0, 0, 0.4)',
-
-  // Chips
-  chipPending: '#ED8936',
-  chipProcessing: '#4299E1',
-  chipCompleted: '#48BB78',
-  chipFailed: '#F56565',
-
-  // Inputs
-  input: '#141B24',
-  inputBorder: 'rgba(212, 160, 23, 0.12)',
-  inputFocus: '#D4A017',
-  inputError: '#F56565',
-  placeholder: '#6B7280',
-
-  // Buttons
-  buttonPrimary: '#D4A017',
-  buttonPrimaryHover: '#B8860B',
-  buttonSecondary: '#141B24',
-  buttonDisabled: '#1E2A38',
-
-  // Overlays
-  overlay: 'rgba(11, 15, 21, 0.85)',
-  overlayLight: 'rgba(11, 15, 21, 0.5)',
-
-  // Gold glow & accents
-  primaryGlow: 'rgba(212, 160, 23, 0.15)',
-  goldGlow: 'rgba(212, 160, 23, 0.3)',
-
-  // Cards & surfaces
-  cardBackground: '#182030',
-  surfaceElevated: '#1E2A38',
-
-  white: '#FFFFFF',
-  black: '#000000',
-
-  // Badges & status
-  unreadBadge: '#EF4444',
-  onlineGreen: '#22C55E',
-
-  // Misc
-  separator: 'rgba(212, 160, 23, 0.1)',
-  gradientGoldStart: '#F6AD55',
-  gradientGoldMid: '#D4A017',
-  surfaceLight: '#1E2A38',
-
-  // Casino felt green
+  /** @deprecated usar `colors.borderSubtle` */
+  borderLight: t.borderSubtle,
+  /** @deprecated usar `colors.borderAccent` */
+  borderGold: t.borderAccent,
+  /** @deprecated usar `colors.warning` */
+  chipPending: t.warning,
+  /** @deprecated usar `colors.info` */
+  chipProcessing: t.info,
+  /** @deprecated usar `colors.success` */
+  chipCompleted: t.success,
+  /** @deprecated usar `colors.error` */
+  chipFailed: t.error,
+  /** @deprecated usar `colors.error` */
+  inputError: t.error,
+  /** @deprecated usar `colors.primaryDark` */
+  buttonPrimary: t.primaryDark,
+  /** @deprecated usar `colors.primaryHover` */
+  buttonPrimaryHover: t.primaryHover,
+  /** @deprecated usar `colors.backgroundSecondary` */
+  buttonSecondary: t.backgroundSecondary,
+  /** @deprecated usar `colors.backgroundTertiary` */
+  buttonDisabled: t.backgroundTertiary,
+  /** @deprecated usar `alpha(colors.background, 0.5)` */
+  overlayLight: alpha(t.background, 0.5),
+  /** @deprecated usar `alpha(colors.primaryDark, 0.15)` */
+  primaryGlow: alpha(t.primaryDark, 0.15),
+  /** @deprecated usar `alpha(colors.primaryDark, 0.3)` */
+  goldGlow: alpha(t.primaryDark, 0.3),
+  /** @deprecated usar `colors.primary` */
+  gradientGoldStart: t.primary,
+  /** @deprecated usar `colors.primaryDark` */
+  gradientGoldMid: t.primaryDark,
+  /** @deprecated usar `colors.surfaceElevated` */
+  surfaceLight: t.surfaceElevated,
+  /** @deprecated sin uso */
   feltGreen: '#1B5E3B',
-  feltGreenLight: '#22C55E',
+  /** @deprecated usar `colors.onlineGreen` */
+  feltGreenLight: t.onlineGreen,
 };
+
 export default colors;

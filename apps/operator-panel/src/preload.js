@@ -44,6 +44,8 @@ contextBridge.exposeInMainWorld('api', {
   // Failures
   approveFailure: (failureId, note, approvedAmount) => invokeWithLongTimeout('approve-failure', { failureId, note, approvedAmount }),
   rejectFailure: (failureId, reason) => invokeWithLongTimeout('reject-failure', { failureId, reason }),
+  // Marca una carga fallida como ya cargada a mano (COMPLETED sin despachar al bot).
+  markFailureLoaded: (failureId, note) => invokeWithLongTimeout('mark-failure-loaded', { failureId, note }),
 
   // Chat
   sendMessage: (chatId, content, imageUrl) => invokeWithTimeout('send-message', { chatId, content, imageUrl }),
@@ -69,15 +71,20 @@ contextBridge.exposeInMainWorld('api', {
   // Requests
   getRequests: (params) => invokeWithTimeout('get-requests', params || {}),
 
+  // Clipboard (native Electron fallback when navigator.clipboard is unavailable)
+  copyToClipboard: (text) => ipcRenderer.invoke('copy-to-clipboard', text),
+
   // Users management
-  getClients: () => invokeWithTimeout('get-clients'),
+  getClients: (params) => invokeWithTimeout('get-clients', params),
   toggleUserActive: (userId, isActive) => invokeWithTimeout('toggle-user-active', userId, isActive),
   createPanelUser: (targetUsername) => invokeWithTimeout('create-panel-user', targetUsername),
+  assignUserPanel: (userId, panelId) => invokeWithTimeout('assign-user-panel', userId, panelId),
 
   // Preloaded users (CSV bulk import)
   bulkImportPreloaded: (entries) => invokeWithTimeout('bulk-import-preloaded', entries),
   listPreloadedUsers: () => invokeWithTimeout('list-preloaded-users'),
   unflagPreloadedUser: (userId) => invokeWithTimeout('unflag-preloaded-user', userId),
+  updateUserPhone: (userId, phone) => invokeWithTimeout('update-user-phone', userId, phone),
 
   // Promotions
   broadcastPromo: (title, message) => invokeWithTimeout('broadcast-promo', { title, message }),
@@ -314,7 +321,7 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('complete-prize-claim', claimId, proofUrl, proofType),
   pickAndUploadPayoutProof: () => ipcRenderer.invoke('pick-and-upload-payout-proof'),
   rejectPrizeClaim: (claimId, reason) => ipcRenderer.invoke('reject-prize-claim', claimId, reason),
-  getPrizeClaims: () => ipcRenderer.invoke('get-prize-claims'),
+  getPrizeClaims: (scope) => ipcRenderer.invoke('get-prize-claims', scope),
   confirmOutboundPayment: (paymentId) => ipcRenderer.invoke('confirm-outbound-payment', paymentId),
   cancelOutboundPayment: (paymentId, reason) => ipcRenderer.invoke('cancel-outbound-payment', paymentId, reason),
   retryOutboundPayment: (paymentId) => ipcRenderer.invoke('retry-outbound-payment', paymentId),

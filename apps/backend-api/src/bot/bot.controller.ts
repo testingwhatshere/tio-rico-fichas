@@ -45,6 +45,23 @@ import { PrizeClaimsService } from '../prize-claims/prize-claims.service';
  * - GET  /bot/activity-window      - Check if within activity hours
  * - GET  /bot/state                - Get current bot state (admin)
  */
+/** Una acción del bot tal como la reporta la extensión. */
+interface BotSessionLogEntry {
+  sessionId: string;
+  action: string;
+  selector?: string;
+  url?: string;
+  value?: string;
+  startedAt: string;
+  completedAt?: string;
+  success?: boolean;
+  error?: string;
+  screenshotPath?: string;
+  jobId?: string;
+  step?: string;
+  metadata?: Record<string, any>;
+}
+
 @Controller('bot')
 @Public() // Exempt from JWT auth - uses API key instead
 @UseGuards(BotApiKeyGuard)
@@ -81,9 +98,19 @@ export class BotController {
   @HttpCode(HttpStatus.OK)
   async handleJobStarted(
     @Param('jobId') jobId: string,
-    @Body() body: { startedAt?: string },
+    @Body() body: { startedAt?: string; instanceId?: string },
+    @Headers('x-panel-id') panelId?: string,
   ) {
-    return this.botService.handleJobStarted(jobId, body.startedAt);
+    const instanceId =
+      typeof body?.instanceId === 'string' && body.instanceId.length <= 64
+        ? body.instanceId
+        : undefined;
+    return this.botService.handleJobStarted(
+      jobId,
+      body?.startedAt,
+      instanceId,
+      panelId,
+    );
   }
 
   /**
@@ -439,22 +466,7 @@ export class BotController {
   @Post('session-log')
   @HttpCode(HttpStatus.OK)
   async submitSessionLog(
-    @Body()
-    body: {
-      sessionId: string;
-      action: string;
-      selector?: string;
-      url?: string;
-      value?: string;
-      startedAt: string;
-      completedAt?: string;
-      success?: boolean;
-      error?: string;
-      screenshotPath?: string;
-      jobId?: string;
-      step?: string;
-      metadata?: Record<string, any>;
-    },
+    @Body() body: BotSessionLogEntry,
     @Headers('x-panel-id') panelId?: string,
   ) {
     await this.loggingService.logBotAction({
@@ -474,6 +486,52 @@ export class BotController {
     });
 
     return { success: true };
+  }
+
+  /**
+   * Batch de session logs.
+   *
+   * La extensión intenta este endpoint primero (`sendSessionLogBatch`) y, si no
+   * responde OK, reenvía las entradas de a una contra `session-log`. Mientras
+   * esta ruta no existió, cada tanda costaba un 404 + N requests individuales.
+   */
+  @Post('session-logs')
+  @HttpCode(HttpStatus.OK)
+  async submitSessionLogBatch(
+    @Body() body: { entries?: BotSessionLogEntry[] },
+    @Headers('x-panel-id') panelId?: string,
+  ) {
+    const entries = Array.isArray(body?.entries) ? body.entries : [];
+
+    for (const entry of entries) {
+      // Una entrada corrupta no puede tirar abajo la tanda entera: BotSessionLog
+      // es la única traza forense de lo que hizo el bot, conviene guardar lo que
+      // se pueda antes que perder las 20 por una.
+      try {
+        await this.loggingService.logBotAction({
+          sessionId: entry.sessionId,
+          action: entry.action,
+          selector: entry.selector,
+          url: entry.url,
+          value: entry.value,
+          startedAt: new Date(entry.startedAt),
+          completedAt: entry.completedAt
+            ? new Date(entry.completedAt)
+            : undefined,
+          success: entry.success,
+          error: entry.error,
+          screenshotPath: entry.screenshotPath,
+          jobId: entry.jobId,
+          step: entry.step,
+          metadata: { ...entry.metadata, panelId },
+        });
+      } catch (err) {
+        const motivo = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Session log batch: entrada descartada (${motivo})`);
+      }
+    }
+
+    return { success: true, received: entries.length };
   }
 
   /**

@@ -17,7 +17,12 @@ import { FILE_SIZE_LIMIT_BYTES } from '../common/constants/timeouts';
 import { MessagesService } from '../messages/messages.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { CreateRequestDto, ApproveRequestDto, RejectRequestDto } from './dto';
+import {
+  CreateRequestDto,
+  ApproveRequestDto,
+  RejectRequestDto,
+  RespondOverpaidOfferDto,
+} from './dto';
 import { ConfirmProofUploadDto } from '../uploads/dto';
 
 @Controller('requests')
@@ -136,7 +141,22 @@ export class RequestsController {
       user.sub,
       dto.cloudinaryUrl,
       dto.fileHash,
+      dto.canConfirmOverpaid === true,
     );
+  }
+
+  /**
+   * El jugador responde "transferiste de mas, ¿cargamos el monto del
+   * comprobante?". Aceptar aprueba la carga por lo transferido; rechazar la
+   * manda al operador como cualquier otra transferencia de mas.
+   */
+  @Post(':id/overpaid-offer')
+  async respondOverpaidOffer(
+    @Param('id') id: string,
+    @Body() dto: RespondOverpaidOfferDto,
+    @CurrentUser() user: { sub: string },
+  ) {
+    return this.requestsService.respondOverpaidOffer(id, user.sub, dto.accept);
   }
 
   /**

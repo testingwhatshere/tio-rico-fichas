@@ -11,6 +11,7 @@ import { EventsGateway } from '../events/events.gateway';
 import { OperatorGateway } from '../events/operator.gateway';
 import { TelegramService } from '../notifications/telegram.service';
 import { ChatStatus, ChatQueryDto, ChatResponseDto } from './dto';
+import { toDeliverableProofUrlOrNull } from '../common/utils/proof-url';
 
 @Injectable()
 export class ChatsService {
@@ -160,10 +161,6 @@ export class ChatsService {
           },
         },
         operator: { select: { id: true, email: true } },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
         _count: {
           select: {
             messages: {
@@ -192,10 +189,6 @@ export class ChatsService {
             },
           },
           operator: { select: { id: true, email: true } },
-          messages: {
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-          },
           _count: {
             select: {
               messages: {
@@ -216,10 +209,12 @@ export class ChatsService {
       });
 
       // Also emit on /operator namespace where the operator panel connects
-      this.operatorGateway.emitNewChat(this.formatChatResponse(chat));
+      const formatted = await this.formatChat(chat);
+      this.operatorGateway.emitNewChat(formatted);
+      return formatted;
     }
 
-    return this.formatChatResponse(chat);
+    return this.formatChat(chat);
   }
 
   /**
@@ -246,10 +241,6 @@ export class ChatsService {
           },
         },
         operator: { select: { id: true, email: true } },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
         _count: {
           select: {
             messages: {
@@ -264,7 +255,7 @@ export class ChatsService {
       throw new NotFoundException('Chat not found');
     }
 
-    return this.formatChatResponse(chat);
+    return (await this.formatChat(chat));
   }
 
   /**
@@ -296,10 +287,6 @@ export class ChatsService {
           },
         },
         operator: { select: { id: true, email: true } },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
         _count: {
           select: {
             messages: {
@@ -309,9 +296,14 @@ export class ChatsService {
         },
       },
       orderBy: { updatedAt: 'desc' },
+      // Sin cota traia TODOS los chats abiertos —con user, operator, ultimo
+      // mensaje y un count de no-leidos por cada uno— en cada conexion de cada
+      // operador. El gemelo `findAll` de este mismo servicio ya usaba take: 100.
+      // Van 150 y ordenados por actividad: lo de arriba es lo que se atiende.
+      take: 150,
     });
 
-    return chats.map((chat) => this.formatChatResponse(chat));
+    return this.formatChats(chats);
   }
 
   /**
@@ -331,10 +323,6 @@ export class ChatsService {
           },
         },
         operator: { select: { id: true, email: true } },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
         _count: {
           select: {
             messages: {
@@ -346,7 +334,7 @@ export class ChatsService {
       orderBy: { createdAt: 'asc' }, // FIFO
     });
 
-    return chats.map((chat) => this.formatChatResponse(chat));
+    return this.formatChats(chats);
   }
 
   /**
@@ -407,7 +395,6 @@ export class ChatsService {
                 },
               },
               operator: { select: { id: true, email: true } },
-              messages: { orderBy: { createdAt: 'desc' }, take: 1 },
               _count: {
                 select: {
                   messages: {
@@ -444,7 +431,7 @@ export class ChatsService {
       operatorId,
     });
 
-    return this.formatChatResponse(updatedChat);
+    return (await this.formatChat(updatedChat));
   }
 
   /**
@@ -497,7 +484,6 @@ export class ChatsService {
           },
         },
         operator: { select: { id: true, email: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
         _count: {
           select: {
             messages: {
@@ -528,7 +514,7 @@ export class ChatsService {
       closedById,
     });
 
-    return this.formatChatResponse(updatedChat);
+    return (await this.formatChat(updatedChat));
   }
 
   /**
@@ -564,10 +550,6 @@ export class ChatsService {
           },
         },
         operator: { select: { id: true, email: true } },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
         _count: {
           select: {
             messages: {
@@ -586,7 +568,7 @@ export class ChatsService {
       userId: chat.userId,
     });
 
-    return this.formatChatResponse(updatedChat);
+    return (await this.formatChat(updatedChat));
   }
 
   /**
@@ -606,10 +588,6 @@ export class ChatsService {
           },
         },
         operator: { select: { id: true, email: true } },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
         _count: {
           select: {
             messages: {
@@ -621,7 +599,7 @@ export class ChatsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return chats.map((chat) => this.formatChatResponse(chat));
+    return this.formatChats(chats);
   }
 
   /**
@@ -644,10 +622,6 @@ export class ChatsService {
           },
         },
         operator: { select: { id: true, email: true } },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
         _count: {
           select: {
             messages: {
@@ -657,9 +631,14 @@ export class ChatsService {
         },
       },
       orderBy: { updatedAt: 'desc' },
+      // Sin cota traia TODOS los chats abiertos —con user, operator, ultimo
+      // mensaje y un count de no-leidos por cada uno— en cada conexion de cada
+      // operador. El gemelo `findAll` de este mismo servicio ya usaba take: 100.
+      // Van 150 y ordenados por actividad: lo de arriba es lo que se atiende.
+      take: 150,
     });
 
-    return chats.map((chat) => this.formatChatResponse(chat));
+    return this.formatChats(chats);
   }
 
   /**
@@ -746,6 +725,9 @@ export class ChatsService {
       requests: requests.map((r) => ({
         ...r,
         amount: r.amount.toString(),
+        // Un PDF crudo de Cloudinary da 401: el operador abria el comprobante
+        // desde el chat y veia un recuadro vacio.
+        proofUrl: toDeliverableProofUrlOrNull(r.proofUrl),
       })),
       prizeClaims: prizeClaims.map((p) => ({
         ...p,
@@ -757,6 +739,46 @@ export class ChatsService {
   /**
    * Format chat for response
    */
+  /**
+   * El ultimo mensaje de cada chat va en una consulta aparte. Prisma 6 (sin
+   * relationJoins) resolvia `include: { messages: { take: 1 } }` trayendo TODOS
+   * los mensajes de los chats pedidos y cortando en memoria: ~4.600 mensajes
+   * por cada carga de la bandeja, y era lo que mas egress gastaba en Supabase.
+   * Con LATERAL + LIMIT 1 viaja una fila por chat.
+   */
+  private async attachLastMessages<T extends { id: string }>(
+    chats: T[],
+  ): Promise<Array<T & { messages: any[] }>> {
+    if (chats.length === 0) return [];
+    const rows = await this.prisma.$queryRaw<
+      Array<{ chatId: string; content: string; type: string; createdAt: Date }>
+    >`
+      SELECT c.id AS "chatId", m.content, m.type::text AS type, m."createdAt"
+      FROM unnest(${chats.map((c) => c.id)}::text[]) AS c(id)
+      CROSS JOIN LATERAL (
+        SELECT left(content, 300) AS content, type, "createdAt"
+        FROM "Message"
+        WHERE "chatId" = c.id
+        ORDER BY "createdAt" DESC
+        LIMIT 1
+      ) m`;
+    const byChat = new Map(rows.map((r) => [r.chatId, r]));
+    return chats.map((chat) => {
+      const last = byChat.get(chat.id);
+      return { ...chat, messages: last ? [last] : [] };
+    });
+  }
+
+  private async formatChat(chat: any): Promise<ChatResponseDto> {
+    const [withLast] = await this.attachLastMessages([chat]);
+    return this.formatChatResponse(withLast);
+  }
+
+  private async formatChats(chats: any[]): Promise<ChatResponseDto[]> {
+    const withLast = await this.attachLastMessages(chats);
+    return withLast.map((chat) => this.formatChatResponse(chat));
+  }
+
   private formatChatResponse(chat: any): ChatResponseDto {
     return {
       id: chat.id,

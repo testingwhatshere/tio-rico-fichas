@@ -12,6 +12,7 @@ import { EventsGateway } from '../events/events.gateway';
 import { ChatsGateway } from '../events/chats.gateway';
 import { OperatorGateway } from '../events/operator.gateway';
 import { ChatsService } from '../chats/chats.service';
+import { toDeliverableProofUrlOrNull } from '../common/utils/proof-url';
 import {
   SendMessageDto,
   GetMessagesQueryDto,
@@ -465,7 +466,7 @@ export class MessagesService {
           amount: message.request.amount.toString(),
           status: message.request.status,
           targetUsername: message.request.targetUsername,
-          proofUrl: message.request.proofUrl,
+          proofUrl: toDeliverableProofUrlOrNull(message.request.proofUrl),
         },
       }),
       sender: message.sender

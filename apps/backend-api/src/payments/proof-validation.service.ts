@@ -39,6 +39,13 @@ export interface ProofValidationResult {
     screenshot_quality?: string;
     editing_signs?: string;
   } | null;
+  /**
+   * Texto OCR crudo del comprobante (recortado a 4000 chars por el validador).
+   * Sirve para buscar cualquier identificador nuestro en TODO el comprobante en vez
+   * de depender de que el parser haya acertado el campo "Para". Opcional: un
+   * validador viejo no lo manda y el backend cae al chequeo por campos parseados.
+   */
+  ocrText?: string | null;
 }
 
 @Injectable()
@@ -49,6 +56,23 @@ export class ProofValidationService {
     @Inject(forwardRef(() => ValidatorGateway))
     private readonly validatorGateway: ValidatorGateway,
   ) {}
+
+  /**
+   * Durante un deploy o un corte corto el validador tarda unos segundos en
+   * reconectarse. Mandar la carga a revision manual en ese hueco frena a
+   * clientes con comprobantes perfectos (2026-10-08, nieva3): se espera un
+   * rato antes de darse por vencido.
+   */
+  async waitForValidator(maxWaitMs: number): Promise<boolean> {
+    const deadline = Date.now() + maxWaitMs;
+    while (
+      !this.validatorGateway.isValidatorConnected() &&
+      Date.now() < deadline
+    ) {
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+    return this.validatorGateway.isValidatorConnected();
+  }
 
   /**
    * Validate a payment proof image using remote validator (Ollama on client)
@@ -103,6 +127,7 @@ export class ProofValidationService {
         bankName: result.bankName ?? null,
         transactionStatus: result.transactionStatus ?? null,
         authenticityChecks: result.authenticityChecks ?? null,
+        ocrText: result.ocrText ?? null,
       };
     } catch (error: any) {
       this.logger.error(`Remote validation failed: ${error.message}`);

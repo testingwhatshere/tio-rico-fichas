@@ -71,6 +71,8 @@ export function useProofUpload({
             addBotMessage('Este comprobante ya fue usado en otra solicitud. Toca "Cambiar archivo" y subi uno diferente.');
           } else if (message.includes('10mb') || message.includes('excede')) {
             addBotMessage('El archivo es demasiado grande (max 10MB). Intenta con una imagen mas chica.');
+          } else if (!error?.response && message.includes('network')) {
+            addBotMessage('No pudimos enviar el comprobante. Revisa tu conexion, o guardalo en el telefono (o sacale una captura) y proba de nuevo.');
           } else if (message.includes('not configured') || message.includes('cloudinary')) {
             addBotMessage('El servicio de subida de archivos no esta disponible. Contacta soporte.');
           } else {

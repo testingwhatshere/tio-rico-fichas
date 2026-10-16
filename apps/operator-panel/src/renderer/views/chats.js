@@ -685,7 +685,7 @@ export function invalidatePanelInfo(userId) {
 const REQUEST_STATUS_LABELS = {
   VALIDATING: 'Validando',
   VALIDATION_FAILED: 'Validación falló',
-  PENDING_MP_VERIFICATION: 'Esperando MP',
+  PENDING_MP_VERIFICATION: 'En revision', // estado legado: ya no se entra aca
   APPROVED: 'Aprobado',
   PROCESSING: 'Cargando',
 };

@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { ModuleRef } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service';
+import { invalidateSettingsCache } from '../settings/settings-cache';
 import { EventsGateway } from '../events/events.gateway';
 import { BalanceService } from '../balance/balance.service';
 import { BotGateway } from './bot.gateway';
@@ -26,6 +27,7 @@ import {
 import {
   STALE_PROGRESS_MS,
   BOT_HEARTBEAT_TIMEOUT_MS,
+  HEARTBEAT_PERSIST_INTERVAL_MS,
 } from '../common/constants/timeouts';
 import { PrizeClaimsService } from '../prize-claims/prize-claims.service';
 import { ChatsService } from '../chats/chats.service';
@@ -68,6 +70,13 @@ export class BotService implements OnModuleInit {
     uptime: null,
   };
   private jobProgress: Map<string, JobProgress> = new Map();
+  // Ultimo estado efectivamente escrito en Setting, para no repetir upserts identicos.
+  private persistedState: {
+    status?: BotState['status'];
+    lastJobId?: string | null;
+    version?: string | null;
+  } = {};
+  private lastHeartbeatPersistedAt = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -117,6 +126,14 @@ export class BotService implements OnModuleInit {
         this.botState.version = map.get('BOT_VERSION')!;
       }
 
+      // Arrancamos sabiendo qué hay escrito (los valores crudos, no los ya
+      // reinterpretados arriba) para no reescribir lo mismo apenas levanta.
+      this.persistedState = {
+        status: map.get('BOT_STATUS') as BotState['status'] | undefined,
+        lastJobId: map.get('BOT_LAST_JOB_ID') ?? null,
+        version: map.get('BOT_VERSION') ?? null,
+      };
+
       this.logger.log(
         `Bot state restored from DB: status=${this.botState.status}`,
       );
@@ -127,27 +144,50 @@ export class BotService implements OnModuleInit {
 
   /**
    * Persist bot state to database (fire-and-forget)
+   *
+   * Solo escribe lo que cambio. Antes hacia los 4 upserts en cada heartbeat: 33.478
+   * llamadas y 409s de CPU de base en un mes, el 85% del tiempo total de queries del
+   * servicio. Todo eso se lee una sola vez, en onModuleInit.
    */
   private async persistBotState() {
     try {
-      const entries: { key: string; value: string }[] = [
-        { key: 'BOT_STATUS', value: this.botState.status },
-      ];
-      if (this.botState.lastHeartbeat) {
-        entries.push({
-          key: 'BOT_LAST_HEARTBEAT',
-          value: this.botState.lastHeartbeat.toISOString(),
-        });
+      const entries: { key: string; value: string }[] = [];
+
+      if (this.botState.status !== this.persistedState.status) {
+        entries.push({ key: 'BOT_STATUS', value: this.botState.status });
       }
-      if (this.botState.lastJobId) {
+      if (
+        this.botState.lastJobId &&
+        this.botState.lastJobId !== this.persistedState.lastJobId
+      ) {
         entries.push({
           key: 'BOT_LAST_JOB_ID',
           value: this.botState.lastJobId,
         });
       }
-      if (this.botState.version) {
+      if (
+        this.botState.version &&
+        this.botState.version !== this.persistedState.version
+      ) {
         entries.push({ key: 'BOT_VERSION', value: this.botState.version });
       }
+
+      // El heartbeat cambia cada 20s pero al reiniciar el backend el proximo llega
+      // enseguida, asi que refrescarlo cada 5 minutos alcanza. Si ya hay otra clave
+      // para escribir, se aprovecha el mismo viaje y queda coherente.
+      const now = Date.now();
+      const heartbeatDue =
+        now - this.lastHeartbeatPersistedAt >= HEARTBEAT_PERSIST_INTERVAL_MS;
+      const writeHeartbeat =
+        !!this.botState.lastHeartbeat && (heartbeatDue || entries.length > 0);
+      if (writeHeartbeat) {
+        entries.push({
+          key: 'BOT_LAST_HEARTBEAT',
+          value: this.botState.lastHeartbeat!.toISOString(),
+        });
+      }
+
+      if (entries.length === 0) return;
 
       await this.prisma.$transaction(
         entries.map(({ key, value }) =>
@@ -158,6 +198,15 @@ export class BotService implements OnModuleInit {
           }),
         ),
       );
+      invalidateSettingsCache();
+
+      // Recien cuando la escritura salio bien: si falla, el proximo intento reintenta.
+      this.persistedState = {
+        status: this.botState.status,
+        lastJobId: this.botState.lastJobId,
+        version: this.botState.version,
+      };
+      if (writeHeartbeat) this.lastHeartbeatPersistedAt = now;
     } catch (error) {
       this.logger.warn(`Failed to persist bot state: ${error.message}`);
     }
@@ -166,8 +215,39 @@ export class BotService implements OnModuleInit {
   /**
    * Handle job result from bot
    */
+  /** `jobId:panelId` → instancia de la extensión que la empezó (ver handleJobStarted). */
+  private readonly jobClaimants = new Map<
+    string,
+    { instanceId: string; at: number }
+  >();
+  private static readonly JOB_CLAIMANT_TTL_MS = 2 * 60 * 60 * 1000;
+
+  private pruneJobClaimants() {
+    const cutoff = Date.now() - BotService.JOB_CLAIMANT_TTL_MS;
+    for (const [key, owner] of this.jobClaimants) {
+      if (owner.at < cutoff) this.jobClaimants.delete(key);
+    }
+  }
+
+  private releaseJobClaims(jobId: string) {
+    for (const key of this.jobClaimants.keys()) {
+      if (key.startsWith(`${jobId}:`)) this.jobClaimants.delete(key);
+    }
+  }
+
   async handleJobResult(jobId: string, dto: JobResultDto) {
+    this.releaseJobClaims(jobId);
     this.logger.log(`Received job result for ${jobId}: success=${dto.success}`);
+
+    // El bot ya contestó: si después se desconecta, este job no se reencola.
+    try {
+      const { BotGateway } = require('./bot.gateway');
+      this.moduleRef
+        .get(BotGateway, { strict: false })
+        ?.releaseJobTracking?.(jobId);
+    } catch {
+      // El tracking es una optimización: sin él sólo se pierde el rescate rápido.
+    }
 
     // Find the job
     const job = await this.prisma.job.findUnique({
@@ -184,6 +264,36 @@ export class BotService implements OnModuleInit {
       this.logger.warn(
         `Job ${jobId} already in final state ${job.status}, ignoring duplicate result`,
       );
+      // Una confirmación de ÉXITO que llega tarde para un job que se dio por
+      // fallido (corte de red, timeout, chequeo de trabados) significa que la
+      // plata SÍ se movió en el panel. No se cambia el estado acá, pero el
+      // operador tiene que saberlo antes de reintentar: reintentar sería cargar
+      // dos veces (ver risk_load_indeterminate_after_aceptar).
+      if (
+        job.status === 'FAILED' &&
+        dto.success &&
+        (job.type === 'LOAD_CREDITS' || job.type === 'WITHDRAW_CHIPS')
+      ) {
+        const quien = job.targetUsername || job.request?.targetUsername || '?';
+        const monto = job.amount ?? job.request?.amount ?? '?';
+        this.logger.error(
+          `LATE SUCCESS for FAILED job ${jobId} (${job.type} ${quien} $${monto}): the panel operation DID happen`,
+        );
+        try {
+          this.eventsGateway.emitSystemAlert({
+            type: 'LATE_SUCCESS_FOR_FAILED_JOB',
+            severity: 'critical',
+            title: 'Una carga marcada como fallida SÍ se hizo',
+            message: `${job.type === 'WITHDRAW_CHIPS' ? 'El retiro' : 'La carga'} de $${monto} para ${quien} figuraba como fallida, pero el bot confirmó que se hizo en el panel. NO la reintentes: revisá el saldo del usuario en el panel.`,
+            jobId,
+            requestId: job.requestId,
+          });
+        } catch (err: any) {
+          this.logger.warn(
+            `No se pudo avisar el éxito tardío de ${jobId}: ${err.message}`,
+          );
+        }
+      }
       return {
         success: true,
         message: 'Job result already processed (idempotent)',
@@ -203,6 +313,93 @@ export class BotService implements OnModuleInit {
         screenshot: dto.screenshotPath || undefined,
       },
     });
+
+    // La verificación de fichas también viaja por la cola (antes se emitía directo al
+    // bot y chocaba con la carga en curso). El resultado vuelve por el mismo canal que
+    // cualquier job y se rutea al reclamo asociado mediante Job.prizeClaim.
+    if (job.type === 'VERIFY_CHIPS') {
+      // La lectura se guarda en el job: la consulta de saldo de TioRicoCargas
+      // (integrations) la lee de acá. Antes sólo iba al reclamo de premio.
+      const reading = ((dto as any)?.result ?? {}) as {
+        success?: boolean;
+        balance?: number;
+        error?: string;
+      };
+      await this.prisma.job
+        .update({
+          where: { id: jobId },
+          data: {
+            result: {
+              success: dto.success,
+              reading: {
+                success: reading.success ?? dto.success,
+                balance: reading.balance ?? (dto as any)?.balance ?? null,
+                error: reading.error ?? dto.error ?? null,
+              },
+            },
+          },
+        })
+        .catch((e: Error) =>
+          this.logger.warn(
+            `No se pudo guardar la lectura de ${jobId}: ${e.message}`,
+          ),
+        );
+
+      if (job.prizeClaim) {
+        try {
+          const prizeClaimsService = this.moduleRef.get(PrizeClaimsService, {
+            strict: false,
+          });
+          // Ojo con la diferencia: `dto.success` dice si el BOT pudo hacer su trabajo,
+          // no si el usuario tiene fichas. La lectura del panel viaja en `result`, y
+          // un "usuario no encontrado" llega como job exitoso con result.success=false.
+          const verify = ((dto as any)?.result ?? {}) as {
+            success?: boolean;
+            balance?: number;
+            error?: string;
+          };
+          await prizeClaimsService?.handleVerificationResult(
+            job.prizeClaim.id,
+            {
+              success: verify.success ?? dto.success,
+              balance: verify.balance ?? (dto as any)?.balance,
+              error: verify.error ?? dto.error,
+            },
+          );
+        } catch (error: any) {
+          this.logger.error(
+            `Failed to handle chip verification result: ${error.message}`,
+          );
+        }
+      } else {
+        // Sin reclamo: es una consulta de saldo (TioRicoCargas); la lectura ya
+        // quedó guardada arriba.
+        this.logger.log(
+          `VERIFY_CHIPS job ${jobId} sin reclamo: lectura guardada`,
+        );
+      }
+
+      // Liberar el panel igual que cualquier otro job: sin esto queda marcado busy y
+      // desaparece del discovery hasta reiniciar el backend.
+      this.jobProgress.delete(jobId);
+      this.botState.lastJobId = jobId;
+      this.botState.status = 'online';
+      this.persistBotState();
+      if (job.panelId) {
+        this.botGateway.markPanelIdle(job.panelId);
+        this.updatePanelState(job.panelId, {
+          status: 'online',
+          lastJobId: jobId,
+        });
+        this.eventEmitter.emit(AppEvent.JOB_COMPLETED, {
+          jobId,
+          panelId: job.panelId,
+        });
+      }
+      this.eventsGateway.emitDashboardUpdate();
+
+      return { success: true, message: 'Chip verification result processed' };
+    }
 
     // Handle WITHDRAW_CHIPS jobs (prize claims) separately
     if (job.type === 'WITHDRAW_CHIPS') {
@@ -391,6 +588,23 @@ export class BotService implements OnModuleInit {
             `Failed to persist default panelPassword after CREATE_USER: ${err.message}`,
           );
         }
+
+        // Avisar que salió bien.
+        //
+        // Antes sólo se emitía el fallo: cuando la creación funcionaba, el
+        // operador se quedaba con el "en proceso" del principio y nunca sabía
+        // si había terminado. Volvía a apretar el botón o preguntaba.
+        try {
+          this.eventsGateway.emitToOperators('create_user_succeeded', {
+            jobId,
+            targetUsername: job.targetUsername,
+            panelId: job.panelId,
+          });
+        } catch (err: any) {
+          this.logger.warn(
+            `Failed to emit create_user_succeeded: ${err.message}`,
+          );
+        }
       } else if (!dto.success) {
         try {
           this.eventsGateway.emitToOperators('create_user_failed', {
@@ -556,8 +770,41 @@ export class BotService implements OnModuleInit {
   /**
    * Handle job started notification from bot
    */
-  async handleJobStarted(jobId: string, startedAt?: string) {
+  async handleJobStarted(
+    jobId: string,
+    startedAt?: string,
+    instanceId?: string,
+    panelId?: string,
+  ) {
     this.logger.log(`Job ${jobId} started`);
+
+    // Una carga la ejecuta UNA sola instancia de la extensión. Si se perdió el
+    // ACK en un corte, el dispatcher puede habérsela pasado a otro socket; si ese
+    // socket es OTRA instancia (otro Chrome con el mismo panel), las dos
+    // avisarían "empecé" y las dos cargarían. La primera instancia que avisa se
+    // queda con la carga; cualquier otra recibe alreadyClaimed y aborta.
+    // (Chequeo y registro síncronos, antes de cualquier await: sin carreras.)
+    // Extensiones viejas no mandan instanceId: comportamiento de siempre.
+    // La clave incluye el panel: una carga revivida en OTRO panel (re-discovery)
+    // conserva el id y la toma otra instancia legítimamente.
+    const claimKey = `${jobId}:${panelId || '-'}`;
+    if (instanceId) {
+      this.pruneJobClaimants();
+      const owner = this.jobClaimants.get(claimKey);
+      if (owner && owner.instanceId !== instanceId) {
+        this.logger.warn(
+          `Job ${jobId} already started by instance ${owner.instanceId}; rejecting start from ${instanceId}`,
+        );
+        return {
+          success: true,
+          message: 'Job already started by another bot instance',
+          alreadyClaimed: true,
+        };
+      }
+      if (!owner) {
+        this.jobClaimants.set(claimKey, { instanceId, at: Date.now() });
+      }
+    }
 
     // Atomic claim: only update if still QUEUED (prevents two bots from both claiming)
     const claimed = await this.prisma.job.updateMany({
@@ -638,6 +885,19 @@ export class BotService implements OnModuleInit {
     } else if (job?.type === 'WITHDRAW_CHIPS') {
       // WITHDRAW_CHIPS jobs don't have a request — prize claim tracks its own status
       this.logger.log(`WITHDRAW_CHIPS job ${jobId} started`);
+    } else if (job?.type === 'VERIFY_CHIPS') {
+      // El bot dejó de hacer fila y se puso a leer el saldo: a partir de acá el
+      // reclamo espera minuto y medio, no cinco minutos.
+      try {
+        const {
+          PrizeClaimsService,
+        } = require('../prize-claims/prize-claims.service');
+        this.moduleRef
+          .get(PrizeClaimsService, { strict: false })
+          ?.onVerifyChipsStarted?.(jobId);
+      } catch {
+        // Si no se puede avisar, el timeout largo sigue cubriendo el caso.
+      }
     }
 
     // Update bot state
@@ -737,18 +997,47 @@ export class BotService implements OnModuleInit {
     );
 
     this.botState.lastHeartbeat = new Date();
-    this.botState.status = 'online';
+
+    // El heartbeat prueba que el bot está VIVO, no que esté libre. Antes esto
+    // hacía `status = 'online'` a secas, lo cual pisaba 'busy' y —peor— 'error'.
+    //
+    // Nunca se notó porque el heartbeat HTTP venía rebotando con 400 y este
+    // método no corría nunca. Al arreglar el DTO se despertó: con el heartbeat
+    // cada 24s, un bot que reportó 'error' (service-worker.js:1377) volvía solo
+    // a 'online' en menos de medio minuto y el operador no veía la falla. Eso
+    // rompe la regla de "si falla, STOP y esperar revisión manual".
+    //
+    // Un heartbeat solo puede levantar un bot que dábamos por muerto o del que
+    // no sabíamos nada. 'unknown' es el estado inicial tras reiniciar el backend
+    // sin nada persistido: dejarlo así hacía que el bot figurara 'unknown' para
+    // siempre, porque el heartbeat ya no lo pisa. Mismo criterio que la rama por
+    // panel de acá abajo.
+    if (
+      this.botState.status === 'offline' ||
+      this.botState.status === 'unknown'
+    ) {
+      this.botState.status = 'online';
+    }
+
     if (dto.version) this.botState.version = dto.version;
-    if (dto.uptime) this.botState.uptime = dto.uptime;
+    // La extensión manda `uptimeMinutes`; `uptime` es el nombre viejo. Antes solo
+    // se leía `uptime`, así que el uptime del bot figuraba siempre en blanco.
+    const uptime = dto.uptime ?? dto.uptimeMinutes;
+    if (uptime) this.botState.uptime = uptime;
     this.persistBotState();
 
-    // Update per-panel state
+    // Update per-panel state — mismo criterio: no pisar el status del panel.
     if (panelId) {
+      const previo = this.getPanelState(panelId);
+      const status =
+        !previo || previo.status === 'offline' || previo.status === 'unknown'
+          ? ('online' as const)
+          : previo.status;
       this.updatePanelState(panelId, {
-        status: 'online',
+        status,
         lastHeartbeat: new Date(),
         version: dto.version || null,
-        uptime: dto.uptime || null,
+        uptime: uptime || null,
       });
     }
 
@@ -886,7 +1175,10 @@ export class BotService implements OnModuleInit {
       this.eventsGateway.emitBotStatus({
         status: dto.status,
         panelId: panelId || 'default',
-        connectedPerPanel: Object.fromEntries(this.botStates),
+        // Cantidad de sockets vivos por panel, igual que el resto de los
+        // emisores de bot_status. Antes iban los BotState completos y la web de
+        // operadores (que hace `count > 0`) marcaba todos los paneles offline.
+        connectedPerPanel: this.botGateway.getConnectedCountPerPanel(),
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
@@ -1143,6 +1435,7 @@ export class BotService implements OnModuleInit {
       update: { value: JSON.stringify(result) },
       create: { key: 'SELECTOR_CHECK_LAST', value: JSON.stringify(result) },
     });
+    invalidateSettingsCache();
 
     // Alert via Telegram if required selectors are broken
     if (result.failed.length > 0) {

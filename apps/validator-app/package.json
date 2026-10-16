@@ -1,6 +1,6 @@
 {
   "name": "validator-app",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "description": "Validador de Comprobantes - Aplicacion de escritorio",
   "main": "src/main.js",
   "author": "Game Automation Platform",
@@ -9,7 +9,9 @@
     "start": "electron .",
     "dev": "electron .",
     "build": "electron-builder --win",
-    "build:win": "electron-builder --win"
+    "build:win": "electron-builder --win",
+    "start:server": "node src/headless.js",
+    "bench:server": "node server/bench.js"
   },
   "dependencies": {
     "pdf-poppler": "^0.2.1",

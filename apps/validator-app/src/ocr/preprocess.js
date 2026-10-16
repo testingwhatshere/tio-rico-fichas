@@ -60,129 +60,156 @@ async function preprocessForOCR(imageBuffer) {
 }
 
 /**
- * Generate multiple preprocessed variants for multi-pass OCR.
- * Each variant is optimized for different text types.
+ * Variantes de preprocesado para el OCR de varias pasadas, en el orden en que se
+ * prueban. Cada una se arma recién cuando se la pide (`getBuffer`, memoizado):
+ * armarlas todas de entrada costaba más que el OCR mismo en una CPU chica, y la
+ * mayoría de los comprobantes se resuelven con la primera pasada (corte temprano).
+ * Los parámetros de cada variante son los mismos de siempre.
  *
  * @param {Buffer} imageBuffer — Raw image buffer
- * @returns {Promise<Array<{name: string, buffer: Buffer, psm: number}>>}
+ * @returns {Promise<Array<{name: string, psm: number, getBuffer: () => Promise<Buffer>}>>}
  */
-async function generateOCRVariants(imageBuffer) {
+async function generateOCRVariantsLazy(imageBuffer) {
+  const fija = (name, buffer, psm) => ({ name, psm, getBuffer: async () => buffer });
+
   if (!sharp) {
-    return [{ name: 'original', buffer: imageBuffer, psm: 6 }];
+    return [fija('original', imageBuffer, 6)];
   }
 
   // Skip preprocessing for very small images (likely already processed)
   if (imageBuffer.length < 500) {
     logger.info('OCR', 'Image too small for preprocessing, using original');
-    return [{ name: 'original', buffer: imageBuffer, psm: 6 }];
+    return [fija('original', imageBuffer, 6)];
   }
+
+  let metaPromise = null;
+  const meta = () => (metaPromise ??= sharp(imageBuffer).metadata());
+
+  const lazy = (name, psm, build) => {
+    let promise = null;
+    return {
+      name,
+      psm,
+      getBuffer: () => {
+        if (!promise) {
+          promise = build().catch((err) => {
+            logger.warn('OCR', `${name} variant failed: ${err.message}`);
+            throw err;
+          });
+        }
+        return promise;
+      },
+    };
+  };
 
   const variants = [];
 
+  // Modo oscuro (AstroPay "Prueba de pago", 2026-10): las etiquetas y la fecha van en gris
+  // medio sobre una tarjeta casi negra. Ninguna variante de abajo las lee — o el threshold
+  // las funde con el fondo, o Tesseract las descarta por bajo contraste — y sin "Enviado
+  // por", "Receptor" ni "Coelsa ID" los patterns no tienen de dónde agarrarse. Estirando
+  // el rango oscuro (fondo ~35 → 0, gris ~110 → ~150) e invirtiendo, sale el comprobante
+  // entero. Va primera para que el corte temprano la pueda usar, y sólo en imágenes
+  // oscuras: en las claras no aporta y serían 3s más por comprobante.
+  if (await esModoOscuro(imageBuffer)) {
+    variants.push(lazy('dark-stretch', 4, async () => { // PSM 4 = una columna
+      const m = await meta();
+      return sharp(imageBuffer)
+        .resize(Math.min((m.width || 720) * 2, 1600), null, { fit: 'inside', withoutEnlargement: false })
+        .grayscale()
+        .linear(2.2, -100)
+        .negate()
+        .png()
+        .toBuffer();
+    }));
+  }
+
   // Always try the original image first — preprocessing sometimes destroys
   // detail (small text, thin strokes) that Tesseract could otherwise read.
-  variants.push({ name: 'original', buffer: imageBuffer, psm: 3 }); // PSM 3 = auto layout
+  variants.push(fija('original', imageBuffer, 3)); // PSM 3 = auto layout
 
-  try {
-    // Variant 1: Standard (good for document-style receipts)
-    const standard = await sharp(imageBuffer)
-      .resize(1200, null, { fit: 'inside', withoutEnlargement: false })
-      .grayscale()
-      .normalize()
-      .sharpen({ sigma: 1.5 })
-      .threshold(140)
-      .png()
-      .toBuffer();
-    variants.push({ name: 'standard', buffer: standard, psm: 6 });
-  } catch (err) {
-    logger.warn('OCR', `Standard variant failed: ${err.message}`);
-  }
+  // Texto gris claro sobre fondo claro (Brubank, 2026-10): la fecha va en gris ~#aaa sobre
+  // lila y ninguna variante la leía — el normalize+threshold(140) de las demás la funde con
+  // el fondo. Un umbral alto sin normalize la deja negra y nítida (probado 190–225: todos
+  // leen fecha y monto; 205 queda en el medio). Va segunda: si la original ya leyó todo,
+  // el corte temprano no llega a correrla.
+  variants.push(lazy('light-gray', 6, () => sharp(imageBuffer)
+    .resize(1400, null, { fit: 'inside', withoutEnlargement: false })
+    .grayscale()
+    .threshold(205)
+    .png()
+    .toBuffer()));
 
-  try {
-    // Variant 2: High contrast (better for large bold text like amounts)
-    const highContrast = await sharp(imageBuffer)
-      .resize(1400, null, { fit: 'inside', withoutEnlargement: false })
-      .grayscale()
-      .normalize()
-      .linear(1.8, -50) // Increase contrast aggressively
-      .sharpen({ sigma: 2.0 })
-      .threshold(120) // Lower threshold captures more dark text
-      .png()
-      .toBuffer();
-    variants.push({ name: 'high-contrast', buffer: highContrast, psm: 11 }); // PSM 11 = sparse text
-  } catch (err) {
-    logger.warn('OCR', `High-contrast variant failed: ${err.message}`);
-  }
+  // Variant 1: Standard (good for document-style receipts)
+  variants.push(lazy('standard', 6, () => sharp(imageBuffer)
+    .resize(1200, null, { fit: 'inside', withoutEnlargement: false })
+    .grayscale()
+    .normalize()
+    .sharpen({ sigma: 1.5 })
+    .threshold(140)
+    .png()
+    .toBuffer()));
 
-  try {
-    // Variant 3: Inverted (catches text that's light on dark background)
-    const inverted = await sharp(imageBuffer)
-      .resize(1200, null, { fit: 'inside', withoutEnlargement: false })
-      .grayscale()
-      .normalize()
-      .negate() // Invert colors
-      .threshold(140)
-      .png()
-      .toBuffer();
-    variants.push({ name: 'inverted', buffer: inverted, psm: 6 });
-  } catch (err) {
-    logger.warn('OCR', `Inverted variant failed: ${err.message}`);
-  }
+  // Variant 2: High contrast (better for large bold text like amounts)
+  variants.push(lazy('high-contrast', 11, () => sharp(imageBuffer) // PSM 11 = sparse text
+    .resize(1400, null, { fit: 'inside', withoutEnlargement: false })
+    .grayscale()
+    .normalize()
+    .linear(1.8, -50) // Increase contrast aggressively
+    .sharpen({ sigma: 2.0 })
+    .threshold(120) // Lower threshold captures more dark text
+    .png()
+    .toBuffer()));
 
-  try {
-    // Variant 4: Downscale (paradoxically, *very large* fonts read better when shrunk —
-    // Tesseract's LSTM was trained on small text and gets confused by huge bold characters).
-    const downscale = await sharp(imageBuffer)
-      .resize(800, null, { fit: 'inside', withoutEnlargement: false })
-      .grayscale()
-      .normalize()
-      .sharpen({ sigma: 1.2 })
-      .threshold(140)
-      .png()
-      .toBuffer();
-    variants.push({ name: 'downscale', buffer: downscale, psm: 6 });
-  } catch (err) {
-    logger.warn('OCR', `Downscale variant failed: ${err.message}`);
-  }
+  // Variant 3: Inverted (catches text that's light on dark background)
+  variants.push(lazy('inverted', 6, () => sharp(imageBuffer)
+    .resize(1200, null, { fit: 'inside', withoutEnlargement: false })
+    .grayscale()
+    .normalize()
+    .negate() // Invert colors
+    .threshold(140)
+    .png()
+    .toBuffer()));
 
-  try {
-    // Variant 5: Number-focused (PSM 7 single line + heavy contrast — optimized for the
-    // bold amount line). Whitelist is applied in worker.js when name='number-focused'.
-    const numberFocused = await sharp(imageBuffer)
-      .resize(1600, null, { fit: 'inside', withoutEnlargement: false })
-      .grayscale()
-      .normalize()
-      .linear(2.0, -80) // Very high contrast
-      .sharpen({ sigma: 2.5 })
-      .threshold(100)
-      .png()
-      .toBuffer();
-    variants.push({ name: 'number-focused', buffer: numberFocused, psm: 11 });
-  } catch (err) {
-    logger.warn('OCR', `Number-focused variant failed: ${err.message}`);
-  }
+  // Variant 4: Downscale (paradoxically, *very large* fonts read better when shrunk —
+  // Tesseract's LSTM was trained on small text and gets confused by huge bold characters).
+  variants.push(lazy('downscale', 6, () => sharp(imageBuffer)
+    .resize(800, null, { fit: 'inside', withoutEnlargement: false })
+    .grayscale()
+    .normalize()
+    .sharpen({ sigma: 1.2 })
+    .threshold(140)
+    .png()
+    .toBuffer()));
+
+  // Variant 5: Number-focused (PSM 7 single line + heavy contrast — optimized for the
+  // bold amount line). Whitelist is applied in worker.js when name='number-focused'.
+  variants.push(lazy('number-focused', 11, () => sharp(imageBuffer)
+    .resize(1600, null, { fit: 'inside', withoutEnlargement: false })
+    .grayscale()
+    .normalize()
+    .linear(2.0, -80) // Very high contrast
+    .sharpen({ sigma: 2.5 })
+    .threshold(100)
+    .png()
+    .toBuffer()));
 
   // Variant 6: Top-half crop @ high zoom — MP/MercadoPago renders the headline
   // amount in huge bold font in the upper portion of the receipt. By cropping
   // and zooming, we give Tesseract a clearer shot at it without the rest of the
   // page noise.
-  try {
-    const meta = await sharp(imageBuffer).metadata();
-    if (meta.width && meta.height) {
-      const topHalf = await sharp(imageBuffer)
-        .extract({ left: 0, top: 0, width: meta.width, height: Math.floor(meta.height * 0.55) })
-        .resize(2400, null, { fit: 'inside', withoutEnlargement: false })
-        .grayscale()
-        .normalize()
-        .linear(1.6, -40)
-        .sharpen({ sigma: 2.0 })
-        .threshold(130)
-        .png()
-        .toBuffer();
-      variants.push({ name: 'top-half-zoom', buffer: topHalf, psm: 6 });
-    }
-  } catch (err) {
-    logger.warn('OCR', `Top-half-zoom variant failed: ${err.message}`);
+  const m = await meta().catch(() => ({}));
+  if (m.width && m.height) {
+    variants.push(lazy('top-half-zoom', 6, () => sharp(imageBuffer)
+      .extract({ left: 0, top: 0, width: m.width, height: Math.floor(m.height * 0.55) })
+      .resize(2400, null, { fit: 'inside', withoutEnlargement: false })
+      .grayscale()
+      .normalize()
+      .linear(1.6, -40)
+      .sharpen({ sigma: 2.0 })
+      .threshold(130)
+      .png()
+      .toBuffer()));
   }
 
   // Variant 6b: Native-resolution negate + high threshold.
@@ -192,62 +219,81 @@ async function generateOCRVariants(imageBuffer) {
   // El LSTM de Tesseract se degrada con fuentes >100px, así que cualquier resize
   // que agrande el monto bold lo hace ilegible. La imagen nativa (~420px) lo
   // mantiene en un tamaño cómodo para el modelo.
-  try {
-    const nativeNegate = await sharp(imageBuffer)
-      .grayscale()
-      .negate()
-      .threshold(180)
-      .png()
-      .toBuffer();
-    variants.push({ name: 'native-negate', buffer: nativeNegate, psm: 6 });
-  } catch (err) {
-    logger.warn('OCR', `Native-negate variant failed: ${err.message}`);
-  }
+  variants.push(lazy('native-negate', 6, () => sharp(imageBuffer)
+    .grayscale()
+    .negate()
+    .threshold(180)
+    .png()
+    .toBuffer()));
 
   // Variant 6c: idem pero threshold más bajo, en caso que el gradient sea
   // más oscuro (Itaú top naranja, MODO azul institucional) y necesite cortar
   // antes para no fundir fondo+texto.
-  try {
-    const nativeNegateSoft = await sharp(imageBuffer)
-      .grayscale()
-      .negate()
-      .threshold(160)
-      .png()
-      .toBuffer();
-    variants.push({ name: 'native-negate-soft', buffer: nativeNegateSoft, psm: 6 });
-  } catch (err) {
-    logger.warn('OCR', `Native-negate-soft variant failed: ${err.message}`);
-  }
+  variants.push(lazy('native-negate-soft', 6, () => sharp(imageBuffer)
+    .grayscale()
+    .negate()
+    .threshold(160)
+    .png()
+    .toBuffer()));
 
   // Variant 7: digits-only PSM 7 (single line treated as one text line).
   // Aggressive zoom + strict whitelist (applied in worker.js when name starts with
   // 'digits-only'). Designed for the case where the amount is rendered alone on
   // its own visual line in a custom font.
-  try {
-    const digitsOnly = await sharp(imageBuffer)
-      .resize(2000, null, { fit: 'inside', withoutEnlargement: false })
-      .grayscale()
-      .normalize()
-      .linear(1.8, -60)
-      .sharpen({ sigma: 2.0 })
-      .threshold(140)
-      .png()
-      .toBuffer();
-    variants.push({ name: 'digits-only', buffer: digitsOnly, psm: 7 });
-  } catch (err) {
-    logger.warn('OCR', `Digits-only variant failed: ${err.message}`);
-  }
-
-  // Always include original as fallback
-  if (variants.length === 0) {
-    variants.push({ name: 'original', buffer: imageBuffer, psm: 6 });
-  }
+  variants.push(lazy('digits-only', 7, () => sharp(imageBuffer)
+    .resize(2000, null, { fit: 'inside', withoutEnlargement: false })
+    .grayscale()
+    .normalize()
+    .linear(1.8, -60)
+    .sharpen({ sigma: 2.0 })
+    .threshold(140)
+    .png()
+    .toBuffer()));
 
   return variants;
+}
+
+/**
+ * Igual que generateOCRVariantsLazy pero con todos los buffers ya armados
+ * (`buffer`). Lo usan las herramientas de tools/; las que fallan se omiten.
+ *
+ * @param {Buffer} imageBuffer — Raw image buffer
+ * @returns {Promise<Array<{name: string, buffer: Buffer, psm: number}>>}
+ */
+async function generateOCRVariants(imageBuffer) {
+  const lazy = await generateOCRVariantsLazy(imageBuffer);
+  const variants = [];
+  for (const v of lazy) {
+    try {
+      variants.push({ name: v.name, buffer: await v.getBuffer(), psm: v.psm });
+    } catch (_) { /* ya logueado */ }
+  }
+  if (variants.length === 0) variants.push({ name: 'original', buffer: imageBuffer, psm: 6 });
+  return variants;
+}
+
+/**
+ * Si la mayor parte de la imagen es casi negra. Se mira una miniatura: alcanza para la
+ * proporción y no cuesta nada. El 40% deja afuera los comprobantes claros con un header
+ * oscuro (MP, Itaú) y agarra los de tema oscuro aunque tengan barra de estado blanca.
+ */
+async function esModoOscuro(imageBuffer) {
+  try {
+    const { data } = await sharp(imageBuffer)
+      .resize(100, null, { fit: 'inside' })
+      .grayscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    let oscuros = 0;
+    for (const p of data) if (p < 60) oscuros++;
+    return oscuros / data.length > 0.4;
+  } catch {
+    return false;
+  }
 }
 
 function isAvailable() {
   return !!sharp;
 }
 
-module.exports = { preprocessForOCR, generateOCRVariants, isAvailable };
+module.exports = { preprocessForOCR, generateOCRVariants, generateOCRVariantsLazy, esModoOscuro, isAvailable };

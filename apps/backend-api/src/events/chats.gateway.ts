@@ -26,6 +26,7 @@ import { RequestsService } from '../requests/requests.service';
 import { EventsGateway } from './events.gateway';
 import { getCorsOrigin } from '../common/cors.config';
 import { sanitizeError } from '../common/sanitize-error';
+import { toDeliverableProofUrlOrNull } from '../common/utils/proof-url';
 
 /**
  * ChatsGateway - Dedicated namespace for Chat App
@@ -433,7 +434,7 @@ export class ChatsGateway
     this.server.to(`user:${userId}`).emit('request_status_update', {
       requestId: data.requestId,
       status: data.status,
-      proofUrl: data.proofUrl,
+      proofUrl: toDeliverableProofUrlOrNull(data.proofUrl),
       validationScore: data.validationScore,
     });
   }

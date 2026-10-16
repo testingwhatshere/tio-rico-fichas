@@ -240,16 +240,67 @@ async function loadPreloadedList() {
     listEl.innerHTML = list
       .map(
         (u) => `
-        <div style="display:flex; align-items:center; padding:10px; border-bottom:1px solid rgba(255,255,255,0.05);">
+        <div style="display:flex; align-items:center; padding:10px; border-bottom:1px solid rgba(255,255,255,0.05);" data-row-id="${escapeHtml(u.id)}">
           <div style="flex:1;">
             <div style="font-weight:600;">${escapeHtml(u.username || '-')}</div>
-            <div style="font-size:0.8rem; color:#94a3b8;">${escapeHtml(u.phone || '-')}${u.panelId ? ' · panel ' + escapeHtml(u.panelId) : ''}</div>
+            <div style="font-size:0.8rem; color:#94a3b8;" data-phone-label="${escapeHtml(u.id)}">${escapeHtml(u.phone || '-')}${u.panelId ? ' · panel ' + escapeHtml(u.panelId) : ''}</div>
           </div>
+          <button data-editphone-id="${escapeHtml(u.id)}" data-phone="${escapeHtml(u.phone || '')}" class="btn btn-secondary btn-sm" style="margin-right:6px;">Editar tel.</button>
           <button data-unflag-id="${escapeHtml(u.id)}" class="btn btn-secondary btn-sm">Quitar</button>
         </div>
       `,
       )
       .join('');
+    listEl.querySelectorAll('button[data-editphone-id]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-editphone-id');
+        const currentPhone = btn.getAttribute('data-phone') || '';
+        const row = listEl.querySelector(`div[data-row-id="${id}"]`);
+        if (!row || row.querySelector('input[data-phone-input]')) return;
+        // Inline editor (prompt() is unavailable in Electron).
+        const editor = document.createElement('div');
+        editor.style.cssText = 'display:flex; align-items:center; gap:6px;';
+        editor.innerHTML = `
+          <input data-phone-input type="tel" value="${escapeHtml(currentPhone)}" placeholder="Nuevo teléfono"
+            style="padding:4px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:#1e293b; color:#fff; width:150px;">
+          <button data-phone-save class="btn btn-primary btn-sm">Guardar</button>
+          <button data-phone-cancel class="btn btn-secondary btn-sm">Cancelar</button>
+        `;
+        // Replace the two action buttons with the editor
+        const editBtn = row.querySelector(`button[data-editphone-id="${id}"]`);
+        const unflagBtn = row.querySelector(`button[data-unflag-id="${id}"]`);
+        if (editBtn) editBtn.style.display = 'none';
+        if (unflagBtn) unflagBtn.style.display = 'none';
+        row.appendChild(editor);
+        const input = editor.querySelector('input[data-phone-input]');
+        input?.focus();
+        const restore = () => {
+          editor.remove();
+          if (editBtn) editBtn.style.display = '';
+          if (unflagBtn) unflagBtn.style.display = '';
+        };
+        editor.querySelector('button[data-phone-cancel]')?.addEventListener('click', restore);
+        editor.querySelector('button[data-phone-save]')?.addEventListener('click', async () => {
+          const phone = (input?.value || '').trim();
+          const digits = phone.replace(/\D/g, '');
+          if (digits.length < 7 || digits.length > 15) {
+            showToast('El teléfono debe tener entre 7 y 15 dígitos', 'error');
+            return;
+          }
+          const saveBtn = editor.querySelector('button[data-phone-save]');
+          if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Guardando...'; }
+          try {
+            const res = await window.api.updateUserPhone(id, phone);
+            if (res?.error) throw new Error(res.error);
+            showToast('Teléfono actualizado', 'success');
+            await loadPreloadedList();
+          } catch (err) {
+            showToast(err.message || 'No se pudo actualizar', 'error');
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Guardar'; }
+          }
+        });
+      });
+    });
     listEl.querySelectorAll('button[data-unflag-id]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const id = btn.getAttribute('data-unflag-id');

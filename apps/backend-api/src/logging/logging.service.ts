@@ -481,6 +481,14 @@ export class LoggingService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /** Lo último que reportó el bot, sea de qué job sea. */
+  async getRecentBotSessionLogs(limit = 100) {
+    return this.prisma.botSessionLog.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+  }
+
   async getJobBotLogs(jobId: string) {
     return this.prisma.botSessionLog.findMany({
       where: { jobId },

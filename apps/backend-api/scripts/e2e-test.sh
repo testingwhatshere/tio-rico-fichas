@@ -4,7 +4,7 @@
 
 set -u
 
-API="https://tiorico-api.onrender.com/api"
+API="https://tiorico-api-axfb.onrender.com/api"
 PASS=0
 FAIL=0
 FAILED_TESTS=()

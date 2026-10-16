@@ -300,6 +300,14 @@
           <span>Solicitudes</span>
         </button>
 
+        <button class="nav-item" data-view="approved-loads" title="Cargas ya aprobadas con su comprobante">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 12l2 2 4-4"/>
+            <path d="M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+          </svg>
+          <span>Cargas Aprobadas</span>
+        </button>
+
         <button class="nav-item" data-view="payments" title="Pagos Salientes (Alt+Y)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
           <span>Pagos</span>
@@ -614,6 +622,23 @@
           <div class="jobs-list" id="requests-list">
             <div class="empty-state">
               <p>Cargando solicitudes...</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Cargas Aprobadas View -->
+        <section id="view-approved-loads" class="view">
+          <div class="view-toolbar">
+            <input type="text" id="approved-loads-search" placeholder="Buscar por usuario, email o nro de operacion..." class="search-input" style="margin-bottom: 8px; width: 100%;">
+            <div class="filter-tabs">
+              <button class="filter-tab active" data-approved-loads-filter="COMPLETED">Completadas</button>
+              <button class="filter-tab" data-approved-loads-filter="APPROVED">Aprobadas</button>
+              <button class="filter-tab" data-approved-loads-filter="PROCESSING">Procesando</button>
+            </div>
+          </div>
+          <div class="approved-loads-list" id="approved-loads-list">
+            <div class="empty-state">
+              <p>Cargando cargas aprobadas...</p>
             </div>
           </div>
         </section>
@@ -1324,6 +1349,13 @@
               <path d="M6 18L18 6M6 6l12 12"/>
             </svg>
             Rechazar (R)
+          </button>
+          <button class="btn btn-outline" id="modal-mark-loaded-btn" title="Ya cargaste las fichas a mano: cierra la solicitud como completada sin mandar el bot">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 11l3 3L22 4"/>
+              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+            </svg>
+            Ya cargada a mano
           </button>
           <button class="btn btn-primary" id="modal-approve-btn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

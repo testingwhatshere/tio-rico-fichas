@@ -2,7 +2,8 @@
  * OCR Pattern Registry — Auto-detection of payment platform from receipt text.
  *
  * Architecture:
- * - platforms.js: Declarative config for each bank/wallet (keywords + optional overrides)
+ * - platforms.js: Declarative config for each bank/wallet (keywords + optional overrides
+ *   + optional limpiarTexto para descartar bloques que no son parte del comprobante)
  * - generic.js: THE single extractor that uses _helpers.js for all fields
  * - _helpers.js: Shared regex-based extraction functions (amount, date, sender, etc.)
  *
@@ -27,6 +28,14 @@ function detectPlatform(lowerText) {
       if (blocked) continue;
     }
 
+    // `matches` es para los casos que una lista de palabras no puede expresar: cuando la
+    // misma palabra aparece como emisor o como receptor según el comprobante, y sólo uno
+    // de los dos define el formato. Si está, manda sobre `keywords`.
+    if (typeof platform.matches === 'function') {
+      if (platform.matches(lowerText)) return platform;
+      continue;
+    }
+
     const matched = platform.keywords.some(kw => lowerText.includes(kw));
     if (matched) return platform;
   }
@@ -46,7 +55,11 @@ function detectAndExtract(text, expectedAmount = null) {
   const platform = detectPlatform(lower);
 
   if (platform) {
-    const fields = extract(text, platform.overrides || {}, platform.name, expectedAmount);
+    // Algunas billeteras imprimen publicidad debajo del comprobante. Se limpia ANTES de
+    // extraer para que ese bloque no compita por el monto ni por la fecha: es opt-in por
+    // plataforma, así una billetera no hereda el recorte pensado para otra.
+    const util = platform.limpiarTexto ? platform.limpiarTexto(text) : text;
+    const fields = extract(util, platform.overrides || {}, platform.name, expectedAmount);
     return {
       platform: platform.id,
       platformName: platform.name,

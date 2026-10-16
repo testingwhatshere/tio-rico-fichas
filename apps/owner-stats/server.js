@@ -1,255 +1,208 @@
 /**
  * owner-stats — Panel de KPIs de negocio para el dueño.
  *
- * Lee la DB de producción en modo SOLO LECTURA (default_transaction_read_only)
- * y sirve un dashboard estático. Única env var requerida: DATABASE_URL.
+ * Lee la DB de producción en modo SOLO LECTURA y sirve un dashboard estático.
+ * Única env var obligatoria: DATABASE_URL.
+ *
+ * Opcionales:
+ *   DASHBOARD_TZ        zona horaria del negocio (default Buenos Aires)
+ *   DASHBOARD_USER/PASS si están las dos, el panel pide usuario y contraseña
+ *   CACHE_TTL_MS        frescura del cache (default 60s)
+ *   QUERY_TIMEOUT_MS    corte por query (default 15s)
+ *   PG_POOL_MAX         conexiones máximas (default 4)
  */
 const express = require('express');
 const path = require('path');
-const { Pool } = require('pg');
+const { ping } = require('./src/db');
+const rangos = require('./src/ranges');
+const resumen = require('./src/resumen');
+const csv = require('./src/csv');
+const { q } = require('./src/db');
 
 const PORT = process.env.PORT || 3010;
-const TZ = process.env.DASHBOARD_TZ || 'America/Argentina/Buenos_Aires';
-const CACHE_TTL_MS = 60_000;
-
-if (!process.env.DATABASE_URL) {
-  console.error('Falta DATABASE_URL');
-  process.exit(1);
-}
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: 3,
-  idleTimeoutMillis: 30_000,
-  ssl: { rejectUnauthorized: false },
-});
-
-// Toda conexión del pool queda en solo-lectura: este servicio jamás escribe.
-pool.on('connect', (client) => {
-  client.query('SET default_transaction_read_only = on').catch(() => {});
-});
-
-// Expresiones SQL whitelisteadas para el inicio de cada período (en hora argentina).
-const RANGE_FROM_SQL = {
-  hoy: `date_trunc('day', (now() at time zone '${TZ}')) at time zone '${TZ}'`,
-  '7d': `now() - interval '7 days'`,
-  mes: `date_trunc('month', (now() at time zone '${TZ}')) at time zone '${TZ}'`,
-  '30d': `now() - interval '30 days'`,
-  todo: `to_timestamp(0)`,
-};
-
-const num = (v) => Number(v) || 0;
-
-async function q(sql, params = []) {
-  const { rows } = await pool.query(sql, params);
-  return rows;
-}
-
-async function getSummary(range) {
-  const fromSql = RANGE_FROM_SQL[range] || RANGE_FROM_SQL.hoy;
-
-  const [
-    cargas,
-    premiosPedidos,
-    premiosEstados,
-    usuariosActivos,
-    usuariosNuevos,
-    porPanel,
-    diarioCargas,
-    diarioPremios,
-    porHora,
-    mensualCargas,
-    mensualPremios,
-    totales,
-  ] = await Promise.all([
-    // Cargas completadas del período (dinero que entró)
-    q(`SELECT COUNT(*)::int AS count,
-              COALESCE(SUM(amount), 0)::float AS monto,
-              COALESCE(AVG(amount), 0)::float AS promedio
-       FROM "Request"
-       WHERE status = 'COMPLETED' AND "updatedAt" >= ${fromSql}`),
-
-    // Premios pedidos en el período (todos los estados)
-    q(`SELECT COUNT(*)::int AS count, COALESCE(SUM(amount), 0)::float AS monto
-       FROM "PrizeClaim"
-       WHERE "createdAt" >= ${fromSql}`),
-
-    // Premios del período agrupados por estado
-    q(`SELECT
-         COUNT(*) FILTER (WHERE status = 'COMPLETED')::int AS pagados,
-         COALESCE(SUM(amount) FILTER (WHERE status = 'COMPLETED'), 0)::float AS pagados_monto,
-         COUNT(*) FILTER (WHERE status = 'REJECTED')::int AS rechazados,
-         COUNT(*) FILTER (WHERE status NOT IN ('COMPLETED', 'REJECTED'))::int AS en_proceso
-       FROM "PrizeClaim"
-       WHERE "updatedAt" >= ${fromSql}`),
-
-    // Jugadores que cargaron en el período
-    q(`SELECT COUNT(DISTINCT "userId")::int AS count
-       FROM "Request"
-       WHERE "createdAt" >= ${fromSql}`),
-
-    // Jugadores nuevos en el período
-    q(`SELECT COUNT(*)::int AS count
-       FROM "User"
-       WHERE role = 'CLIENT' AND "createdAt" >= ${fromSql}`),
-
-    // Cargas por panel en el período — lo más pedido por el dueño
-    q(`SELECT COALESCE(p.name, 'Sin panel') AS panel,
-              COUNT(*)::int AS cargas,
-              COALESCE(SUM(r.amount), 0)::float AS monto
-       FROM "Request" r
-       LEFT JOIN "Panel" p ON p.id = r."panelId"
-       WHERE r.status = 'COMPLETED' AND r."updatedAt" >= ${fromSql}
-       GROUP BY 1
-       ORDER BY 3 DESC`),
-
-    // Serie diaria fija: últimos 30 días de entradas
-    q(`SELECT to_char(("updatedAt" at time zone '${TZ}')::date, 'YYYY-MM-DD') AS fecha,
-              COUNT(*)::int AS cargas,
-              COALESCE(SUM(amount), 0)::float AS monto
-       FROM "Request"
-       WHERE status = 'COMPLETED' AND "updatedAt" >= now() - interval '30 days'
-       GROUP BY 1`),
-
-    // Serie diaria fija: últimos 30 días de premios pagados
-    q(`SELECT to_char(("updatedAt" at time zone '${TZ}')::date, 'YYYY-MM-DD') AS fecha,
-              COALESCE(SUM(amount), 0)::float AS monto
-       FROM "PrizeClaim"
-       WHERE status = 'COMPLETED' AND "updatedAt" >= now() - interval '30 days'
-       GROUP BY 1`),
-
-    // A qué hora se carga más (últimos 30 días)
-    q(`SELECT EXTRACT(HOUR FROM ("updatedAt" at time zone '${TZ}'))::int AS hora,
-              COUNT(*)::int AS cargas
-       FROM "Request"
-       WHERE status = 'COMPLETED' AND "updatedAt" >= now() - interval '30 days'
-       GROUP BY 1`),
-
-    // Mes a mes: últimos 12 meses de cargas
-    q(`SELECT to_char(date_trunc('month', ("updatedAt" at time zone '${TZ}')), 'YYYY-MM') AS mes,
-              COUNT(*)::int AS cargas,
-              COALESCE(SUM(amount), 0)::float AS monto
-       FROM "Request"
-       WHERE status = 'COMPLETED'
-         AND "updatedAt" >= (date_trunc('month', now() at time zone '${TZ}') - interval '11 months') at time zone '${TZ}'
-       GROUP BY 1`),
-
-    // Mes a mes: últimos 12 meses de premios pagados
-    q(`SELECT to_char(date_trunc('month', ("updatedAt" at time zone '${TZ}')), 'YYYY-MM') AS mes,
-              COUNT(*)::int AS premios,
-              COALESCE(SUM(amount), 0)::float AS monto
-       FROM "PrizeClaim"
-       WHERE status = 'COMPLETED'
-         AND "updatedAt" >= (date_trunc('month', now() at time zone '${TZ}') - interval '11 months') at time zone '${TZ}'
-       GROUP BY 1`),
-
-    // Totales históricos
-    q(`SELECT
-         (SELECT COUNT(*)::int FROM "Request" WHERE status = 'COMPLETED') AS cargas_total,
-         (SELECT COALESCE(SUM(amount), 0)::float FROM "Request" WHERE status = 'COMPLETED') AS entradas_total,
-         (SELECT COALESCE(SUM(amount), 0)::float FROM "PrizeClaim" WHERE status = 'COMPLETED') AS premios_total,
-         (SELECT COUNT(*)::int FROM "User" WHERE role = 'CLIENT') AS jugadores_total`),
-  ]);
-
-  const c = cargas[0];
-  const pe = premiosEstados[0];
-  const t = totales[0];
-
-  // Rellenar los 30 días (incluye días sin actividad) en hora argentina
-  const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ });
-  const cargasByDay = new Map(diarioCargas.map((r) => [r.fecha, r]));
-  const premiosByDay = new Map(diarioPremios.map((r) => [r.fecha, r]));
-  const diario = [];
-  for (let i = 29; i >= 0; i--) {
-    const fecha = dayFmt.format(new Date(Date.now() - i * 86_400_000));
-    diario.push({
-      fecha,
-      cargas: num(cargasByDay.get(fecha)?.cargas),
-      entradas: num(cargasByDay.get(fecha)?.monto),
-      premios: num(premiosByDay.get(fecha)?.monto),
-    });
-  }
-
-  // Rellenar las 24 horas
-  const horaMap = new Map(porHora.map((r) => [r.hora, r.cargas]));
-  const horas = Array.from({ length: 24 }, (_, h) => ({ hora: h, cargas: num(horaMap.get(h)) }));
-
-  // Rellenar 12 meses
-  const mCargas = new Map(mensualCargas.map((r) => [r.mes, r]));
-  const mPremios = new Map(mensualPremios.map((r) => [r.mes, r]));
-  const mensual = [];
-  const now = new Date();
-  const nowAR = new Date(dayFmt.format(now) + 'T12:00:00');
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(nowAR.getFullYear(), nowAR.getMonth() - i, 1);
-    const mes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    const entradas = num(mCargas.get(mes)?.monto);
-    const premios = num(mPremios.get(mes)?.monto);
-    mensual.push({
-      mes,
-      cargas: num(mCargas.get(mes)?.cargas),
-      entradas,
-      premios,
-      premiosCount: num(mPremios.get(mes)?.premios),
-      resultado: entradas - premios,
-    });
-  }
-
-  return {
-    range,
-    generatedAt: new Date().toISOString(),
-    periodo: {
-      cargas: { count: num(c.count), monto: num(c.monto), promedio: num(c.promedio) },
-      premiosPedidos: { count: num(premiosPedidos[0].count), monto: num(premiosPedidos[0].monto) },
-      premiosPagados: { count: num(pe.pagados), monto: num(pe.pagados_monto) },
-      premiosEnProceso: num(pe.en_proceso),
-      premiosRechazados: num(pe.rechazados),
-      resultado: num(c.monto) - num(pe.pagados_monto),
-      jugadoresActivos: num(usuariosActivos[0].count),
-      jugadoresNuevos: num(usuariosNuevos[0].count),
-    },
-    porPanel: porPanel.map((r) => ({ panel: r.panel, cargas: num(r.cargas), monto: num(r.monto) })),
-    diario,
-    horas,
-    mensual,
-    totales: {
-      cargas: num(t.cargas_total),
-      entradas: num(t.entradas_total),
-      premios: num(t.premios_total),
-      jugadores: num(t.jugadores_total),
-    },
-  };
-}
-
-// Cache simple por rango para no castigar la DB con cada refresh
-const cache = new Map();
+const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS || 60_000);
+// Cuánto tiempo seguimos sirviendo datos viejos si la DB deja de responder.
+// Vale más un panel con números de hace 5 minutos que una pantalla de error.
+const STALE_MAX_MS = Number(process.env.STALE_MAX_MS || 15 * 60_000);
+// Techo para armar el resumen completo. Sin esto, una base que no responde deja
+// la petición colgada hasta que el navegador se cansa.
+const BUILD_TIMEOUT_MS = Number(process.env.BUILD_TIMEOUT_MS || 25_000);
+// Cuánto se espera a la revalidación antes de resignarse a servir lo viejo.
+const ESPERA_REVALIDACION_MS = Number(process.env.ESPERA_REVALIDACION_MS || 4_000);
 
 const app = express();
 app.disable('x-powered-by');
+app.set('trust proxy', 1);
+
+// ---------- auth opcional ----------
+const USER = process.env.DASHBOARD_USER;
+const PASS = process.env.DASHBOARD_PASS;
+if (USER && PASS) {
+  const esperado = 'Basic ' + Buffer.from(`${USER}:${PASS}`).toString('base64');
+  app.use((req, res, next) => {
+    if (req.path === '/salud') return next();
+    const dado = req.headers.authorization || '';
+    // Comparación de largo constante para no filtrar la contraseña por tiempos.
+    if (dado.length === esperado.length && seguroIguales(dado, esperado)) return next();
+    res.set('WWW-Authenticate', 'Basic realm="Panel del dueño", charset="UTF-8"');
+    res.status(401).send('Credenciales requeridas');
+  });
+  console.log('[auth] panel protegido con usuario y contraseña');
+} else {
+  console.warn('[auth] SIN protección: cualquiera con la URL ve los números. Definí DASHBOARD_USER y DASHBOARD_PASS.');
+}
+
+function seguroIguales(a, b) {
+  let dif = 0;
+  for (let i = 0; i < a.length; i++) dif |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return dif === 0;
+}
+
+// ---------- estáticos ----------
 app.use(express.static(path.join(__dirname, 'public'), {
   index: 'index.html',
   setHeaders: (res, filePath) => {
-    // El HTML siempre fresco; assets con cache corto (los deploys son poco frecuentes)
-    res.setHeader('Cache-Control', filePath.endsWith('.html') ? 'no-cache' : 'public, max-age=300');
+    // `no-cache` no significa "no cachear": el navegador guarda el archivo pero
+    // revalida con ETag y recibe un 304 vacío si no cambió. Con max-age el
+    // navegador ni pregunta, y después de un deploy el panel sigue mostrando
+    // el JS viejo sin que nadie entienda por qué.
+    // La librería de gráficos sí se cachea fuerte: su nombre incluye la versión.
+    res.setHeader('Cache-Control', filePath.includes('/vendor/')
+      ? 'public, max-age=604800, immutable'
+      : 'no-cache');
   },
 }));
 
-app.get('/api/summary', async (req, res) => {
-  const range = RANGE_FROM_SQL[req.query.range] ? req.query.range : 'hoy';
-  const cached = cache.get(range);
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
-    return res.json(cached.data);
+// ---------- cache con stale-while-revalidate ----------
+const cache = new Map();
+const enVuelo = new Map();
+
+/** Corta una promesa que tarda demasiado, para no dejar peticiones colgadas. */
+function conTimeout(promesa, ms) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`la consulta tardó más de ${ms / 1000}s`)), ms);
+    promesa.then(resolve, reject).finally(() => clearTimeout(t));
+  });
+}
+
+function revalidar(clave, fn) {
+  if (enVuelo.has(clave)) return enVuelo.get(clave);
+  const p = conTimeout(fn(), BUILD_TIMEOUT_MS)
+    .then((data) => {
+      // Un resumen sin el bloque principal significa que la base no contestó
+      // nada útil. Guardarlo pisaría números válidos con una pantalla vacía:
+      // como cada sección atrapa su propio error, esto llega acá como "éxito".
+      if (!data || !data.periodo) {
+        throw new Error('la base no devolvió datos utilizables');
+      }
+      cache.set(clave, { at: Date.now(), data });
+      return data;
+    })
+    .catch((err) => {
+      // Se anota el fallo para poder avisar en pantalla SOLO cuando la base
+      // falló de verdad. Datos vencidos mientras se recalculan no son un
+      // problema y no merecen una banda de advertencia.
+      const hit = cache.get(clave);
+      if (hit) hit.fallo = { at: Date.now(), motivo: err.message };
+      throw err;
+    })
+    .finally(() => enVuelo.delete(clave));
+  enVuelo.set(clave, p);
+  return p;
+}
+
+async function conCache(clave, fn) {
+  const hit = cache.get(clave);
+  const edad = hit ? Date.now() - hit.at : Infinity;
+
+  if (hit && edad < CACHE_TTL_MS) return { data: hit.data, cache: 'fresco' };
+
+  // Con datos vencidos pero todavía usables: se devuelven YA y la actualización
+  // corre por detrás. Esperar no servía de nada: como cada sección atrapa su
+  // propio error, la promesa no falla rápido cuando la base no responde —
+  // simplemente tarda un minuto. El resultado era una pantalla en blanco
+  // justo cuando teníamos números perfectamente mostrables en memoria.
+  if (hit && edad < STALE_MAX_MS) {
+    // El fallo anterior NO se borra acá: si se borrara, se perdería la
+    // evidencia justo antes de poder informarla (la revalidación tarda más en
+    // fracasar que lo que esperamos). Una revalidación exitosa reemplaza la
+    // entrada entera del cache, así que se limpia sola.
+    const pendiente = revalidar(clave, fn);
+    pendiente.catch((err) => console.warn('[cache] revalidación falló:', err.message));
+    // Un respiro corto: si la base contesta rápido (el caso normal) devolvemos
+    // datos frescos igual; si tarda, se sirve lo que hay y sigue por detrás.
+    await Promise.race([pendiente.catch(() => {}), new Promise((r) => setTimeout(r, ESPERA_REVALIDACION_MS))]);
+    const post = cache.get(clave);
+    const edadFinal = Date.now() - post.at;
+    return {
+      data: post.data,
+      cache: edadFinal < CACHE_TTL_MS ? 'fresco' : 'viejo',
+      edadMs: edadFinal,
+      ...(post.fallo ? { fallo: post.fallo.motivo } : {}),
+    };
   }
+
+  // Sin nada usable en memoria: no queda otra que esperar (con techo).
+  return { data: await revalidar(clave, fn), cache: 'nuevo' };
+}
+
+// ---------- API ----------
+app.get('/api/summary', async (req, res) => {
   try {
-    const data = await getSummary(range);
-    cache.set(range, { at: Date.now(), data });
-    res.json(data);
+    // La clave sale de los parámetros crudos: resolver el período consulta la
+    // base, y eso tiene que pasar solo cuando de verdad hay que recalcular.
+    const { clave, panelId } = rangos.clave(req.query);
+    const construir = async () => resumen.construir(await rangos.resolve(req.query), panelId);
+
+    const { data, cache: estado, edadMs, fallo } = await conCache(clave, construir);
+    res.set('Cache-Control', 'no-store');
+    res.json({ ...data, cache: estado, ...(edadMs ? { cacheEdadMs: edadMs } : {}), ...(fallo ? { fallo } : {}) });
   } catch (err) {
     console.error('Error generando resumen:', err.message);
     res.status(503).json({ error: 'No se pudieron cargar los datos. Probá de nuevo en un minuto.' });
   }
 });
 
-app.get('/salud', (_req, res) => res.json({ ok: true }));
+app.get('/api/paneles', async (_req, res) => {
+  try {
+    const rows = await q('SELECT id, name AS nombre, "isActive" AS activo FROM "Panel" ORDER BY name');
+    res.json(rows);
+  } catch (err) {
+    console.error('Error listando paneles:', err.message);
+    res.status(503).json({ error: 'No se pudo leer la lista de paneles.' });
+  }
+});
 
-app.listen(PORT, () => console.log(`owner-stats escuchando en :${PORT}`));
+/** Opciones de período y tipos de export: el frontend no los hardcodea. */
+app.get('/api/meta', (_req, res) => {
+  res.json({ rangos: rangos.OPCIONES, exports: csv.tipos, tz: rangos.TZ });
+});
+
+app.get('/api/export.csv', async (req, res) => {
+  const tipo = csv.TIPOS[req.query.tipo] ? req.query.tipo : 'resumen';
+  try {
+    const { clave, panelId } = rangos.clave(req.query);
+    const construir = async () => resumen.construir(await rangos.resolve(req.query), panelId);
+    const { data } = await conCache(clave, construir);
+
+    const nombre = `tiorico-${tipo}-${clave.split('|')[0]}-${new Date().toISOString().slice(0, 10)}.csv`;
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="${nombre}"`);
+    res.send(csv.TIPOS[tipo](data));
+  } catch (err) {
+    console.error('Error exportando CSV:', err.message);
+    res.status(503).send('No se pudo generar el archivo.');
+  }
+});
+
+app.get('/salud', async (_req, res) => {
+  try {
+    const t0 = Date.now();
+    await ping();
+    res.json({ ok: true, db: 'ok', latenciaMs: Date.now() - t0, cache: cache.size });
+  } catch (err) {
+    res.status(503).json({ ok: false, db: 'error', detalle: err.message });
+  }
+});
+
+app.listen(PORT, () => console.log(`owner-stats escuchando en :${PORT} (TZ ${rangos.TZ})`));

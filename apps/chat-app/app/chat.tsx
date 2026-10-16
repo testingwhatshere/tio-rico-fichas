@@ -34,6 +34,7 @@ import { useShareIntentContext } from 'expo-share-intent';
 import { useChatFlow, ACTIVE_STATUSES } from '@/hooks/useChatFlow';
 import { useMessages } from '@/hooks/useMessages';
 import { useSocketHandlers } from '@/hooks/useSocketHandlers';
+import { useOverpaidOffer } from '@/hooks/useOverpaidOffer';
 import { useProofUpload } from '@/hooks/useProofUpload';
 
 const DEFAULT_SUPPORT_PHONE = '+54 9 11 6596-3996';
@@ -116,6 +117,13 @@ export default function UnifiedChatScreen() {
   const handleStartNewLoadRef = useRef<((prefillAmount?: number) => void) | null>(null);
   const handleAmountSelectedRef = useRef<((amount: number) => Promise<void> | void) | null>(null);
 
+  const { showOverpaidOffer } = useOverpaidOffer({
+    addBotMessage,
+    setFlowState,
+    updateActiveRequest,
+    handleAmountSelected: (a) => handleAmountSelectedRef.current?.(a),
+  });
+
   // Socket handlers
   useSocketHandlers({
     chatIdRef,
@@ -133,6 +141,7 @@ export default function UnifiedChatScreen() {
     handleProofUpload,
     handleStartNewLoad: (p) => handleStartNewLoadRef.current?.(p),
     handleAmountSelected: (a) => handleAmountSelectedRef.current?.(a),
+    showOverpaidOffer,
   });
 
   // Glow animation for empty state
@@ -180,7 +189,12 @@ export default function UnifiedChatScreen() {
 
         if (active) {
           updateActiveRequest(active);
-          initFlowStateFromRequest(active, chat.id, addBotMessage, handlePaymentConfirmed, supportPhoneRef, handleProofUpload);
+          const pendingOffer = (active as any).overpaidOffer;
+          if (active.status === 'VALIDATING' && pendingOffer?.status === 'PENDING') {
+            showOverpaidOffer(active.id, pendingOffer);
+          } else {
+            initFlowStateFromRequest(active, chat.id, addBotMessage, handlePaymentConfirmed, supportPhoneRef, handleProofUpload);
+          }
         } else {
           setFlowState('IDLE');
         }
@@ -793,6 +807,24 @@ export default function UnifiedChatScreen() {
             >
               <Ionicons name="close-circle-outline" size={18} color={colors.error} />
               <Text style={[styles.ctaButtonText, { color: colors.error, fontSize: 13 }]}>CANCELAR SOLICITUD</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Empty-state CTA: start a new load. The empty copy tells the user to
+            "toca el boton de abajo para cargar fichas" — this IS that button.
+            Without it a user landing on /chat with no active request was stuck
+            seeing only "Necesito ayuda" (no way to start a load). */}
+        {!isLoading && flowState === 'IDLE' && !activeRequest && (
+          <View style={styles.ctaContainer}>
+            <TouchableOpacity
+              style={styles.ctaButton}
+              onPress={() => handleStartNewLoad()}
+              activeOpacity={0.7}
+              testID="cta-cargar-fichas"
+            >
+              <Ionicons name="cash-outline" size={20} color={colors.textOnPrimary} />
+              <Text style={styles.ctaButtonText}>CARGAR FICHAS</Text>
             </TouchableOpacity>
           </View>
         )}

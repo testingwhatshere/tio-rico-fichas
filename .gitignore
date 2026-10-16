@@ -266,3 +266,12 @@ apps/chat-app/dist-local/
 *.mhtml
 *.zip
 referencias/
+# Llaves, zips con la clave del bot y datos de usuarios: nunca al repo
+/a
+/a.pub
+apps/backend-api/extension-builds/*.zip
+usuarios_curados.csv
+extension-recolectora/
+recollecion/
+design_handoff_chat_soporte/
+*.bak

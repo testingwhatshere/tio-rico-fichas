@@ -44,9 +44,14 @@ export class JobProcessor {
       console.log('[JobProcessor] Job completed successfully');
       return result;
     } catch (loadError) {
-      const isUserNotFound = loadError.message &&
-        (loadError.message.includes('not found in search results') ||
-         loadError.message.includes('no encontrado'));
+      // Structured flag ONLY — never substring-match the message. Matching on
+      // 'no encontrado' used to swallow every generic selector timeout from
+      // humanize.js ("Elemento no encontrado: X"), so a slow panel or a service
+      // worker restart mid-search was reported to the backend as "this user does
+      // not exist here". The backend trusts that verdict, wipes User.panelId and
+      // sends the load into blind discovery — that's how nieva3 lost a $17.000
+      // load on 2026-08-24 while sitting on the very panel that was searched.
+      const isUserNotFound = loadError.userNotFoundInPanel === true;
 
       if (!isUserNotFound) throw loadError;
 
@@ -63,59 +68,79 @@ export class JobProcessor {
   }
 
   /**
-   * Validate session and ensure user is logged in
-   * Retries login up to 3 times if session is invalid
+   * Valida que la sesión del panel esté abierta antes de operar.
+   *
+   * Si está cerrada, hace UN solo re-login (con el candado compartido, ver
+   * loginOnce). Si eso no alcanza, la carga falla y la revisa un operador:
+   * reintentar logins es justo la señal que no queremos darle al panel.
+   *
+   * Antes esta función nunca re-logueaba: checkLoginStatus devolvía el objeto de
+   * estado completo y `if (objeto)` siempre daba verdadero.
    */
-  static async validateSession(tab, config, maxAttempts = 3) {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        // Re-verify tab exists before each attempt
-        try {
-          await chrome.tabs.get(tab.id);
-        } catch {
-          console.warn(`[JobProcessor] Tab ${tab.id} gone, re-creating (attempt ${attempt})...`);
-          tab = await this.ensurePanelTab(config.panelUrl);
-          await this.waitForTabLoad(tab.id);
-        }
-
-        const isLoggedIn = await this.checkLoginStatus(tab.id, config);
-
-        if (isLoggedIn) {
-          console.log('[JobProcessor] Session validated successfully');
-          return tab;
-        }
-
-        console.log(`[JobProcessor] Session expired (attempt ${attempt}/${maxAttempts}), re-authenticating...`);
-        await this.performLogin(tab.id, config);
-
-        // Verify login succeeded
-        const loginSuccess = await this.checkLoginStatus(tab.id, config);
-        if (loginSuccess) {
-          console.log('[JobProcessor] Re-authentication successful');
-          return tab;
-        }
-
-        if (attempt < maxAttempts) {
-          const backoffMs = 2000 * Math.pow(2, attempt - 1); // 2s, 4s, 8s
-          console.warn(`[JobProcessor] Login verification failed, retrying in ${backoffMs / 1000}s...`);
-          await new Promise(resolve => setTimeout(resolve, backoffMs));
-        }
-      } catch (error) {
-        console.error(`[JobProcessor] Session validation error (attempt ${attempt}/${maxAttempts}):`, error);
-        // If tab-related error, re-create tab and retry
-        if (error.message?.includes('No tab with id') || error.message?.includes('Tab not found')) {
-          console.warn('[JobProcessor] Tab error detected, re-creating tab...');
-          tab = await this.ensurePanelTab(config.panelUrl);
-          await this.waitForTabLoad(tab.id);
-          continue;
-        }
-        if (attempt === maxAttempts) {
-          throw new Error(`Session validation failed after ${maxAttempts} attempts: ${error.message}`);
-        }
-      }
+  static async validateSession(tab, config) {
+    // La pestaña puede haberse cerrado entre la carga anterior y esta.
+    try {
+      await chrome.tabs.get(tab.id);
+    } catch {
+      console.warn(`[JobProcessor] Tab ${tab.id} gone, re-creating...`);
+      tab = await this.ensurePanelTab(config.panelUrl);
+      await this.waitForTabLoad(tab.id);
     }
 
-    throw new Error(`Failed to establish valid session after ${maxAttempts} attempts`);
+    const status = await this.getLoginStatus(tab.id, config);
+    this.throwIfChallenge(status);
+    if (status.isLoggedIn) {
+      console.log('[JobProcessor] Session validated successfully');
+      return tab;
+    }
+
+    if (!config.panelUsername || !config.panelPassword) {
+      throw new Error('La sesión del panel está cerrada y la extensión no tiene usuario/contraseña del panel configurados');
+    }
+
+    console.log('[JobProcessor] Session expired, re-authenticating once...');
+    await this.loginOnce(tab.id, config);
+    await this.waitForTabLoad(tab.id).catch(() => {});
+
+    const after = await this.getLoginStatus(tab.id, config);
+    this.throwIfChallenge(after);
+    if (after.isLoggedIn) {
+      console.log('[JobProcessor] Re-authentication successful');
+      return tab;
+    }
+    throw new Error('La sesión del panel está cerrada y el re-login no funcionó');
+  }
+
+  /**
+   * Login con candado: si ya hay uno en curso (por ejemplo el auto-login que
+   * dispara la carga de la página), se espera ese en vez de abrir otro. Dos
+   * logins simultáneos contra el panel son una señal de bot.
+   */
+  static loginOnce(tabId, config) {
+    if (!this._loginInFlight) {
+      this._loginInFlight = this.performLogin(tabId, config).finally(() => {
+        this._loginInFlight = null;
+      });
+    }
+    return this._loginInFlight;
+  }
+
+  static isLoginInFlight() {
+    return !!this._loginInFlight;
+  }
+
+  /**
+   * Si el panel muestra un desafío de Cloudflare / captcha, corta con un error
+   * marcado (`isPanelChallenge`) para que se avise al operador. Nunca se intenta
+   * resolverlo.
+   */
+  static throwIfChallenge(status) {
+    if (status?.challenge) {
+      const err = new Error(`El panel muestra un desafío de verificación (${status.challenge}). Requiere que una persona lo resuelva en la PC del bot.`);
+      err.isPanelChallenge = true;
+      err.challenge = status.challenge;
+      throw err;
+    }
   }
 
   /**
@@ -215,10 +240,10 @@ export class JobProcessor {
   }
 
   /**
-   * Check if user is logged in.
+   * Estado de login del panel ({ isLoggedIn, challenge, ... }).
    * Delegates to panel-automation.js checkLoginStatus() for consistency.
    */
-  static async checkLoginStatus(tabId, config) {
+  static async getLoginStatus(tabId, config) {
     // Inject content scripts so we can use the canonical check
     await this.injectContentScripts(tabId, config);
 
@@ -229,10 +254,17 @@ export class JobProcessor {
       }
     });
 
-    if (!result?.[0]?.result && result?.[0]?.result !== false) {
+    const status = result?.[0]?.result;
+    if (!status || typeof status !== 'object') {
       throw new Error('Login status check failed: no result from content script');
     }
-    return result[0].result;
+    return status;
+  }
+
+  /** true si la sesión del panel está abierta. */
+  static async checkLoginStatus(tabId, config) {
+    const status = await this.getLoginStatus(tabId, config);
+    return status.isLoggedIn === true;
   }
 
   /**
@@ -351,6 +383,9 @@ export class JobProcessor {
     if (phase1 && !phase1.success) {
       const error = new Error(`Credit load failed: ${phase1.error}`);
       error.screenshot = await this.captureScreenshotSafe();
+      // Carry the content script's structured verdict; processLoadCreditsJob uses this
+      // (never the message text) to decide whether to invalidate the user's panel.
+      if (phase1.userNotFound) error.userNotFoundInPanel = true;
       throw error;
     }
 
@@ -424,31 +459,260 @@ export class JobProcessor {
     }
 
     // Amount is filled. Click Aceptar via MAIN world (bypasses CSP) + poll for result.
-    return await this.mainWorldClickAndWait(tabId, job, parseFloat(job.amount) || 0);
+    try {
+      return await this.mainWorldClickAndWait(tabId, job, parseFloat(job.amount) || 0, {
+        op: 'addCredit',
+        userKingboxId: phase1?.userKingboxId ?? null,
+        balanceBefore: phase1?.balanceBefore ?? null,
+      });
+    } catch (clickError) {
+      // Sin señal después de Aceptar: la carga pudo haber entrado o no. En vez de dejar
+      // la duda (reintentarla a ciegas puede cargar dos veces), se mira el saldo.
+      if (!clickError.ambiguousAfterSubmit) throw clickError;
+      return await this.verifyLoadByBalance(tabId, job, config, phase1?.balanceBefore ?? null, clickError);
+    }
+  }
+
+  /**
+   * Carga sin confirmación visible: decide por el saldo del usuario.
+   *
+   * - Subió exactamente el monto → la carga entró (éxito).
+   * - No cambió → la carga NO entró: falla con ese motivo (el operador puede reintentar).
+   * - Cualquier otra cosa (el usuario jugó en el medio, no se pudo leer) → queda como
+   *   estaba: falla para revisión manual, ahora con los dos saldos a la vista.
+   *
+   * Nunca reintenta la carga: sólo lee.
+   *
+   * `direction` = -1 para retiros: ahí el saldo tiene que BAJAR en el monto.
+   */
+  static async verifyLoadByBalance(tabId, job, config, balanceBefore, originalError, direction = 1) {
+    const amount = Math.round(Number(job.amount) || 0);
+    const what = direction < 0 ? 'Retiro' : 'Carga';
+    const fmt = (n) => `$${Number(n).toLocaleString('es-AR')}`;
+    if (balanceBefore == null || !amount) {
+      originalError.message += ' (sin saldo previo para verificar: revisar a mano antes de reintentar)';
+      throw originalError;
+    }
+
+    let balanceAfter = null;
+    try {
+      // La página quedó en un estado desconocido (modal abierto, alerta, nada): se recarga
+      // y se da un momento al panel para registrar la carga antes de leer.
+      await chrome.tabs.reload(tabId);
+      await this.waitForTabLoad(tabId);
+      await new Promise((r) => setTimeout(r, 3000));
+      const reading = await this.verifyChips(job.targetUsername, config);
+      if (reading?.success && Number.isFinite(Number(reading.balance))) balanceAfter = Number(reading.balance);
+    } catch (e) {
+      console.warn('[JobProcessor] Verificación por saldo: no se pudo leer:', e.message);
+    }
+
+    const detalle = `saldo antes ${fmt(balanceBefore)}, después ${balanceAfter == null ? '?' : fmt(balanceAfter)}`;
+    if (balanceAfter === balanceBefore + direction * amount) {
+      console.log(`[JobProcessor] ${what} confirmada por saldo (${detalle})`);
+      return {
+        success: true,
+        targetUsername: job.targetUsername,
+        amount: job.amount,
+        message: `${what} confirmad${direction < 0 ? 'o' : 'a'} por saldo (${detalle})`,
+        verifiedByBalance: true,
+      };
+    }
+
+    const error = balanceAfter === balanceBefore
+      ? new Error(`${what} NO realizad${direction < 0 ? 'o' : 'a'}: el saldo del usuario no cambió (${detalle}). Se puede reintentar.`)
+      : new Error(`${originalError.message} — ${detalle}: revisar a mano antes de reintentar`);
+    error.screenshot = originalError.screenshot;
+    if (balanceAfter === balanceBefore) error.loadNotApplied = true;
+    console.warn(`[JobProcessor] Verificación por saldo: ${error.message}`);
+    throw error;
+  }
+
+  /**
+   * Instala (una vez por página) el guardia de red en el MAIN world y lo arma para
+   * esta operación. Envuelve fetch y XMLHttpRequest — axios de Nuxt usa XHR — y sólo
+   * mira `/api/admin/user/addCredit|addDebit`:
+   *
+   * - Desarmado (nadie del bot operando) deja pasar todo: el operador puede usar la
+   *   misma pestaña a mano.
+   * - Armado deja salir UNA sola request, y sólo si es la operación, el monto y el
+   *   usuario (`userKingboxId`) del job. Cualquier otra se corta antes de salir: así
+   *   no hay carga a otro usuario, ni por otro monto, ni doble por doble click.
+   * - Guarda la respuesta del panel (status HTTP + `header` + saldo nuevo + id de
+   *   transacción): es la verdad sobre si la carga entró, mucho más que el toast.
+   */
+  static async armNetworkGuard(tabId, guard) {
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: (g) => {
+        const W = window;
+        if (!W.__trBot) {
+          const bot = { guard: null, events: [] };
+          W.__trBot = bot;
+          const opOf = (url) => {
+            const m = /\/api\/admin\/user\/(addCredit|addDebit)(?:[/?#]|$)/.exec(String(url || ''));
+            return m ? m[1] : null;
+          };
+          const parseBody = (body) => {
+            try { return typeof body === 'string' ? JSON.parse(body) : null; } catch { return null; }
+          };
+          // null = dejar salir; string = motivo del bloqueo
+          const decide = (op, body) => {
+            const gd = bot.guard;
+            if (!gd) return null;
+            if (gd.sent >= 1) return 'segundo envío durante la misma operación (posible doble click)';
+            if (op !== gd.op) return `operación ${op} cuando se esperaba ${gd.op}`;
+            const data = parseBody(body);
+            if (!data) return 'no se pudo leer el cuerpo del envío';
+            const sentAmount = Math.round(Number(data.amount) * 100);
+            if (!Number.isFinite(sentAmount) || sentAmount !== Math.round(gd.amount * 100)) {
+              return `monto enviado ${data.amount} distinto del pedido ${gd.amount}`;
+            }
+            if (gd.userId != null && String(data.userKingboxId) !== String(gd.userId)) {
+              return `usuario enviado ${data.userKingboxId} distinto del esperado ${gd.userId}`;
+            }
+            return null;
+          };
+          // Copia en sessionStorage: si el panel responde 401 y Nuxt manda al login, la
+          // página navega y `window.__trBot` se pierde; sessionStorage sobrevive en la pestaña.
+          const persist = () => { try { sessionStorage.setItem('__trBotEvents', JSON.stringify(bot.events)); } catch { /* lleno o bloqueado */ } };
+          bot.persist = persist;
+          const record = (ev) => { bot.events.push(ev); if (bot.events.length > 20) bot.events.shift(); persist(); return ev; };
+          const finish = (ev, status, json) => {
+            ev.status = status;
+            ev.header = json?.header || null;
+            ev.balance = json?.content?.walletUser?.balance ?? null;
+            ev.transaction = json?.content?.transaction ?? null;
+            ev.message = json?.message || json?.header?.description || null;
+            ev.done = true;
+            persist();
+          };
+
+          const origFetch = W.fetch;
+          W.fetch = function (input, init) {
+            const url = typeof input === 'string' ? input : input?.url;
+            const op = opOf(url);
+            if (!op) return origFetch.apply(this, arguments);
+            const body = init?.body;
+            const reason = decide(op, body);
+            const ev = record({ op, at: Date.now(), via: 'fetch', body: typeof body === 'string' ? body.slice(0, 200) : null });
+            if (reason) { ev.blocked = true; ev.reason = reason; ev.done = true; persist(); return Promise.reject(new TypeError('Bloqueado por la extensión: ' + reason)); }
+            if (bot.guard) bot.guard.sent++;
+            return origFetch.apply(this, arguments).then((r) => {
+              r.clone().json().catch(() => null).then((j) => finish(ev, r.status, j));
+              return r;
+            }, (e) => { ev.status = 0; ev.networkError = String(e?.message || e); ev.done = true; persist(); throw e; });
+          };
+
+          const XHR = W.XMLHttpRequest.prototype;
+          const origOpen = XHR.open;
+          const origSend = XHR.send;
+          XHR.open = function (method, url) {
+            this.__trOp = opOf(url);
+            return origOpen.apply(this, arguments);
+          };
+          XHR.send = function (body) {
+            const op = this.__trOp;
+            if (!op) return origSend.apply(this, arguments);
+            const reason = decide(op, body);
+            const ev = record({ op, at: Date.now(), via: 'xhr', body: typeof body === 'string' ? body.slice(0, 200) : null });
+            if (reason) {
+              ev.blocked = true; ev.reason = reason; ev.done = true; persist();
+              // Nunca sale: se le avisa a la página como error de red.
+              setTimeout(() => this.dispatchEvent(new ProgressEvent('error')), 0);
+              return;
+            }
+            if (bot.guard) bot.guard.sent++;
+            this.addEventListener('loadend', () => {
+              let json = null;
+              try {
+                json = this.responseType === 'json' ? this.response
+                  : (this.responseType === '' || this.responseType === 'text') ? JSON.parse(this.responseText) : null;
+              } catch { /* respuesta no-JSON */ }
+              finish(ev, this.status, json);
+            });
+            return origSend.apply(this, arguments);
+          };
+        }
+        W.__trBot.guard = { ...g, sent: 0, armedAt: Date.now() };
+        W.__trBot.events = [];
+        W.__trBot.persist();
+        return { armed: true, armedAt: W.__trBot.guard.armedAt };
+      },
+      args: [guard],
+    });
+    return res?.result || null;
+  }
+
+  static async disarmNetworkGuard(tabId) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: () => { if (window.__trBot) window.__trBot.guard = null; },
+      });
+    } catch { /* la pestaña pudo haber navegado: el guardia murió con ella */ }
   }
 
   /**
    * Click Aceptar in MAIN world and poll for success/error result.
    * Reusable for LOAD_CREDITS, WITHDRAW_CHIPS, and any modal with submit button.
+   *
+   * El resultado lo decide sólo la respuesta del panel a addCredit/addDebit (guardia
+   * de red); la pantalla no se mira. Si no llega respuesta, o el panel dio 5xx / se
+   * cortó la red, queda "en duda" (`ambiguousAfterSubmit`) y se verifica por saldo.
+   * Al terminar se recarga la página.
    */
-  static async mainWorldClickAndWait(tabId, job, amountNum) {
+  static async mainWorldClickAndWait(tabId, job, amountNum, opts = {}) {
     console.log('[JobProcessor] Executing MAIN world click for Aceptar...');
+    const op = opts.op || 'addCredit';
 
-    // Record modal state BEFORE click (to detect close)
-    const preClickState = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        const modal = document.querySelector('.widthdraw.modal, .insert-mo.modal');
-        if (!modal) return { modalVisible: false };
-        const style = getComputedStyle(modal);
-        return {
-          modalVisible: parseFloat(style.opacity) > 0 && style.display !== 'none',
-          modalSelector: modal.classList.contains('widthdraw') ? '.widthdraw.modal' : '.insert-mo.modal',
-        };
-      }
-    });
-    const wasModalVisible = preClickState?.[0]?.result?.modalVisible;
+    // Sin guardia no se toca Aceptar: es la única protección contra monto/usuario
+    // equivocado y doble envío, y la que dice con certeza si la carga entró.
+    let armed;
+    try {
+      armed = await this.armNetworkGuard(tabId, {
+        op,
+        amount: amountNum,
+        userId: opts.userKingboxId ?? null,
+        jobId: job.id,
+      });
+    } catch (e) {
+      armed = null;
+      console.warn('[JobProcessor] No se pudo armar el guardia de red:', e.message);
+    }
+    if (!armed?.armed) {
+      const error = new Error('No se pudo preparar la verificación de la carga; NO se tocó Aceptar (la carga no se hizo)');
+      error.screenshot = await this.captureScreenshotSafe();
+      error.loadNotApplied = true;
+      throw error;
+    }
+    if (opts.userKingboxId == null) {
+      console.warn('[JobProcessor] Sin data-id del usuario: el guardia controla monto y doble envío, no el usuario');
+    }
 
+    try {
+      return await this._clickAndPoll(tabId, job, amountNum, op, armed.armedAt, opts);
+    } finally {
+      await this.disarmNetworkGuard(tabId);
+      // Lo que haya quedado en pantalla (modal, toast, alerta) no importa: se recarga
+      // y la página queda limpia para la próxima operación.
+      await this.reloadAfterSubmit(tabId);
+    }
+  }
+
+  static async reloadAfterSubmit(tabId) {
+    try {
+      await new Promise((r) => setTimeout(r, 1000 + Math.random() * 1500));
+      await chrome.tabs.reload(tabId);
+      await this.waitForTabLoad(tabId);
+    } catch (e) {
+      console.warn('[JobProcessor] No se pudo recargar después de Aceptar:', e.message);
+    }
+  }
+
+  static async _clickAndPoll(tabId, job, amountNum, op, armedAt, opts) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
@@ -496,81 +760,107 @@ export class JobProcessor {
     let finalResult = null;
     for (let attempt = 0; attempt < 30; attempt++) {
       await new Promise(r => setTimeout(r, 500));
-      const resultCheck = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (modalWasVisible) => {
-          // 1. SweetAlert v2
-          const swal2Success = document.querySelector('.swal2-popup .swal2-icon.swal2-success');
-          if (swal2Success) {
-            const text = document.querySelector('.swal2-popup .swal2-html-container, .swal2-popup .swal2-title');
-            return { success: true, message: text?.textContent?.trim() || 'Success (SweetAlert2)' };
-          }
-          const swal2Error = document.querySelector('.swal2-popup .swal2-icon.swal2-error');
-          if (swal2Error) {
-            const text = document.querySelector('.swal2-popup .swal2-html-container, .swal2-popup .swal2-title');
-            return { success: false, error: text?.textContent?.trim() || 'Error (SweetAlert2)' };
-          }
-
-          // 2. SweetAlert v1
-          const swal1Success = document.querySelector('.sweet-alert .sa-icon.sa-success');
-          if (swal1Success) return { success: true, message: 'Success (SweetAlert1)' };
-          const swal1Error = document.querySelector('.sweet-alert .sa-icon.sa-error');
-          if (swal1Error) return { success: false, error: 'Error (SweetAlert1)' };
-
-          // 3. Toast notifications (MDBootstrap / custom)
-          const toastSuccess = document.querySelector('#toast-container .toast-success, .toast-success, .md-toast-success');
-          if (toastSuccess) return { success: true, message: toastSuccess.textContent?.trim() || 'Success (toast)' };
-          const toastError = document.querySelector('#toast-container .toast-error, .toast-error, .md-toast-error');
-          if (toastError) return { success: false, error: toastError.textContent?.trim() || 'Error (toast)' };
-
-          // 4. Bootstrap alerts
-          const alertSuccess = document.querySelector('.alert-success:not([style*="display: none"])');
-          if (alertSuccess && alertSuccess.offsetParent) return { success: true, message: alertSuccess.textContent?.trim() || 'Success (alert)' };
-          const alertDanger = document.querySelector('.alert-danger:not([style*="display: none"])');
-          if (alertDanger && alertDanger.offsetParent) return { success: false, error: alertDanger.textContent?.trim() || 'Error (alert)' };
-
-          // 5. Modal closed (if it was visible before click, and now it's not — success)
-          if (modalWasVisible) {
-            const modal = document.querySelector('.widthdraw.modal, .insert-mo.modal');
-            if (modal) {
-              const style = getComputedStyle(modal);
-              const isHidden = style.display === 'none' || parseFloat(style.opacity) === 0;
-              if (isHidden) return { success: true, message: 'Success (modal closed)' };
-            } else {
-              // Modal removed from DOM
-              return { success: true, message: 'Success (modal removed)' };
+      let resultCheck;
+      try {
+        resultCheck = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: 'MAIN',
+          func: (since, expectedOp) => {
+            // 1. Lo que respondió el panel a addCredit/addDebit (guardia de red)
+            let all = window.__trBot?.events;
+            if (!all) { try { all = JSON.parse(sessionStorage.getItem('__trBotEvents') || '[]'); } catch { all = []; } }
+            const events = all.filter((e) => e.at >= since && e.op === expectedOp);
+            const real = events.find((e) => !e.blocked);
+            if (real) {
+              if (!real.done) return { pending: true };
+              const desc = real.message || real.header?.description || '';
+              if (real.status === 200 && real.header?.status === 200) {
+                return {
+                  success: true,
+                  source: 'api',
+                  message: `Confirmado por el panel (${expectedOp} OK${real.transaction != null ? `, transacción ${real.transaction}` : ''})`,
+                  balanceAfter: real.balance,
+                  transaction: real.transaction,
+                };
+              }
+              if (real.status === 401 || real.status === 419) {
+                return { success: false, source: 'api', notApplied: true, sessionExpired: true,
+                  error: `El panel rechazó la carga: sesión vencida (HTTP ${real.status}). La carga NO se hizo` };
+              }
+              if (real.status === 429) {
+                return { success: false, source: 'api', notApplied: true,
+                  error: 'El panel rechazó la carga por exceso de pedidos (HTTP 429). La carga NO se hizo' };
+              }
+              if (real.status >= 400 && real.status < 500) {
+                return { success: false, source: 'api', notApplied: true,
+                  error: `El panel rechazó la carga (HTTP ${real.status}${desc ? `: ${desc}` : ''}). La carga NO se hizo` };
+              }
+              if (real.status === 200) {
+                // HTTP 200 pero el panel dice que no (header.status ≠ 200)
+                return { success: false, source: 'api', notApplied: true,
+                  error: `El panel respondió error${desc ? `: ${desc}` : ''} (código ${real.header?.status ?? '?'}). La carga NO se hizo` };
+              }
+              // 5xx o corte de red: el panel pudo haberla aplicado o no
+              return { ambiguous: true, detail: real.networkError ? `corte de red (${real.networkError})` : `HTTP ${real.status}` };
             }
-          }
+            const blocked = events.find((e) => e.blocked);
+            if (blocked) {
+              return { success: false, source: 'guard', notApplied: true, guardBlocked: true,
+                error: `La extensión bloqueó el envío antes de que saliera: ${blocked.reason}. La carga NO se hizo` };
+            }
+            // La pantalla no se mira: sin respuesta de addCredit/addDebit no hay veredicto.
+            return null;
+          },
+          args: [armedAt, op]
+        });
+      } catch (e) {
+        // La página navegó (p. ej. el panel mandó al login): seguir mirando hasta agotar el tiempo.
+        console.warn('[JobProcessor] Poll falló (¿navegó la página?):', e.message);
+        continue;
+      }
 
-          // Still waiting
-          return null;
-        },
-        args: [wasModalVisible]
-      });
-
-      finalResult = resultCheck?.[0]?.result;
-      if (finalResult) break;
+      const r = resultCheck?.[0]?.result;
+      if (!r || r.pending) continue;
+      finalResult = r;
+      break;
     }
 
     if (finalResult?.success) {
-      console.log('[JobProcessor] Operation confirmed:', finalResult.message);
+      let message = finalResult.message;
+      // Saldo nuevo vs. el leído antes: si no cierra, la carga entró igual (lo dijo el
+      // panel) pero queda anotado — puede ser que el usuario jugó en el medio.
+      if (finalResult.source === 'api' && opts.balanceBefore != null && finalResult.balanceAfter != null) {
+        const delta = Number(finalResult.balanceAfter) - Number(opts.balanceBefore);
+        const expected = op === 'addDebit' ? -Math.round(amountNum) : Math.round(amountNum);
+        if (Math.round(delta) !== expected) {
+          message += ` — ojo: saldo ${opts.balanceBefore} → ${finalResult.balanceAfter} (esperado ${expected >= 0 ? '+' : ''}${expected})`;
+        }
+      }
+      console.log('[JobProcessor] Operation confirmed:', message);
       return {
         success: true,
         targetUsername: job.targetUsername,
         amount: job.amount,
-        message: finalResult.message
+        message,
+        panelTransaction: finalResult.transaction ?? undefined,
       };
     }
 
-    if (finalResult && !finalResult.success) {
+    if (finalResult && finalResult.success === false) {
       const error = new Error(`Operation failed: ${finalResult.error}`);
       error.screenshot = await this.captureScreenshotSafe();
+      if (finalResult.notApplied) error.loadNotApplied = true;
+      if (finalResult.sessionExpired) error.panelSessionExpired = true;
+      if (finalResult.guardBlocked) error.guardBlocked = true;
       throw error;
     }
 
-    // No response after 15s
-    const error = new Error('Operation failed: No success/error response detected after clicking Aceptar');
+    // Sin respuesta de addCredit/addDebit en 15s, o el panel dio 5xx / cortó la red
+    const detail = finalResult?.ambiguous ? ` (${finalResult.detail})` : '';
+    const error = new Error(`Operation failed: No success/error response detected after clicking Aceptar${detail}`);
     error.screenshot = await this.captureScreenshotSafe();
+    // Ya se tocó Aceptar y no hubo señal: el resultado real es desconocido.
+    error.ambiguousAfterSubmit = true;
     throw error;
   }
 
@@ -682,7 +972,17 @@ export class JobProcessor {
     // If content script returned needsMainWorldClick (CSP blocked inline script)
     if (withdrawResult?.success && withdrawResult?.needsMainWorldClick) {
       console.log('[JobProcessor] Withdraw amount filled, executing MAIN world click...');
-      return await this.mainWorldClickAndWait(tab.id, job, parseFloat(job.amount) || 0);
+      try {
+        return await this.mainWorldClickAndWait(tab.id, job, parseFloat(job.amount) || 0, {
+          op: 'addDebit',
+          userKingboxId: withdrawResult.userKingboxId ?? null,
+          balanceBefore: withdrawResult.balanceBefore ?? null,
+        });
+      } catch (clickError) {
+        // Mismo criterio que la carga: en duda se decide por saldo, nunca se repite.
+        if (!clickError.ambiguousAfterSubmit) throw clickError;
+        return await this.verifyLoadByBalance(tab.id, job, config, withdrawResult.balanceBefore ?? null, clickError, -1);
+      }
     }
 
     if (!withdrawResult.success) {

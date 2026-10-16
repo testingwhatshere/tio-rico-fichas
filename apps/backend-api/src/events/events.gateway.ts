@@ -272,6 +272,12 @@ export class EventsGateway
       .to('role:SENIOR_OPERATOR')
       .to('role:ADMIN')
       .emit('job:failed', data);
+    // Bridge to /operator namespace (panel + mobile). Without this, bot job
+    // failures never reached the operators' Fallos queue in real-time —
+    // validation failures did (emitValidationFailed bridges), job failures
+    // didn't — so a bot-errored load only showed up on a full cold-start
+    // reload and had no working retry path.
+    this.operatorGateway.emitJobFailed(data);
   }
 
   // Chat events

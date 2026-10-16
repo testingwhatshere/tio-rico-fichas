@@ -11,6 +11,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto, RegisterDto, AuthResponseDto, ClientAuthDto } from './dto';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
+import { canonicalArPhone } from '../common/utils/phone.util';
 
 @Injectable()
 export class AuthService {
@@ -138,35 +139,13 @@ export class AuthService {
 
   /**
    * Normalize Argentine phone numbers to canonical form `549<area><number>`.
-   * Conservative: only transforms numbers that look Argentine. Foreign numbers
-   * (Chile +56, Spain +34, Uruguay +598, etc.) are left as digit-only without
-   * a wrong "549" prefix.
-   *
-   * Argentine canonical examples (all → "5491134567890"):
-   *   "1134567890" (10 digits, local), "91134567890" (11, with mobile 9),
-   *   "541134567890" (12 with country+area), "5491134567890" (13 canonical),
-   *   "+54 9 11 3456-7890"
+   * Delegates to the shared util (single source of truth shared with the user
+   * preload/import path) so equal numbers always canonicalize identically.
+   * Kept as a static method to preserve existing `AuthService.canonicalArPhone`
+   * call sites.
    */
   static canonicalArPhone(raw: string): string {
-    let digits = (raw || '').replace(/\D/g, '');
-    if (digits.startsWith('00')) digits = digits.slice(2);
-    // Already canonical AR mobile
-    if (digits.startsWith('549')) return digits;
-    // AR with country code 54, missing "9" mobile marker.
-    // Only auto-add the "9" when the total length matches AR (11 digits after "54").
-    if (digits.startsWith('54') && digits.length >= 11 && digits.length <= 13) {
-      return '549' + digits.slice(2);
-    }
-    // AR mobile typed with "9" prefix but no country code (length 10-12)
-    if (digits.startsWith('9') && digits.length >= 10 && digits.length <= 12) {
-      return '54' + digits;
-    }
-    // Plain local AR number (10-11 digits) — likely an area+number with no prefix
-    if (digits.length >= 10 && digits.length <= 11 && !digits.startsWith('0')) {
-      return '549' + digits;
-    }
-    // Foreign number or unrecognized format → return digits unchanged
-    return digits;
+    return canonicalArPhone(raw);
   }
 
   async clientAuth(dto: ClientAuthDto): Promise<AuthResponseDto> {

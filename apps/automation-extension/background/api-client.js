@@ -79,11 +79,13 @@ export class ApiClient {
    * Report job started to backend
    * Maps to: POST /bot/jobs/:jobId/started
    */
-  static async reportJobStarted(config, jobId) {
+  static async reportJobStarted(config, jobId, instanceId) {
     const response = await ApiClient.fetchWithTimeout(`${config.backendUrl}/api/bot/jobs/${jobId}/started`, {
       method: 'POST',
       headers: ApiClient.getHeaders(config),
-      body: JSON.stringify({ startedAt: new Date().toISOString() })
+      // instanceId: el backend deja que UNA sola instancia de la extensión ejecute
+      // cada carga (dos Chrome con el mismo panel no la cargan dos veces).
+      body: JSON.stringify({ startedAt: new Date().toISOString(), instanceId })
     });
 
     if (!response.ok) {
@@ -226,28 +228,67 @@ export class ApiClient {
   }
 
   /**
-   * Heartbeat - report extension is alive
+   * Arma el payload del heartbeat.
+   *
+   * Vive acá y no en el call site porque ahora hay DOS caminos que lo mandan:
+   * el WebSocket (camino normal) y este POST (solo cuando la extensión quedó en
+   * modo polling y no hay socket). Si los payloads se desincronizan, el panel de
+   * operadores muestra datos distintos según cómo esté conectado el bot.
+   */
+  /** Versión del manifest, con fallback si no hay contexto de extensión. */
+  static extensionVersion() {
+    try {
+      return chrome?.runtime?.getManifest?.()?.version || '0.0.0';
+    } catch {
+      return '0.0.0';
+    }
+  }
+
+  static buildHeartbeatPayload(config, state) {
+    return {
+      timestamp: new Date().toISOString(),
+      // Sale del manifest para que no se desincronice: el gateway hace
+      // seguimiento de versión con este campo y lo muestra en el panel de
+      // operadores. Hardcodeado decía 1.0.0 con el manifest ya en 1.0.4.
+      //
+      // Con guarda: este archivo no dependía de la API de chrome hasta acá, y
+      // si getManifest tirara, la excepción subiría hasta sendHeartbeat, que lo
+      // contaría como fallo y forzaría un reconnect del WebSocket cada 3.
+      version: ApiClient.extensionVersion() + '-extension',
+      type: 'automation',
+      panelId: config.panelId || null,
+      walletId: null,
+      tabStatus: state.panelTabId ? 'active' : 'closed',
+      currentUrl: state.lastKnownUrl || '',
+      sessionValid: state.sessionValid !== false,
+      pendingJobs: 0,
+      uptimeMinutes: Math.round((Date.now() - (state.startTime || Date.now())) / 60000),
+      lastJobAt: state.lastJobCompletedAt ? new Date(state.lastJobCompletedAt).toISOString() : null,
+      consecutiveErrors: state.consecutiveJobErrors || 0,
+      // El freno viaja en cada heartbeat: si el aviso puntual se pierde (web
+      // recargada, backend reiniciado), el cartel del operador igual aparece.
+      circuitBreakerActive: !!state.circuitBreakerActive,
+      breakerReasons: state.recentJobErrors || [],
+    };
+  }
+
+  /**
+   * Heartbeat por HTTP - FALLBACK.
    * Maps to: POST /bot/heartbeat
+   *
+   * El camino normal es el WebSocket (ver `sendHeartbeat` en service-worker.js).
+   * Este POST solo corre cuando no hay socket abierto, o sea en modo polling.
+   * Antes corría SIEMPRE, cada 24s: eran ~7.200 requests por día por extensión,
+   * todos rechazados con 400 porque el DTO del backend no aceptaba el payload
+   * enriquecido. Cada 3 rechazos el service worker forzaba un reconnect del
+   * WebSocket, o sea un reconnect cada ~72 segundos, para siempre.
    */
   static async sendHeartbeat(config, state) {
     try {
       const response = await ApiClient.fetchWithTimeout(`${config.backendUrl}/api/bot/heartbeat`, {
         method: 'POST',
         headers: ApiClient.getHeaders(config),
-        body: JSON.stringify({
-          timestamp: new Date().toISOString(),
-          version: '1.0.0-extension',
-          type: 'automation',
-          panelId: config.panelId || null,
-          walletId: null,
-          tabStatus: state.panelTabId ? 'active' : 'closed',
-          currentUrl: state.lastKnownUrl || '',
-          sessionValid: state.sessionValid !== false,
-          pendingJobs: 0,
-          uptimeMinutes: Math.round((Date.now() - (state.startTime || Date.now())) / 60000),
-          lastJobAt: state.lastJobCompletedAt ? new Date(state.lastJobCompletedAt).toISOString() : null,
-          consecutiveErrors: state.consecutiveJobErrors || 0,
-        })
+        body: JSON.stringify(ApiClient.buildHeartbeatPayload(config, state)),
       }, 10000); // 10s timeout for heartbeat
 
       if (!response.ok) {

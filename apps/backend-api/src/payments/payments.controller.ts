@@ -6,14 +6,50 @@ import {
   Delete,
   Param,
   Body,
+  Req,
+  Logger,
 } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import type { Request as ExpressRequest } from 'express';
+import { PrismaService } from '../prisma/prisma.service';
 import { PaymentsService } from './payments.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Public } from '../common/decorators/public.decorator';
 
 @Controller('payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  private readonly logger = new Logger(PaymentsController.name);
+
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  /**
+   * El panel del que pregunta, sacado del token.
+   *
+   * La ruta sigue siendo publica: la app manda el token en todas las llamadas,
+   * pero si no viniera —o no se pudiera leer— esto devuelve null y el usuario
+   * recibe la billetera compartida, que es lo que pasaba antes. Nunca falla la
+   * consulta por no poder identificar al usuario.
+   */
+  private async panelOfCaller(req: ExpressRequest): Promise<string | null> {
+    const header = req?.headers?.authorization;
+    if (!header?.startsWith('Bearer ')) return null;
+    try {
+      const payload = await this.jwtService.verifyAsync(header.slice(7));
+      if (!payload?.sub) return null;
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: { panelId: true },
+      });
+      return user?.panelId ?? null;
+    } catch {
+      // Token vencido o invalido: no es motivo para no mostrar una billetera.
+      return null;
+    }
+  }
 
   // ============================================
   // CLIENT ENDPOINTS
@@ -24,8 +60,9 @@ export class PaymentsController {
    */
   @Get('wallet')
   @Public()
-  async getSelectedWallet() {
-    return this.paymentsService.getSelectedWallet();
+  async getSelectedWallet(@Req() req: ExpressRequest) {
+    const panelId = await this.panelOfCaller(req);
+    return this.paymentsService.getSelectedWallet(panelId);
   }
 
   // ============================================

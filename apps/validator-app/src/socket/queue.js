@@ -2,6 +2,13 @@ const fs = require('fs');
 
 const MAX_OFFLINE_QUEUE_SIZE = 50;
 const MAX_RECENTLY_PROCESSED = 200;
+// Últimos resultados emitidos, por id de validación. Si el backend vuelve a mandar
+// el mismo id (lo reenvía tras una reconexión), se contesta con esto en vez de
+// ignorarlo en silencio: antes el backend se quedaba esperando hasta el timeout.
+const MAX_LAST_RESULTS = 200;
+// Modo servidor: resultados que terminaron con el socket caído. Se mandan al
+// reconectar; el backend los acepta si esa validación sigue pendiente.
+const MAX_PENDING_RESULTS = 50;
 const QUEUE_ITEM_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 function parseQueuedAt(item) {
@@ -12,6 +19,9 @@ function parseQueuedAt(item) {
 
 function createQueueManager(deps) {
   const { config, logger, sendToRenderer, processValidationRequest, getSocket, isConnected } = deps;
+  // headless = modo servidor: sin cola offline en disco (guardaba imágenes
+  // enteras y lo que se reenviaba tarde el backend lo descartaba igual).
+  const headless = deps.headless === true;
 
   let offlineQueue = [];
   let validationQueue = [];
@@ -23,10 +33,14 @@ function createQueueManager(deps) {
   let offlineQueuePath = null;
   let processedIdsPath = null;
   let isShuttingDown = false;
+  const lastResults = new Map();
+  let pendingResults = [];
+  let idleWaiters = [];
 
   // ---- Processed IDs persistence ----
 
   function loadProcessedIds() {
+    if (!processedIdsPath) return;
     try {
       if (fs.existsSync(processedIdsPath)) {
         const data = fs.readFileSync(processedIdsPath, 'utf8');
@@ -47,6 +61,7 @@ function createQueueManager(deps) {
   }
 
   function saveProcessedIds() {
+    if (!processedIdsPath) return;
     try {
       const ids = Array.from(recentlyProcessedIds);
       fs.writeFileSync(processedIdsPath, JSON.stringify(ids));
@@ -56,7 +71,7 @@ function createQueueManager(deps) {
   }
 
   function scheduleSaveProcessedIds() {
-    if (saveProcessedIdsTimer) return;
+    if (!processedIdsPath || saveProcessedIdsTimer) return;
     saveProcessedIdsTimer = setTimeout(() => {
       saveProcessedIdsTimer = null;
       saveProcessedIds();
@@ -364,24 +379,27 @@ function createQueueManager(deps) {
 
   // Add validation request to queue
   function addToValidationQueue(request) {
-    // Check recently-processed set first (prevents re-validation on backend retries)
-    if (recentlyProcessedIds.has(request.id) || (request.requestId && recentlyProcessedIds.has(request.requestId))) {
-      logger.warn('QUEUE', `Already processed validation request ignored: ${request.id}`, { requestId: request.requestId });
+    if (isShuttingDown) {
+      // Se está apagando (deploy/reinicio): no se toma nada nuevo. El backend
+      // conserva el pedido y se lo reenvía a la instancia que levante.
+      logger.warn('QUEUE', `Shutting down, validation request not taken: ${request.id}`, { requestId: request.requestId });
       return;
     }
 
-    // Check in-flight guard (prevents dual-queue race between offline and live queues)
-    if (processingIds.has(request.id) || (request.requestId && processingIds.has(request.requestId))) {
-      logger.warn('QUEUE', `Request currently being processed, ignoring duplicate: ${request.id}`);
+    // Mismo id ya resuelto: el backend lo reenvió (reconexión). Se contesta con el
+    // resultado que ya se tenía, sin volver a leer el comprobante.
+    const previous = lastResults.get(request.id);
+    if (previous) {
+      logger.info('QUEUE', `Validation ${request.id} already resolved, re-sending result`, { requestId: request.requestId });
+      emitValidationResult(request, previous);
       return;
     }
 
-    // Deduplicate: skip if same id or requestId already in queue
-    const isDuplicate = validationQueue.some(
-      (item) => item.id === request.id || (request.requestId && item.requestId === request.requestId)
-    );
-    if (isDuplicate) {
-      logger.warn('QUEUE', `Duplicate validation request ignored: ${request.id}`, { requestId: request.requestId });
+    // Mismo id en curso o en cola: cuando termine se emite, no hace falta nada más.
+    // Un id NUEVO para un requestId ya visto sí se procesa: es una revalidación
+    // pedida a propósito y el backend espera respuesta para ese id.
+    if (processingIds.has(request.id) || validationQueue.some((item) => item.id === request.id)) {
+      logger.warn('QUEUE', `Validation ${request.id} already in progress, ignoring duplicate`, { requestId: request.requestId });
       return;
     }
 
@@ -409,7 +427,9 @@ function createQueueManager(deps) {
     });
 
     try {
-      while (validationQueue.length > 0 && !isShuttingDown && isConnected() && getSocket()?.connected) {
+      // En modo servidor se sigue procesando aunque el socket se caiga: el resultado
+      // queda en memoria y sale al reconectar (ver emitValidationResult).
+      while (validationQueue.length > 0 && !isShuttingDown && (headless || (isConnected() && getSocket()?.connected))) {
         const request = validationQueue[0];
         request.isProcessing = true;
 
@@ -436,11 +456,8 @@ function createQueueManager(deps) {
 
         validationQueue.shift();
 
-        // Track as recently processed
+        // Track as recently processed (lo usa la cola offline de escritorio)
         recentlyProcessedIds.add(request.id);
-        if (request.requestId) {
-          recentlyProcessedIds.add(request.requestId);
-        }
         trimRecentlyProcessed();
 
         // Small delay between validations
@@ -449,8 +466,13 @@ function createQueueManager(deps) {
         }
       }
 
-      // If disconnected/shutting down and items remain, move them to offline queue
-      if (validationQueue.length > 0 && (isShuttingDown || !isConnected() || !getSocket()?.connected)) {
+      // If disconnected/shutting down and items remain, move them to offline queue.
+      // En modo servidor no: lo que queda sin empezar se descarta y el backend lo
+      // reenvía a la instancia que lo reemplace.
+      if (headless && validationQueue.length > 0 && isShuttingDown) {
+        logger.warn('QUEUE', `Shutting down with ${validationQueue.length} queued validations not started; backend will re-send them`);
+        validationQueue.length = 0;
+      } else if (!headless && validationQueue.length > 0 && (isShuttingDown || !isConnected() || !getSocket()?.connected)) {
         logger.warn('QUEUE', `${isShuttingDown ? 'Shutting down' : 'Disconnected'} with ${validationQueue.length} items in validation queue, moving to offline queue`);
         sendToRenderer('log', { message: `Moviendo ${validationQueue.length} solicitudes a cola offline...`, type: 'warning' });
 
@@ -465,12 +487,87 @@ function createQueueManager(deps) {
         count: validationQueue.length,
         processing: false,
       });
+      const waiters = idleWaiters;
+      idleWaiters = [];
+      for (const resolve of waiters) resolve(true);
     }
   }
 
-  // Emit validation result safely, saving to offline queue if disconnected
-  function emitValidationResult(request, resultPayload) {
+  // Resuelve cuando no hay ninguna validación en curso (o al vencer el plazo,
+  // con false). Lo usa el apagado ordenado del modo servidor.
+  function waitUntilIdle(timeoutMs) {
+    if (!isProcessingValidation) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        idleWaiters = idleWaiters.filter((w) => w !== done);
+        resolve(false);
+      }, timeoutMs);
+      function done(value) {
+        clearTimeout(timer);
+        resolve(value);
+      }
+      idleWaiters.push(done);
+    });
+  }
+
+  function rememberResult(payload) {
+    lastResults.delete(payload.id);
+    lastResults.set(payload.id, payload);
+    if (lastResults.size > MAX_LAST_RESULTS) {
+      lastResults.delete(lastResults.keys().next().value);
+    }
+  }
+
+  // Modo servidor: manda los resultados que terminaron con el socket caído.
+  function flushPendingResults() {
+    if (pendingResults.length === 0) return 0;
     const socket = getSocket();
+    if (!socket || !socket.connected) return 0;
+    const toSend = pendingResults;
+    pendingResults = [];
+    for (const payload of toSend) {
+      try {
+        socket.emit('validation_result', payload);
+      } catch (error) {
+        pendingResults.push(payload);
+      }
+    }
+    const sent = toSend.length - pendingResults.length;
+    logger.info('QUEUE', `Flushed ${sent} pending results after reconnect`, { remaining: pendingResults.length });
+    return sent;
+  }
+
+  // Emit validation result safely, saving to offline queue if disconnected
+  function emitValidationResult(request, rawPayload) {
+    // El backend empareja la respuesta por `id`. Sin él la descarta ("unknown
+    // validation: undefined") y el comprobante espera el timeout entero antes de
+    // ir a revisión manual (2026-10-13). Se pone acá para que ningún camino
+    // —error de descarga, payload inválido, sin imagen— pueda olvidárselo.
+    const resultPayload = {
+      ...rawPayload,
+      id: request.id,
+      requestId: request.requestId ?? rawPayload?.requestId ?? null,
+    };
+    if (resultPayload.id) rememberResult(resultPayload);
+
+    const socket = getSocket();
+    if (headless) {
+      if (socket && socket.connected) {
+        try {
+          socket.emit('validation_result', resultPayload);
+          return;
+        } catch (error) {
+          logger.warn('QUEUE', `Socket emit failed, keeping result for reconnect: ${request.id}`, { error: error.message });
+        }
+      } else {
+        logger.warn('QUEUE', `Socket not connected, keeping result for reconnect: ${request.id}`);
+      }
+      pendingResults = pendingResults.filter((p) => p.id !== resultPayload.id);
+      pendingResults.push(resultPayload);
+      if (pendingResults.length > MAX_PENDING_RESULTS) pendingResults.shift();
+      return;
+    }
+
     // Guard: check socket exists and is connected before attempting emit
     if (!socket || !socket.connected) {
       logger.warn('QUEUE', `Socket not connected before emit, saving result to offline queue: ${request.id}`, { socketExists: !!socket, connected: socket?.connected });
@@ -567,6 +664,11 @@ function createQueueManager(deps) {
     addToValidationQueue,
     processValidationQueue,
     emitValidationResult,
+    flushPendingResults,
+    waitUntilIdle,
+    isProcessing: () => isProcessingValidation,
+    isKnownValidation: (id) => lastResults.has(id) || processingIds.has(id) || validationQueue.some((item) => item.id === id),
+    getPendingResultsCount: () => pendingResults.length,
     setShuttingDown,
     getOfflineQueue,
     getValidationQueue,

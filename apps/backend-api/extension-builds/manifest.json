@@ -1,0 +1,11 @@
+{
+  "version": "1.0.7",
+  "builtAt": "2026-10-16T17:42:44Z",
+  "panels": [
+    { "slug": "panel-3", "panelId": "6a6a6b21-c731-47cb-98a1-21777edb965e", "name": "Panel 3", "file": "tio-rico-bot-panel-3.zip" }
+    ,
+    { "slug": "panel-2", "panelId": "9751125e-32d7-4137-ac52-bdffb7e3296d", "name": "Panel 2", "file": "tio-rico-bot-panel-2.zip" }
+    ,
+    { "slug": "juana", "panelId": "345666ee-1994-493b-b426-436f4037512c", "name": "Juana", "file": "tio-rico-bot-juana.zip" }
+  ]
+}

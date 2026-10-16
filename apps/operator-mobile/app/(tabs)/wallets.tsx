@@ -1,8 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   FlatList,
+  Pressable,
   TouchableOpacity,
   Modal,
   TextInput,
@@ -14,9 +15,12 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import colors from '@/constants/colors';
+import { space, radius, text } from '@/constants/theme';
+import { PageHeader, Button, ConfirmDialog } from '@/components/ui';
+import { toast } from '@/components/Toast';
 import { useOperatorStore } from '@/stores/operator.store';
 import { emitWithTimeout } from '@/services/socket';
 import { hapticSuccess, hapticMedium, hapticError } from '@/utils/haptics';
@@ -35,6 +39,8 @@ interface WalletFormData {
   cvu: string;
   bankName: string;
   amountLimit: string;
+  /** Panel duenio. Vacio = compartida, que es el caso normal. */
+  panelId: string;
 }
 
 const EMPTY_FORM: WalletFormData = {
@@ -48,6 +54,7 @@ const EMPTY_FORM: WalletFormData = {
   cvu: '',
   bankName: '',
   amountLimit: '',
+  panelId: '',
 };
 
 const WALLET_TYPES: { key: WalletType; label: string; icon: React.ComponentProps<typeof Ionicons>['name'] }[] = [
@@ -65,6 +72,19 @@ export default function WalletsScreen() {
   const addWalletToStore = useOperatorStore((s) => s.addWallet);
   const updateWalletInStore = useOperatorStore((s) => s.updateWallet);
   const removeWalletFromStore = useOperatorStore((s) => s.removeWallet);
+
+  // Los paneles, para poder decir de quien es cada billetera. Se piden una vez:
+  // son tres y no cambian mientras la pantalla esta abierta.
+  const [panels, setPanels] = useState<any[]>([]);
+  useEffect(() => {
+    emitWithTimeout<any>('get_panels', {}, 15000)
+      .then((res) => {
+        if (res?.success && Array.isArray(res.panels)) setPanels(res.panels);
+      })
+      .catch(() => {
+        // Sin la lista, el formulario igual sirve: la billetera queda compartida.
+      });
+  }, []);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [editingWallet, setEditingWallet] = useState<any>(null);
@@ -97,6 +117,7 @@ export default function WalletsScreen() {
       cvu: details.cvu || '',
       bankName: details.bankName || details.bank || '',
       amountLimit: wallet.amountLimit ? String(wallet.amountLimit) : '',
+      panelId: wallet.panelId || '',
     });
     setModalVisible(true);
   }, []);
@@ -111,22 +132,22 @@ export default function WalletsScreen() {
 
   const handleSubmit = useCallback(async () => {
     if (!form.holderName.trim()) {
-      Alert.alert('Error', 'El nombre del titular es obligatorio');
+      toast.error('El nombre del titular es obligatorio');
       return;
     }
 
     if (form.type === 'CBU' && form.cbu.replace(/\s/g, '').length !== 22) {
-      Alert.alert('Error', 'El CBU debe tener 22 digitos');
+      toast.error('El CBU debe tener 22 digitos');
       return;
     }
 
     if (form.type === 'CVU' && form.cvu.replace(/\s/g, '').length !== 22) {
-      Alert.alert('Error', 'El CVU debe tener 22 digitos');
+      toast.error('El CVU debe tener 22 digitos');
       return;
     }
 
     if (form.holderDni && (form.holderDni.length < 7 || form.holderDni.length > 11)) {
-      Alert.alert('Error', 'El DNI debe tener entre 7 y 11 digitos');
+      toast.error('El DNI debe tener entre 7 y 11 digitos');
       return;
     }
 
@@ -156,13 +177,14 @@ export default function WalletsScreen() {
         holderLegalName: form.holderLegalName.trim() || undefined,
         details,
         amountLimit: form.amountLimit && !isNaN(parseFloat(form.amountLimit)) ? parseFloat(form.amountLimit) : undefined,
+        panelId: form.panelId || null,
       };
 
       if (editingWallet) {
         payload.id = editingWallet.id;
         const result = await emitWithTimeout<any>('update_wallet', payload, 15000);
         if (result?.error) {
-          Alert.alert('Error', result.error);
+          toast.error(result.error);
           return;
         }
         updateWalletInStore(result?.data || result?.wallet || { ...editingWallet, ...payload });
@@ -170,7 +192,7 @@ export default function WalletsScreen() {
       } else {
         const result = await emitWithTimeout<any>('create_wallet', payload, 15000);
         if (result?.error) {
-          Alert.alert('Error', result.error);
+          toast.error(result.error);
           return;
         }
         addWalletToStore(result?.data || result?.wallet || payload);
@@ -180,7 +202,7 @@ export default function WalletsScreen() {
       closeModal();
     } catch (err: any) {
       hapticError();
-      Alert.alert('Error', err.message || 'No se pudo guardar la wallet');
+      toast.error(err.message || 'No se pudo guardar la wallet');
     } finally {
       setSubmitting(false);
     }
@@ -191,7 +213,7 @@ export default function WalletsScreen() {
       hapticMedium();
       const result = await emitWithTimeout<any>('select_wallet', { id: wallet.id });
       if (result?.error) {
-        Alert.alert('Error', result.error);
+        toast.error(result.error);
         return;
       }
       // Mark this wallet as selected, unmark others
@@ -206,72 +228,52 @@ export default function WalletsScreen() {
       hapticSuccess();
     } catch (err: any) {
       hapticError();
-      Alert.alert('Error', err.message || 'No se pudo seleccionar la wallet');
+      toast.error(err.message || 'No se pudo seleccionar la wallet');
     }
   }, []);
 
+  // Vaciar y eliminar son destructivas: van por un diálogo propio. `Alert.alert`
+  // en web se vuelve el confirm() nativo del browser: bloqueante, sin estilo y
+  // ajeno al resto del panel.
+  const [confirmTarget, setConfirmTarget] = useState<
+    { wallet: any; action: 'empty' | 'delete' } | null
+  >(null);
+  const [confirming, setConfirming] = useState(false);
+
   const handleEmpty = useCallback((wallet: any) => {
-    Alert.alert(
-      'Vaciar Wallet',
-      `Se reiniciara el acumulado de "${wallet.label || wallet.holderName}" a $0. Confirmar?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Vaciar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              hapticMedium();
-              const result = await emitWithTimeout<any>('empty_wallet', { id: wallet.id });
-              if (result?.error) {
-                Alert.alert('Error', result.error);
-                return;
-              }
-              useOperatorStore.getState().updateWallet({
-                ...wallet,
-                accumulatedAmount: '0',
-              });
-              hapticSuccess();
-            } catch (err: any) {
-              hapticError();
-              Alert.alert('Error', err.message || 'No se pudo vaciar la wallet');
-            }
-          },
-        },
-      ],
-    );
+    setConfirmTarget({ wallet, action: 'empty' });
   }, []);
 
   const handleDelete = useCallback((wallet: any) => {
-    Alert.alert(
-      'Eliminar Wallet',
-      `Se eliminara permanentemente "${wallet.label || wallet.holderName}". Esta accion no se puede deshacer.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              hapticMedium();
-              const result = await emitWithTimeout<any>('delete_wallet', { id: wallet.id });
-              if (result?.error) {
-                Alert.alert('Error', result.error);
-                return;
-              }
-              removeWalletFromStore(wallet.id);
-              hapticSuccess();
-            } catch (err: any) {
-              hapticError();
-              Alert.alert('Error', err.message || 'No se pudo eliminar la wallet');
-            }
-          },
-        },
-      ],
-    );
-  }, [removeWalletFromStore]);
+    setConfirmTarget({ wallet, action: 'delete' });
+  }, []);
 
-  // ---- Render ----
+  const runConfirmed = useCallback(async () => {
+    if (!confirmTarget) return;
+    const { wallet, action } = confirmTarget;
+    setConfirming(true);
+    try {
+      const event = action === 'empty' ? 'empty_wallet' : 'delete_wallet';
+      const result = await emitWithTimeout<any>(event, { id: wallet.id });
+      if (result?.error) {
+        toast.error(result.error);
+        return;
+      }
+      if (action === 'empty') {
+        useOperatorStore.getState().updateWallet({ ...wallet, accumulatedAmount: '0' });
+        toast.success('Acumulado reiniciado a $0');
+      } else {
+        removeWalletFromStore(wallet.id);
+        toast.success('Billetera eliminada');
+      }
+      setConfirmTarget(null);
+    } catch (err: any) {
+      toast.error(err.message || 'No se pudo completar la acción');
+    } finally {
+      setConfirming(false);
+    }
+  }, [confirmTarget, removeWalletFromStore]);
+
 
   const renderWallet = useCallback(
     ({ item }: { item: any }) => (
@@ -299,17 +301,14 @@ export default function WalletsScreen() {
   );
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Image source={require('@/assets/icon.png')} style={{ width: 32, height: 32, borderRadius: 8 }} />
-            <Text style={styles.headerTitle}>Wallets</Text>
-          </View>
-          <Text style={styles.headerSubtitle}>{wallets.length} configurada{wallets.length !== 1 ? 's' : ''}</Text>
-        </View>
-      </View>
+    <View style={styles.container}>
+      <PageHeader
+        title="Billeteras"
+        subtitle={`${wallets.length} configurada${wallets.length !== 1 ? 's' : ''} · donde reciben los pagos los usuarios`}
+        right={
+          <Button label="Nueva billetera" tone="primary" icon="add" onPress={openCreateModal} />
+        }
+      />
 
       {/* List */}
       <FlatList
@@ -321,14 +320,6 @@ export default function WalletsScreen() {
         showsVerticalScrollIndicator={false}
       />
 
-      {/* FAB */}
-      <TouchableOpacity
-        style={[styles.fab, { bottom: insets.bottom + 16 }]}
-        onPress={openCreateModal}
-        activeOpacity={0.8}
-      >
-        <Ionicons name="add" size={28} color={colors.textOnPrimary} />
-      </TouchableOpacity>
 
       {/* Create/Edit Modal */}
       <Modal
@@ -480,6 +471,42 @@ export default function WalletsScreen() {
               placeholderTextColor={colors.placeholder}
             />
 
+            {/* De quien es la plata que entra por esta billetera. Una billetera
+                con panel la ven solo los usuarios de ese panel, y su plata no
+                se mezcla con la del resto. */}
+            <Text style={styles.fieldLabel}>Panel</Text>
+            <View style={styles.panelPicker}>
+              <Pressable
+                onPress={() => updateField('panelId', '')}
+                style={[styles.panelChip, !form.panelId && styles.panelChipActive]}
+              >
+                <Text style={[styles.panelChipText, !form.panelId && styles.panelChipTextActive]}>
+                  Compartida
+                </Text>
+              </Pressable>
+              {panels.map((p: any) => (
+                <Pressable
+                  key={p.id}
+                  onPress={() => updateField('panelId', p.id)}
+                  style={[styles.panelChip, form.panelId === p.id && styles.panelChipActive]}
+                >
+                  <Text
+                    style={[
+                      styles.panelChipText,
+                      form.panelId === p.id && styles.panelChipTextActive,
+                    ]}
+                  >
+                    {p.name}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.fieldHint}>
+              {form.panelId
+                ? 'Solo la ven los usuarios de ese panel. Su plata no se mezcla con la del resto.'
+                : 'La ven todos los usuarios que no estan en un panel con billetera propia.'}
+            </Text>
+
             {/* Amount limit */}
             <Text style={styles.fieldLabel}>Limite de monto (opcional)</Text>
             <TextInput
@@ -519,11 +546,43 @@ export default function WalletsScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
+
+      <ConfirmDialog
+        visible={!!confirmTarget}
+        title={confirmTarget?.action === 'delete' ? 'Eliminar billetera' : 'Vaciar billetera'}
+        message={
+          confirmTarget
+            ? confirmTarget.action === 'delete'
+              ? `Se elimina "${confirmTarget.wallet.label || confirmTarget.wallet.holderName}" para siempre. No se puede deshacer.`
+              : `Se reinicia el acumulado de "${confirmTarget.wallet.label || confirmTarget.wallet.holderName}" a $0. Confirmá que ya retiraste los fondos.`
+            : ''
+        }
+        confirmLabel={confirmTarget?.action === 'delete' ? 'Eliminar' : 'Vaciar'}
+        tone="danger"
+        loading={confirming}
+        onConfirm={runConfirmed}
+        onCancel={() => setConfirmTarget(null)}
+      />
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  panelPicker: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  panelChip: {
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceElevated,
+  },
+  panelChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  panelChipText: { ...text.label, color: colors.textSecondary },
+  panelChipTextActive: { color: colors.textOnPrimary, fontWeight: '700' },
+  fieldHint: { ...text.caption, color: colors.textMuted, marginTop: space.xs },
+
   container: {
     flex: 1,
     backgroundColor: colors.background,

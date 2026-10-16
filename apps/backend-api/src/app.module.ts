@@ -1,3 +1,4 @@
+import { IntegrationsModule } from './integrations/integrations.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ServeStaticModule } from '@nestjs/serve-static';
@@ -14,6 +15,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { MessageTemplatesModule } from './message-templates/message-templates.module';
 import { UsersModule } from './users/users.module';
 import { BotModule } from './bot/bot.module';
 // New modules
@@ -41,9 +43,11 @@ import { PrizeClaimsModule } from './prize-claims/prize-claims.module';
 import { MpVerificationModule } from './mp-verification/mp-verification.module';
 import { TelegramBotModule } from './telegram-bot/telegram-bot.module';
 import { OutboundPaymentsModule } from './outbound-payments/outbound-payments.module';
+import { RetentionModule } from './retention/retention.module';
 
 @Module({
   imports: [
+    RetentionModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
@@ -56,6 +60,7 @@ import { OutboundPaymentsModule } from './outbound-payments/outbound-payments.mo
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
     PrismaModule,
+    MessageTemplatesModule,
     AuthModule,
     UsersModule,
     HealthModule,
@@ -82,6 +87,7 @@ import { OutboundPaymentsModule } from './outbound-payments/outbound-payments.mo
     StatusModule,
     LoggingModule,
     ValidatorModule,
+    IntegrationsModule,
     MetricsModule,
     PanelsModule,
     DiscoveryModule,

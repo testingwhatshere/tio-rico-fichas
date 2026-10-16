@@ -5,6 +5,11 @@ import { escapeHtml, showToast, showTextInputModal } from '../utils.js';
 import { DUCK_SVG } from '../constants.js';
 
 let prizesFilter = 'pending';
+// History (completed/all) is fetched on demand from the backend — the live
+// store.prizeClaims only holds *pending* claims (findPending), so filtering it
+// for COMPLETED would show almost nothing after a panel restart.
+let historyClaims = [];
+let historyLoading = false;
 
 export function initPrizesView() {
   renderPrizesView();
@@ -14,14 +19,21 @@ export function renderPrizesView() {
   const container = document.getElementById('prizes-container');
   if (!container) return;
 
-  const claims = store.prizeClaims || [];
+  // 'pending' → live store (real-time alerts). 'completed'/'all' → fetched history.
   let filteredClaims;
   if (prizesFilter === 'pending') {
-    filteredClaims = claims.filter(isPendingClaim);
-  } else if (prizesFilter === 'completed') {
-    filteredClaims = claims.filter(c => c.status === 'COMPLETED');
+    filteredClaims = (store.prizeClaims || []).filter(isPendingClaim);
   } else {
-    filteredClaims = claims;
+    filteredClaims = historyClaims;
+  }
+
+  let listHtml;
+  if (prizesFilter !== 'pending' && historyLoading) {
+    listHtml = `<div class="empty-state"><p>Cargando historial...</p></div>`;
+  } else if (filteredClaims.length === 0) {
+    listHtml = `<div class="empty-state">${DUCK_SVG}<p>No hay premios</p></div>`;
+  } else {
+    listHtml = filteredClaims.map(c => renderPrizeClaimCard(c)).join('');
   }
 
   container.innerHTML = `
@@ -33,11 +45,7 @@ export function renderPrizesView() {
         <option value="all" ${prizesFilter === 'all' ? 'selected' : ''}>Todos</option>
       </select>
     </div>
-    <div class="prizes-list">
-      ${filteredClaims.length === 0
-        ? `<div class="empty-state">${DUCK_SVG}<p>No hay premios</p></div>`
-        : filteredClaims.map(c => renderPrizeClaimCard(c)).join('')}
-    </div>
+    <div class="prizes-list">${listHtml}</div>
   `;
 
   // Attach filter listener
@@ -45,8 +53,37 @@ export function renderPrizesView() {
   if (filterEl) {
     filterEl.addEventListener('change', (e) => {
       prizesFilter = e.target.value;
-      renderPrizesView();
+      if (prizesFilter === 'pending') {
+        renderPrizesView();
+      } else {
+        loadPrizeHistory(prizesFilter);
+      }
     });
+  }
+}
+
+// Fetch completed/all prize claims from the backend and render them. Kept in a
+// separate cache so live events on the pending list don't wipe the history view.
+async function loadPrizeHistory(scope) {
+  if (!window.api?.getPrizeClaims) {
+    showToast('No se puede cargar el historial en esta versión del panel', 'error');
+    return;
+  }
+  historyLoading = true;
+  renderPrizesView();
+  try {
+    const res = await window.api.getPrizeClaims(scope);
+    // The IPC bridge returns the socket ACK ({ success, data }) or the array directly.
+    const claims = Array.isArray(res) ? res : (res?.data || []);
+    // Guard against a stale response after the operator switched filters again.
+    if (prizesFilter !== scope) return;
+    historyClaims = claims;
+  } catch (e) {
+    showToast('Error cargando historial: ' + e.message, 'error');
+    historyClaims = [];
+  } finally {
+    historyLoading = false;
+    renderPrizesView();
   }
 }
 
@@ -110,7 +147,7 @@ function renderPrizeClaimCard(claim) {
       <div class="prize-body">
         <div class="prize-detail"><strong>Monto:</strong> $${amount}</div>
         <div class="prize-detail"><strong>Fichas verificadas:</strong> $${balance}</div>
-        <div class="prize-detail"><strong>Pago:</strong> ${escapeHtml(paymentInfo)}</div>
+        <div class="prize-detail"><strong>Pago:</strong> ${paymentInfo === 'Sin datos de pago' ? escapeHtml(paymentInfo) : paymentInfo}</div>
         <div class="prize-detail"><strong>Creado:</strong> ${createdAt}</div>
       </div>
       <div class="prize-actions">${actions}</div>
@@ -135,11 +172,19 @@ function getPrizeStatusBadge(status) {
   return `<span class="badge ${info.cls}">${escapeHtml(info.label)}</span>`;
 }
 
+// Returns SAFE HTML (values escaped). CBU/alias render as copyable spans so the
+// operator can click to copy — the global [data-copy] handler in renderer.js
+// picks them up. Do NOT wrap the result in escapeHtml() at the call site.
 function formatPaymentDetails(details, method) {
   if (!details) return 'Sin datos';
-  if (method === 'CBU' && details.cbu) return `CBU: ${details.cbu} (${details.accountHolder || '?'})`;
-  if (method === 'ALIAS' && details.alias) return `Alias: ${details.alias} (${details.accountHolder || '?'})`;
-  return JSON.stringify(details);
+  const holder = details.accountHolder ? ` (${escapeHtml(details.accountHolder)})` : '';
+  const copyable = (label, value) =>
+    `${label}: <span class="value copyable" data-copy="${escapeHtml(value)}" title="Click para copiar">${escapeHtml(value)}</span>${holder}`;
+  if (method === 'CBU' && details.cbu) return copyable('CBU', details.cbu);
+  if (method === 'ALIAS' && details.alias) return copyable('Alias', details.alias);
+  if (details.cbu) return copyable('CBU', details.cbu);
+  if (details.alias) return copyable('Alias', details.alias);
+  return escapeHtml(JSON.stringify(details));
 }
 
 // Pendiente = requiere acción/atención del operador. VERIFICATION_FAILED solo

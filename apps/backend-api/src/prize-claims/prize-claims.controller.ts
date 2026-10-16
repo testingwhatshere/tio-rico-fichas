@@ -75,11 +75,18 @@ export class PrizeClaimsController {
   async complete(
     @Param('id') id: string,
     @CurrentUser() user: { sub: string },
-    @Body() body: { proofUrl: string; proofType?: 'image' | 'pdf' },
+    @Body()
+    body: {
+      proofUrl?: string;
+      proofType?: 'image' | 'pdf';
+      /** Varios comprobantes: un premio grande se paga desde varias cuentas. */
+      proofs?: { url: string; type?: 'image' | 'pdf'; name?: string }[];
+    },
   ) {
     return this.prizeClaimsService.complete(id, user.sub, {
       proofUrl: body?.proofUrl,
       proofType: body?.proofType,
+      proofs: body?.proofs,
     });
   }
 

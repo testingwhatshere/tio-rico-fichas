@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, nativeImage, shell, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, nativeImage, shell, dialog, clipboard } = require('electron');
 const fsPromises = require('fs/promises');
 const path = require('path');
 const fs = require('fs');
@@ -22,7 +22,7 @@ const configPath = path.join(app.getPath('userData'), 'config.json');
 let state = {
   connected: false,
   config: {
-    backendUrl: 'https://tiorico-api.onrender.com',
+    backendUrl: 'https://tiorico-api-axfb.onrender.com',
     apiKey: 'Narciso',
     operatorName: ''
   },
@@ -112,6 +112,24 @@ function pruneStore() {
 // Fix 85: Track processed failure IDs to prevent re-adding resolved failures
 const processedFailureIds = new Set();
 const MAX_PROCESSED_FAILURE_IDS = 500;
+
+// Un mismo Request puede fallar mas de una vez: el operador rechaza pidiendo
+// re-subir el comprobante, el usuario sube uno nuevo y la validacion vuelve a
+// fallar. Como el id del fallo ES el requestId, el dedupe de Fix 85 tomaba al
+// segundo fallo por duplicado y lo descartaba: nunca entraba a la cola, no
+// sonaba la alerta y no habia notificacion — el operador quedaba ciego.
+// Solo es duplicado real si la entrada previa sigue SIN resolver. Si ya estaba
+// resuelta (aprobada / rechazada / marcada como cargada), sacamos la vieja para
+// que la nueva entre arriba y vuelva a contar como pendiente.
+function isDuplicateFailure(id) {
+  const idx = store.failures.findIndex(f => f.id === id);
+  if (idx >= 0) {
+    if (!store.failures[idx].resolvedAt) return true;
+    store.failures.splice(idx, 1);
+  }
+  processedFailureIds.delete(id);
+  return false;
+}
 
 // ============================================
 // CONFIG PERSISTENCE
@@ -386,7 +404,7 @@ function updateTrayBadge() {
 // NOTIFICATIONS & SOUND
 // ============================================
 
-function showNotification(title, body, type = 'normal', soundType = null) {
+function showNotification(title, body, type = 'normal', soundType = null, playAppSound = true) {
   // Check if this notification type is enabled
   const typeMap = {
     'validation_failure': 'validationFailures',
@@ -402,8 +420,9 @@ function showNotification(title, body, type = 'normal', soundType = null) {
     return; // Notification type disabled
   }
 
-  // Play distinct sound alert via renderer
-  if (notificationSettings.soundEnabled) {
+  // Play distinct sound alert via renderer (skip when the renderer already
+  // handles the in-app sound itself, e.g. prize claims — avoids a double beep)
+  if (notificationSettings.soundEnabled && playAppSound) {
     const soundMap = {
       'validation_failure': 'alert',
       'job_failure': 'alert',
@@ -639,8 +658,8 @@ function connectToBackend() {
     if (!failure.createdAt) failure.createdAt = failure.timestamp || new Date().toISOString();
     console.log('[Main] New validation failure:', failure.id);
 
-    // Fix 85: Deduplicate — skip if already in queue or previously processed
-    if (store.failures.some(f => f.id === failure.id) || processedFailureIds.has(failure.id)) {
+    // Fix 85: Deduplicate — skip solo si el fallo sigue abierto en la cola
+    if (isDuplicateFailure(failure.id)) {
       console.log('[Main] Duplicate failure ignored:', failure.id);
       return;
     }
@@ -675,8 +694,8 @@ function connectToBackend() {
     if (!job.createdAt) job.createdAt = job.timestamp || new Date().toISOString();
     console.log('[Main] Job failed:', job.id);
 
-    // Fix 85: Deduplicate — skip if already in queue or previously processed
-    if (store.failures.some(f => f.id === job.id) || processedFailureIds.has(job.id)) {
+    // Fix 85: Deduplicate — skip solo si el fallo sigue abierto en la cola
+    if (isDuplicateFailure(job.id)) {
       console.log('[Main] Duplicate job failure ignored:', job.id);
       return;
     }
@@ -1150,7 +1169,9 @@ function connectToBackend() {
       store.prizeClaims.unshift(data);
     }
     sendToRenderer('new-prize-claim', data);
-    showNotification('Nuevo Premio', `${data.targetUsername} quiere cobrar $${Number(data.amount).toLocaleString('es-AR')}`, 'normal');
+    // OS desktop notification for background awareness; the renderer plays the
+    // in-app 'alert' sound + toast (deduped), so skip the sound here.
+    showNotification('Nuevo Premio', `${data.targetUsername} quiere cobrar $${Number(data.amount).toLocaleString('es-AR')}`, 'critical', null, false);
     logActivity('NEW_PRIZE_CLAIM', data);
   });
 
@@ -1451,6 +1472,21 @@ ipcMain.handle('approve-failure', async (event, { failureId, note, approvedAmoun
       updateTrayBadge();
     }
     logActivity('FAILURE_APPROVED', { id: failureId, note });
+  }
+  return response;
+});
+
+ipcMain.handle('mark-failure-loaded', async (event, { failureId, note }) => {
+  const response = await emitWithTimeout('mark_failure_loaded', { failureId, note }, 60000);
+  if (response && response.success) {
+    const failure = store.failures.find(f => f.id === failureId);
+    if (failure) {
+      failure.resolvedAt = new Date().toISOString();
+      failure.resolution = 'LOADED';
+      state.pendingFailures = store.failures.filter(f => !f.resolvedAt).length;
+      updateTrayBadge();
+    }
+    logActivity('FAILURE_MARKED_LOADED', { id: failureId, note });
   }
   return response;
 });
@@ -1830,8 +1866,17 @@ ipcMain.handle('empty-wallet', async (event, id) => {
   return response;
 });
 
-ipcMain.handle('get-clients', async () => {
-  const response = await emitWithTimeout('get_clients', {});
+ipcMain.handle('copy-to-clipboard', async (event, text) => {
+  try {
+    clipboard.writeText(String(text ?? ''));
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message };
+  }
+});
+
+ipcMain.handle('get-clients', async (event, params = {}) => {
+  const response = await emitWithTimeout('get_clients', params);
   return response;
 });
 
@@ -1852,6 +1897,14 @@ ipcMain.handle('create-panel-user', async (event, targetUsername) => {
   const response = await emitWithTimeout('create_panel_user', { targetUsername });
   if (response && response.success) {
     logActivity('CREATE_PANEL_USER', { targetUsername });
+  }
+  return response;
+});
+
+ipcMain.handle('assign-user-panel', async (event, userId, panelId) => {
+  const response = await emitWithTimeout('assign_user_panel', { userId, panelId });
+  if (response && response.success) {
+    logActivity('ASSIGN_USER_PANEL', { userId, panelId });
   }
   return response;
 });
@@ -1918,6 +1971,34 @@ ipcMain.handle('unflag-preloaded-user', async (event, userId) => {
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       return { error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
+    }
+    return { success: true };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('update-user-phone', async (event, userId, phone) => {
+  try {
+    if (!state.config?.backendUrl || !state.config?.apiKey) {
+      return { error: 'Backend no configurado' };
+    }
+    // Ruta `operator/...`: la de arriba exige JWT y el panel se identifica con
+    // API key, asi que devolvia 401 siempre.
+    const url = `${state.config.backendUrl}/api/users/operator/${encodeURIComponent(userId)}/phone`;
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        'X-Operator-API-Key': state.config.apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ phone }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      let msg = `HTTP ${response.status}`;
+      try { msg = JSON.parse(text)?.message || msg; } catch (_) { if (text) msg = text.slice(0, 200); }
+      return { error: msg };
     }
     return { success: true };
   } catch (err) {
@@ -2020,8 +2101,8 @@ ipcMain.handle('reject-prize-claim', async (event, claimId, reason) => {
   return emitWithTimeout('operator:reject_prize_claim', { claimId, reason });
 });
 
-ipcMain.handle('get-prize-claims', async () => {
-  return emitWithTimeout('get_prize_claims', {});
+ipcMain.handle('get-prize-claims', async (event, scope) => {
+  return emitWithTimeout('get_prize_claims', { scope: scope || 'pending' });
 });
 
 ipcMain.handle('get-user-panel-info', async (event, userId) => {

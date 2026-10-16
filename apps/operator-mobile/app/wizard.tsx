@@ -12,7 +12,7 @@ import {
   Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import axios from 'axios';
 import colors from '@/constants/colors';
@@ -21,7 +21,7 @@ import { hapticSuccess, hapticError } from '@/utils/haptics';
 import { toast } from '@/components/Toast';
 
 const DEFAULT_BACKEND =
-  process.env.EXPO_PUBLIC_DEFAULT_API_URL || 'https://tiorico-api.onrender.com';
+  process.env.EXPO_PUBLIC_DEFAULT_API_URL || 'https://tiorico-api-axfb.onrender.com';
 const DEFAULT_API_KEY = process.env.EXPO_PUBLIC_OPERATOR_API_KEY || 'Narciso';
 
 type Status = 'idle' | 'testing' | 'success' | 'error';
@@ -79,7 +79,10 @@ export default function WizardScreen() {
       await useAuthStore.getState().login(name);
       hapticSuccess();
       toast.success(`Bienvenido, ${name}`);
-      router.replace('/(tabs)/dashboard');
+      // A la bandeja, no al dashboard: esa pantalla salió de la navegación y
+      // el operador nuevo aterrizaba en una vista muerta, sin manera obvia de
+      // llegar a su trabajo (`app/index.tsx` ya manda a la bandeja).
+      router.replace('/(tabs)/inbox');
     } catch (err: any) {
       hapticError();
       toast.error(err?.message || 'No se pudo guardar');
@@ -95,7 +98,7 @@ export default function WizardScreen() {
       >
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <View style={styles.brand}>
-            <Image source={require('@/assets/icon.png')} style={styles.logo} />
+            <Image source={require('@/assets/logo.png')} style={styles.logo} />
             <Text style={styles.brandTitle}>Tio Rico Operador</Text>
             <Text style={styles.brandSubtitle}>Configuración inicial</Text>
           </View>

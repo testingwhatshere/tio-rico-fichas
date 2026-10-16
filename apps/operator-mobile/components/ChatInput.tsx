@@ -4,12 +4,17 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import colors from '@/constants/colors';
 
 interface ChatInputProps {
-  onSend: (text: string) => void;
+  /**
+   * Devolver `false` si el mensaje no se pudo enviar: el texto se restaura en
+   * el campo en vez de perderse.
+   */
+  onSend: (text: string) => void | Promise<boolean | void>;
   onTyping: () => void;
   disabled?: boolean;
 }
@@ -18,6 +23,7 @@ const TYPING_DEBOUNCE_MS = 300;
 
 export default function ChatInput({ onSend, onTyping, disabled }: ChatInputProps) {
   const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<TextInput>(null);
 
@@ -36,21 +42,33 @@ export default function ChatInput({ onSend, onTyping, disabled }: ChatInputProps
     [onTyping],
   );
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || disabled) return;
+    if (!trimmed || disabled || sending) return;
 
-    onSend(trimmed);
+    // El campo se limpia de una para que se sienta inmediato, pero si el envío
+    // falla el texto vuelve: antes se borraba sin esperar la respuesta y el
+    // operador perdía el mensaje entero, con el usuario esperando del otro lado.
     setText('');
+    setSending(true);
 
     // Clear any pending typing debounce
     if (typingTimerRef.current) {
       clearTimeout(typingTimerRef.current);
       typingTimerRef.current = null;
     }
-  }, [text, disabled, onSend]);
 
-  const canSend = text.trim().length > 0 && !disabled;
+    try {
+      const ok = await onSend(trimmed);
+      if (ok === false) setText((current) => (current ? current : trimmed));
+    } catch {
+      setText((current) => (current ? current : trimmed));
+    } finally {
+      setSending(false);
+    }
+  }, [text, disabled, sending, onSend]);
+
+  const canSend = text.trim().length > 0 && !disabled && !sending;
 
   return (
     <View style={styles.container}>
@@ -74,11 +92,15 @@ export default function ChatInput({ onSend, onTyping, disabled }: ChatInputProps
           disabled={!canSend}
           activeOpacity={0.7}
         >
-          <Ionicons
-            name="send"
-            size={20}
-            color={canSend ? colors.textOnPrimary : colors.textMuted}
-          />
+          {sending ? (
+            <ActivityIndicator size="small" color={colors.textMuted} />
+          ) : (
+            <Ionicons
+              name="send"
+              size={20}
+              color={canSend ? colors.textOnPrimary : colors.textMuted}
+            />
+          )}
         </TouchableOpacity>
       </View>
     </View>

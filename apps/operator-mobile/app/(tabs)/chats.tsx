@@ -52,7 +52,7 @@ export default function ChatsScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <Image source={require('@/assets/icon.png')} style={styles.headerIcon} />
+        <Image source={require('@/assets/logo.png')} style={styles.headerIcon} />
         <Text style={styles.headerTitle}>Chats</Text>
         <View style={styles.headerBadge}>
           <Text style={styles.headerBadgeText}>{chats.length}</Text>
@@ -80,7 +80,7 @@ export default function ChatsScreen() {
           }
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Image source={require('@/assets/icon.png')} style={styles.emptyImage} />
+              <Image source={require('@/assets/logo.png')} style={styles.emptyImage} />
               <Text style={styles.emptyTitle}>Sin chats activos</Text>
               <Text style={styles.emptySubtitle}>
                 Los chats con usuarios apareceran aqui

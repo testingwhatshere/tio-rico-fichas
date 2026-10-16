@@ -10,9 +10,11 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { Roles } from '../common/decorators/roles.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { CurrentUserPayload } from '../auth/interfaces/current-user.interface';
 import {
@@ -22,6 +24,7 @@ import {
 } from './dto';
 import { UsersService } from './users.service';
 import { BalanceService } from '../balance/balance.service';
+import { OperatorApiKeyGuard } from '../common/guards/operator-api-key.guard';
 
 @Controller('users')
 export class UsersController {
@@ -37,6 +40,14 @@ export class UsersController {
       page ? parseInt(page, 10) : 1,
       limit ? parseInt(limit, 10) : 10,
     );
+  }
+
+  /** Quién usa la app, para la extensión Recolectora. Autoriza la API key del panel. */
+  @Get('operator/app-usage')
+  @Public()
+  @UseGuards(OperatorApiKeyGuard)
+  async getAppUsage() {
+    return this.usersService.getAppUsage();
   }
 
   @Get(':id')
@@ -83,6 +94,61 @@ export class UsersController {
     @Body() dto: { username: string },
   ) {
     return this.usersService.updateUsername(id, dto.username);
+  }
+
+  /**
+   * Update a user's phone number (operator action).
+   * Used when a bad number blocks the user from logging in. Stored canonical
+   * so the login phone-match works.
+   */
+  @Patch(':id/phone')
+  @Roles(UserRole.OPERATOR, UserRole.SENIOR_OPERATOR, UserRole.ADMIN)
+  async updatePhone(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { phone: string },
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.usersService.updatePhone(id, dto.phone, user.sub);
+  }
+
+  /**
+   * Misma accion que updatePhone, para el panel de escritorio.
+   *
+   * El panel Electron se autentica con la API key de operador, no con JWT, asi
+   * que la ruta de arriba le devolvia 401: el JwtAuthGuard global corre primero
+   * y no conoce la API key. Por eso el editor de telefono del panel nunca
+   * funciono, ni en Pre-cargados ni en Usuarios.
+   *
+   * SIN AUTENTICACION A PROPOSITO — decision explicita del dueño (2026-08-24),
+   * priorizando que no se rompa por expiracion de token ni por rotacion de
+   * claves. No es un descuido: NO agregar guards aca sin hablarlo antes.
+   *
+   * Riesgo asumido y conocido: el login es usuario + telefono, asi que quien
+   * llegue a esta ruta puede reapuntar el telefono de una cuenta ajena y entrar
+   * como esa persona. La ruta con JWT de arriba se deja intacta porque es la
+   * que usa operator-mobile.
+   */
+  @Patch('operator/:id/phone')
+  @Public()
+  async updatePhoneFromOperatorPanel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { phone: string },
+  ) {
+    return this.usersService.updatePhone(id, dto.phone);
+  }
+
+  /**
+   * Manually assign a gaming-panel to a user (operator action).
+   * Used when automatic discovery couldn't resolve the user's panel. Re-queues
+   * a hung FAILED load to the assigned panel if there is one.
+   */
+  @Patch(':id/panel')
+  @Roles(UserRole.OPERATOR, UserRole.SENIOR_OPERATOR, UserRole.ADMIN)
+  async assignPanel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { panelId: string },
+  ) {
+    return this.usersService.assignPanel(id, dto.panelId);
   }
 
   @Delete(':id')

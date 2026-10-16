@@ -2,7 +2,7 @@
   "expo": {
     "name": "Tio Rico Fichas",
     "slug": "tioricofichas",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -37,7 +37,10 @@
             "NSExtensionActivationSupportsImageWithMaxCount": 1,
             "NSExtensionActivationSupportsFileWithMaxCount": 1
           },
-          "androidIntentFilters": ["image/*", "application/pdf"],
+          "androidIntentFilters": [
+            "image/*",
+            "application/pdf"
+          ],
           "androidMultiIntentFilters": []
         }
       ],

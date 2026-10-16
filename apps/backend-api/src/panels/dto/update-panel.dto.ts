@@ -9,4 +9,9 @@ export class UpdatePanelDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  /** Si el panel entra en la busqueda automatica de usuarios sin panel. */
+  @IsBoolean()
+  @IsOptional()
+  discoverable?: boolean;
 }

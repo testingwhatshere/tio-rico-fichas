@@ -8,7 +8,7 @@ async function main() {
   });
   console.log('User en mi DB:', u);
   // Ahora hacer login al backend deployed y comparar id
-  const res = await fetch('https://tiorico-api.onrender.com/api/auth/client', {
+  const res = await fetch('https://tiorico-api-axfb.onrender.com/api/auth/client', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: u?.username, phone: u?.phone }),

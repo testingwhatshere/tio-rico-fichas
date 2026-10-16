@@ -14,12 +14,12 @@
  *   ping       - Ping al bot via WebSocket
  *
  * Variables de entorno:
- *   BACKEND_URL  - URL del backend (default: https://tiorico-api.onrender.com)
+ *   BACKEND_URL  - URL del backend (default: https://tiorico-api-axfb.onrender.com)
  *   BOT_API_KEY  - API key del bot
  *   PANEL_ID     - Panel ID
  */
 
-const BACKEND_URL = process.env.BACKEND_URL || 'https://tiorico-api.onrender.com';
+const BACKEND_URL = process.env.BACKEND_URL || 'https://tiorico-api-axfb.onrender.com';
 const BOT_API_KEY = process.env.BOT_API_KEY || '';
 const PANEL_ID = process.env.PANEL_ID || '';
 const TARGET_USERNAME = process.argv[3] || 'test_user_' + Date.now();

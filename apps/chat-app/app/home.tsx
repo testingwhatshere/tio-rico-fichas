@@ -24,8 +24,10 @@ import { hapticLight } from '@/utils/haptics';
 import { crossAlert, crossConfirm } from '@/utils/dialog';
 import colors from '@/constants/colors';
 import PrizeClaimCard from '@/components/cards/PrizeClaimCard';
+import DownloadAppBanner from '@/components/DownloadAppBanner';
 
 const GAME_URL = 'https://tioricojuegos.co';
+
 
 interface ChatMessage {
   id: string;
@@ -354,6 +356,9 @@ export default function HomeScreen() {
           />
         }
       >
+        {/* Descargar la app (solo web + Android) */}
+        <DownloadAppBanner />
+
         {/* Header with duck icon */}
         <View style={styles.header}>
           <Image

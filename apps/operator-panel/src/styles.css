@@ -4234,6 +4234,40 @@ select:focus {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 1px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Boton chico para editar el telefono sin sacar al operador de la lista.
+   Se mantiene discreto hasta que el mouse pasa por la card. */
+.user-phone-edit {
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.user-card:hover .user-phone-edit,
+.user-phone-edit:focus-visible {
+  opacity: 1;
+}
+
+.user-phone-edit:hover {
+  color: var(--gold-500, #d4a017);
+  border-color: var(--gold-500, #d4a017);
+  opacity: 1;
+}
+
+.user-phone-edit:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .user-status {
@@ -4931,4 +4965,160 @@ select:focus {
 
 .log-entry.log-debug {
   color: var(--text-muted, #666);
+}
+
+/* ============================================
+   Cargas Aprobadas view (aditivo)
+   ============================================ */
+.approved-loads-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  padding: 4px;
+}
+
+.al-card {
+  display: flex;
+  gap: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 12px;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.al-card:hover {
+  border-color: var(--gold-400);
+  transform: translateY(-1px);
+}
+
+.al-card-duplicate {
+  border-color: var(--amber-500);
+  box-shadow: 0 0 0 1px var(--amber-500) inset;
+}
+
+.al-thumb {
+  position: relative;
+  flex: 0 0 92px;
+  width: 92px;
+  height: 92px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.al-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: zoom-in;
+}
+
+.al-thumb-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.al-thumb-loading .spinner-sm {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-color);
+  border-top: 2px solid var(--gold-500);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.al-thumb-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: center;
+  padding: 6px;
+}
+
+.al-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.al-info-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.al-username {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.al-email {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.al-info-bottom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+
+.al-amount {
+  font-weight: 700;
+  color: var(--gold-400);
+  font-size: 14px;
+}
+
+.al-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.al-id {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.al-txid {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.al-dup-badge {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--amber-400);
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid var(--amber-500);
+  border-radius: 6px;
+  padding: 3px 8px;
+  width: fit-content;
 }

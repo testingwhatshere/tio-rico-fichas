@@ -6,12 +6,15 @@ import {
   Query,
   Res,
   NotFoundException,
+  UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import * as fs from 'fs';
 import { LoggingService } from './logging.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { LogLevel, LogSource } from '@prisma/client';
+import { Public } from '../common/decorators/public.decorator';
+import { OperatorApiKeyGuard } from '../common/guards/operator-api-key.guard';
 
 @Controller('logs')
 @Roles('OPERATOR', 'SENIOR_OPERATOR', 'ADMIN')
@@ -85,6 +88,37 @@ export class LoggingController {
   /**
    * Get bot session logs
    */
+  /**
+   * La traza del bot para un job, accesible con la API key del panel.
+   *
+   * `BotSessionLog` es la única evidencia de qué hizo la extensión paso a paso,
+   * pero hasta ahora sólo se podía leer con un JWT de operador — que nadie
+   * tiene a mano cuando hay que averiguar por qué un job quedó colgado. Sin
+   * esto, diagnosticar significaba pedirle a una persona que abriera la consola
+   * de Chrome en la máquina del panel.
+   */
+  @Get('operator/bot/job/:jobId')
+  @Public()
+  // Sin roles: el controller entero exige rol de operador, y `getAllAndOverride`
+  // toma primero lo del método. Acá la autorización la da la API key del panel.
+  @Roles()
+  @UseGuards(OperatorApiKeyGuard)
+  async getJobBotLogsForOperator(@Param('jobId') jobId: string) {
+    return this.loggingService.getJobBotLogs(jobId);
+  }
+
+  /** Últimos pasos registrados, sin filtrar por job: para ver qué está haciendo
+   *  el bot ahora mismo o qué hizo último antes de morir. */
+  @Get('operator/bot/recent')
+  @Public()
+  @Roles()
+  @UseGuards(OperatorApiKeyGuard)
+  async getRecentBotLogsForOperator(@Query('limit') limit?: string) {
+    return this.loggingService.getRecentBotSessionLogs(
+      Math.min(Number(limit) || 100, 500),
+    );
+  }
+
   @Get('bot/session/:sessionId')
   async getBotSessionLogs(@Param('sessionId') sessionId: string) {
     return this.loggingService.getBotSessionLogs(sessionId);

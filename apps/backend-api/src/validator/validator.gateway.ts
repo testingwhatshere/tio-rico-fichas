@@ -45,6 +45,12 @@ interface ValidationRequest {
   mimeType: string;
   expectedAmount: number;
   expectedWallet?: WalletValidationInfo | null;
+  // Tells the validator how long the backend will wait, so it can size its own
+  // internal Ollama timeout to land a result BEFORE the backend gives up.
+  // Without this the validator defaulted to 120s while the backend rejected at
+  // 90s → the (late) result was dropped and the load got stuck as "Validation
+  // timeout" (the martina34t incident).
+  validationTimeoutMs?: number;
 }
 
 interface ValidationResult {
@@ -76,6 +82,8 @@ interface ValidationResult {
     screenshot_quality?: string;
     editing_signs?: string;
   } | null;
+  /** Texto OCR crudo (recortado). Los validadores viejos no lo mandan. */
+  ocrText?: string | null;
 }
 
 type PendingValidation = {
@@ -83,7 +91,14 @@ type PendingValidation = {
   resolve: (result: ValidationResult) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
+  /** Socket al que se mandó por última vez (diagnóstico). */
+  sentTo: string | null;
+  /** Cuántas veces se envió (1 = sin reenvíos). */
+  sends: number;
 };
+
+/** Cuánto se espera antes de cortar el socket reemplazado (deja salir el aviso). */
+const REPLACED_DISCONNECT_DELAY_MS = 250;
 
 @WebSocketGateway({
   namespace: '/validator',
@@ -102,6 +117,13 @@ export class ValidatorGateway
 
   private readonly logger = new Logger(ValidatorGateway.name);
   private connectedValidator: Socket | null = null;
+  /**
+   * Sockets que pasaron la autenticación y siguen abiertos. Un resultado se
+   * acepta de cualquiera de ellos si la validación sigue pendiente: durante un
+   * deploy del validador la instancia saliente todavía puede estar terminando un
+   * comprobante cuando la entrante ya tomó el lugar.
+   */
+  private readonly authenticatedSockets = new Set<string>();
   private validatorApiKey: string;
   private pendingValidations: Map<string, PendingValidation> = new Map();
   private operatorGateway: OperatorGateway | null = null;
@@ -192,34 +214,43 @@ export class ValidatorGateway
       return;
     }
 
-    // Only allow one validator at a time. If the existing socket is dead
-    // (no heartbeat in 90s) treat it as zombie and let the new one take over —
-    // otherwise a network blip on the validator's side leaves us unable to
-    // reconnect because the old socket lingers in our state.
-    if (this.connectedValidator) {
-      const lastHb = this.lastHeartbeat?.getTime() || 0;
-      const stale = Date.now() - lastHb > 90_000;
-      const dead = this.connectedValidator.disconnected || stale;
-      if (dead) {
-        this.logger.warn(
-          `Replacing stale validator ${this.connectedValidator.id} (lastHeartbeat ${
-            this.lastHeartbeat?.toISOString() || 'never'
-          }) with ${client.id}`,
-        );
+    this.authenticatedSockets.add(client.id);
+
+    // Single-validator model: only ever one legitimate validator is deployed
+    // (the Render worker). Any NEW connection that authenticates with the valid
+    // API key is therefore the validator restarting, reconnecting after a
+    // network blip, or the new instance of a deploy — never a competing second
+    // instance. So we always let the newcomer take over and reap the previous
+    // socket immediately. Waiting for a staleness window (the old behaviour)
+    // meant a reconnecting validator got rejected for up to
+    // VALIDATOR_TAKEOVER_STALE_MS because Socket.IO hadn't yet detected the
+    // dropped TCP socket — that was the source of the reconnect-storm churn.
+    //
+    // The replaced socket gets a 'replaced' event first so a still-alive
+    // instance (the outgoing one in a deploy) stops reconnecting instead of
+    // taking the slot back.
+    if (this.connectedValidator && this.connectedValidator.id !== client.id) {
+      const previous = this.connectedValidator;
+      const lastHb = this.lastHeartbeat?.toISOString() || 'never';
+      this.logger.warn(
+        `Replacing existing validator ${previous.id} (lastHeartbeat ${lastHb}) with validator ${client.id}`,
+      );
+      try {
+        previous.emit('replaced', {
+          by: client.id,
+          timestamp: new Date().toISOString(),
+        });
+      } catch {
+        /* noop */
+      }
+      setTimeout(() => {
         try {
-          this.connectedValidator.disconnect();
+          previous.disconnect(true);
         } catch {
           /* noop */
         }
-        this.connectedValidator = null;
-      } else {
-        this.logger.warn('Another validator already connected, rejecting');
-        client.emit('error', {
-          message: 'Another validator is already connected',
-        });
-        client.disconnect();
-        return;
-      }
+      }, REPLACED_DISCONNECT_DELAY_MS);
+      this.connectedValidator = null;
     }
 
     this.connectedValidator = client;
@@ -234,26 +265,51 @@ export class ValidatorGateway
     // Start heartbeat monitoring
     this.startHeartbeatMonitor();
 
+    // Lo que quedó pendiente de un validador anterior (corte, reinicio, deploy)
+    // se le reenvía a este con el mismo id.
+    this.resendPendingTo(client);
+
     // Notify operators that validator is online
     this.emitValidatorStatusToOperators(true);
   }
 
   handleDisconnect(client: Socket) {
+    this.authenticatedSockets.delete(client.id);
     if (this.connectedValidator?.id === client.id) {
-      this.logger.warn(`Validator disconnected: ${client.id}`);
       this.connectedValidator = null;
       this.lastHeartbeat = null;
       this.stopHeartbeatMonitor();
 
-      // Reject all pending validations
-      for (const [id, pending] of this.pendingValidations) {
-        clearTimeout(pending.timeout);
-        pending.reject(new Error('Validator disconnected'));
-      }
-      this.pendingValidations.clear();
+      // Las validaciones pendientes NO se rechazan: siguen esperando con su
+      // timeout original y se reenvían al validador que se conecte (el mismo
+      // reconectado o la instancia nueva de un deploy). Antes se rechazaban
+      // todas y un microcorte mandaba cada comprobante en vuelo a revisión
+      // manual (2026-10-13). Si nadie se conecta a tiempo, vence el timeout y
+      // sigue el camino de siempre.
+      this.logger.warn(
+        `Validator disconnected: ${client.id} (${this.pendingValidations.size} pending kept for resend)`,
+      );
 
       // Notify operators that validator is offline
       this.emitValidatorStatusToOperators(false);
+    }
+  }
+
+  /**
+   * Reenvía las validaciones pendientes al validador recién conectado. El
+   * validador es idempotente por id: si ya lo había resuelto, contesta con el
+   * resultado guardado sin volver a leer el comprobante.
+   */
+  private resendPendingTo(client: Socket) {
+    if (this.pendingValidations.size === 0) return;
+    for (const [id, pending] of this.pendingValidations) {
+      if (pending.sentTo === client.id) continue;
+      pending.sentTo = client.id;
+      pending.sends += 1;
+      this.logger.log(
+        `Re-sending pending validation ${id} for request ${pending.request.requestId} to ${client.id} (send #${pending.sends})`,
+      );
+      client.emit('validate', pending.request);
     }
   }
 
@@ -316,6 +372,10 @@ export class ValidatorGateway
 
     const id = `val_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+    // Get timeout from settings (dynamic) — computed BEFORE building the request
+    // so we can pass it to the validator as a hint.
+    const validationTimeout = await this.getValidationTimeout();
+
     const request: ValidationRequest = {
       id,
       requestId,
@@ -323,10 +383,8 @@ export class ValidatorGateway
       mimeType,
       expectedAmount,
       expectedWallet: walletInfo || null,
+      validationTimeoutMs: validationTimeout,
     };
-
-    // Get timeout from settings (dynamic)
-    const validationTimeout = await this.getValidationTimeout();
 
     return new Promise((resolve, reject) => {
       // Set timeout
@@ -336,18 +394,21 @@ export class ValidatorGateway
       }, validationTimeout);
 
       // Store pending validation
+      const target = this.connectedValidator!;
       this.pendingValidations.set(id, {
         request,
         resolve,
         reject,
         timeout,
+        sentTo: target.id,
+        sends: 1,
       });
 
       // Send to validator
       this.logger.log(
         `Sending validation request ${id} for request ${requestId}`,
       );
-      this.connectedValidator!.emit('validate', request);
+      target.emit('validate', request);
     });
   }
 
@@ -359,19 +420,30 @@ export class ValidatorGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() result: ValidationResult,
   ) {
-    if (client.id !== this.connectedValidator?.id) {
-      this.logger.warn('Received result from unknown validator');
+    if (!this.authenticatedSockets.has(client.id)) {
+      this.logger.warn(
+        `Received result from unauthenticated socket ${client.id}`,
+      );
       return;
     }
 
-    const pending = this.pendingValidations.get(result.id);
+    const pending = result?.id
+      ? this.pendingValidations.get(result.id)
+      : undefined;
     if (!pending) {
-      this.logger.warn(`Received result for unknown validation: ${result.id}`);
+      // Ya resuelto (llegó otra copia antes) o vencido.
+      this.logger.warn(
+        `Received result for unknown validation: ${result?.id} (request ${result?.requestId ?? '?'})`,
+      );
       return;
     }
 
     this.logger.log(
-      `Received validation result for ${result.id}: valid=${result.isValid}`,
+      `Received validation result for ${result.id}: valid=${result.isValid}` +
+        (pending.sends > 1 ? ` (after ${pending.sends} sends)` : '') +
+        (client.id !== this.connectedValidator?.id
+          ? ` from previous validator ${client.id}`
+          : ''),
     );
 
     clearTimeout(pending.timeout);

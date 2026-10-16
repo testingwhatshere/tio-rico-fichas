@@ -110,6 +110,11 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
           `Approved-without-job recovery failed: ${error.message}`,
         );
       }
+      try {
+        await this.reconcileBusyPanels();
+      } catch (error) {
+        this.logger.error(`Busy panel reconciliation failed: ${error.message}`);
+      }
     }, STUCK_JOB_CHECK_INTERVAL_MS);
 
     this.logger.log(
@@ -285,6 +290,45 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     } catch (error: any) {
       this.logger.error(
         `Failed to dispatch after stuck job cleanup: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Liberar paneles marcados busy que no tienen ningún job corriendo.
+   *
+   * `busyPanels` vive en RAM en el gateway y se limpia en el completion del job
+   * o cuando el panel se queda sin bots conectados. Ninguna de las dos cosas es
+   * confiable: la extensión MV3 reconecta cada ~70s solapando sockets, así que
+   * el panel nunca llega a cero bots, y hasta 2026-08-26 los jobs sin panelId
+   * marcaban busy un panel que después nadie liberaba. Un panel pegado en busy
+   * desaparece del discovery y no acepta creación de usuarios, en silencio.
+   *
+   * Esto lo reconcilia contra la DB, que es la fuente de verdad de qué se está
+   * ejecutando.
+   */
+  private async reconcileBusyPanels(): Promise<void> {
+    const busyPanels = this.botGateway.getBusyPanelIds();
+    if (busyPanels.length === 0) return;
+
+    const processing = await this.prisma.job.findMany({
+      where: { status: 'PROCESSING' },
+      select: { panelId: true },
+    });
+
+    // Un job PROCESSING sin panelId puede estar corriendo en cualquier panel
+    // (jobs viejos, anteriores a que se persista el panel efectivo). Mientras
+    // exista uno así no se libera nada: interrumpir una carga en curso es peor
+    // que dejar un panel de más marcado busy otros 5 minutos.
+    if (processing.some((job) => !job.panelId)) return;
+
+    const panelsWithActiveJob = new Set(processing.map((job) => job.panelId));
+
+    for (const panelId of busyPanels) {
+      if (panelsWithActiveJob.has(panelId)) continue;
+      this.botGateway.markPanelIdle(panelId);
+      this.logger.warn(
+        `Panel ${panelId} estaba marcado busy sin ningún job PROCESSING — liberado`,
       );
     }
   }
@@ -701,7 +745,30 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     } else {
       // Legacy: push to any available bot
       if (this.botGateway.isAnyBotConnected()) {
-        pushed = await this.botGateway.pushJobToBot(job);
+        const result = await this.botGateway.pushJobToBot(job);
+        pushed = result.pushed;
+
+        // Dejar asentado en qué panel terminó corriendo.
+        //
+        // Los jobs sin panelId (CREATE_USER del botón "Crear en Panel",
+        // CHANGE_PASSWORD) se despachan al primer panel disponible, y el
+        // gateway marca ESE panel como busy. La liberación al completar va por
+        // `job.panelId`: si queda en null, nadie libera nunca y el panel se
+        // vuelve invisible para el discovery hasta que se reinicie el backend
+        // (2026-08-26: el Panel B estuvo así, todo se buscaba en el A).
+        if (result.pushed && result.panelId) {
+          job.panelId = result.panelId;
+          try {
+            await this.prisma.job.update({
+              where: { id: job.id },
+              data: { panelId: result.panelId },
+            });
+          } catch (err: any) {
+            this.logger.error(
+              `No se pudo persistir el panel ${result.panelId} en el job ${job.id}: ${err.message}`,
+            );
+          }
+        }
       }
     }
 

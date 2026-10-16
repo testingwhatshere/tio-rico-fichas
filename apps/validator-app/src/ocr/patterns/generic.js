@@ -21,12 +21,19 @@ function extract(text, overrides = {}, bankName = null, expectedAmount = null) {
     return defaultFn(text);
   };
 
+  // El monto se extrae en su versión detallada: además del número interesa saber si el
+  // primer dígito podía ser el símbolo de peso mal leído, porque eso no se puede resolver
+  // mirando este texto — lo resuelve el pipeline comparando contra las otras variantes.
+  const montoDetalle = overrides.extractedAmount
+    ? { amount: overrides.extractedAmount(text, expectedAmount), ambiguous: false, alternative: null }
+    : h.extractAmountDetailed(text, expectedAmount);
+
   const fields = {
     // Pass expectedAmount through so the helper can pick the closest match when
     // multiple peso amounts appear in the same receipt.
-    extractedAmount: overrides.extractedAmount
-      ? overrides.extractedAmount(text, expectedAmount)
-      : h.extractAmount(text, expectedAmount),
+    extractedAmount: montoDetalle.amount,
+    amountAmbiguous: montoDetalle.ambiguous,
+    amountAlternative: montoDetalle.alternative,
     extractedDate: get('extractedDate', h.extractDate),
     extractedTime: get('extractedTime', h.extractTime),
     transactionStatus: get('transactionStatus', h.extractStatus),

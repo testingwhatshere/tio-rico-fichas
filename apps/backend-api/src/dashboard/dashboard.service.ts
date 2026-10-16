@@ -1,12 +1,29 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { invalidateSettingsCache } from '../settings/settings-cache';
 import { JobsService } from '../jobs/jobs.service';
+import { UploadsService } from '../uploads/uploads.service';
+import { attachProofTwins } from '../common/utils/proof-twins';
+import { fetchValidationSummaries } from '../common/utils/validation-summary';
 import {
   DashboardStatsDto,
   RequestTrendDto,
   RevenueStatsDto,
   SystemHealthDto,
 } from './dto';
+
+/**
+ * El monto que el OCR leyo en el comprobante, aplanado desde `validationDetails`.
+ *
+ * Es el numero con el que el operador decide cuanto cargar cuando lo transferido
+ * no coincide con lo pedido. Vive anidado en un Json de ~20 campos y el panel
+ * esperaba un campo plano, asi que en la practica no llegaba nunca.
+ */
+function extractedAmountOf(validationDetails: unknown): number | null {
+  const raw = (validationDetails as any)?.extractedAmount;
+  const n = Number(raw);
+  return raw != null && Number.isFinite(n) && n > 0 ? n : null;
+}
 
 @Injectable()
 export class DashboardService {
@@ -16,12 +33,39 @@ export class DashboardService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => JobsService))
     private readonly jobsService: JobsService,
+    private readonly uploadsService: UploadsService,
   ) {}
 
   /**
    * Get comprehensive dashboard statistics
    */
+  /**
+   * Cache del payload de stats sin argumentos (el caso que usa `getInitialData`).
+   *
+   * Son 32 queries en 9 oleadas secuenciales y el resultado es identico para
+   * todos los operadores: no depende de quien pregunta. Se recalculaba entero en
+   * cada conexion y cada reconexion. Cinco segundos alcanzan para colapsar la
+   * rafaga de reconexiones sin que el numero se sienta viejo.
+   */
+  private statsCache: { at: number; data: DashboardStatsDto } | null = null;
+  private static readonly STATS_CACHE_MS = 5000;
+
   async getDashboardStats(from?: Date, to?: Date): Promise<DashboardStatsDto> {
+    const cacheable = !from && !to;
+    if (cacheable && this.statsCache) {
+      if (Date.now() - this.statsCache.at < DashboardService.STATS_CACHE_MS) {
+        return this.statsCache.data;
+      }
+    }
+    const result = await this.computeDashboardStats(from, to);
+    if (cacheable) this.statsCache = { at: Date.now(), data: result };
+    return result;
+  }
+
+  private async computeDashboardStats(
+    from?: Date,
+    to?: Date,
+  ): Promise<DashboardStatsDto> {
     const now = new Date();
     const startOfDay = new Date(
       now.getFullYear(),
@@ -38,73 +82,60 @@ export class DashboardService {
       },
     };
 
-    // Request statistics
-    const [
-      totalRequests,
-      pendingRequests,
-      validatingRequests,
-      validationFailedRequests,
-      pendingMpVerification,
-      approvedRequests,
-      processingRequests,
-      completedRequests,
-      failedRequests,
-      rejectedRequests,
-      cancelledRequests,
-    ] = await Promise.all([
-      this.prisma.request.count({ where: dateFilter }),
-      this.prisma.request.count({
-        where: { ...dateFilter, status: 'PENDING_PROOF' },
+    // Estadísticas por estado: un `groupBy` por tabla en vez de un `count` por
+    // estado.
+    //
+    // Eran 20 consultas disparadas juntas contra un pool de 9 conexiones. Con
+    // dos operadores conectando a la vez el pool se agotaba y fallaba TODO —
+    // incluida la app de los usuarios, que comparte el mismo pool: el
+    // 2026-08-26 hubo 500 en /api/messages y respuestas de 9 segundos.
+    const [requestGroups, jobGroups, chatGroups] = await Promise.all([
+      this.prisma.request.groupBy({
+        by: ['status'],
+        where: dateFilter,
+        _count: { _all: true },
       }),
-      this.prisma.request.count({
-        where: { ...dateFilter, status: 'VALIDATING' },
+      this.prisma.job.groupBy({
+        by: ['status'],
+        where: dateFilter,
+        _count: { _all: true },
       }),
-      this.prisma.request.count({
-        where: { ...dateFilter, status: 'VALIDATION_FAILED' },
-      }),
-      this.prisma.request.count({
-        where: { ...dateFilter, status: 'PENDING_MP_VERIFICATION' },
-      }),
-      this.prisma.request.count({
-        where: { ...dateFilter, status: 'APPROVED' },
-      }),
-      this.prisma.request.count({
-        where: { ...dateFilter, status: 'PROCESSING' },
-      }),
-      this.prisma.request.count({
-        where: { ...dateFilter, status: 'COMPLETED' },
-      }),
-      this.prisma.request.count({ where: { ...dateFilter, status: 'FAILED' } }),
-      this.prisma.request.count({
-        where: { ...dateFilter, status: 'REJECTED' },
-      }),
-      this.prisma.request.count({
-        where: { ...dateFilter, status: 'CANCELLED' },
-      }),
+      this.prisma.chat.groupBy({ by: ['status'], _count: { _all: true } }),
     ]);
 
+    const countOf = (groups: any[], status: string) =>
+      groups.find((g) => g.status === status)?._count?._all ?? 0;
+    const totalOf = (groups: any[]) =>
+      groups.reduce((acc, g) => acc + (g._count?._all ?? 0), 0);
+
+    // Request statistics
+    const totalRequests = totalOf(requestGroups);
+    const pendingRequests = countOf(requestGroups, 'PENDING_PROOF');
+    const validatingRequests = countOf(requestGroups, 'VALIDATING');
+    const validationFailedRequests = countOf(requestGroups, 'VALIDATION_FAILED');
+    const pendingMpVerification = countOf(
+      requestGroups,
+      'PENDING_MP_VERIFICATION',
+    );
+    const approvedRequests = countOf(requestGroups, 'APPROVED');
+    const processingRequests = countOf(requestGroups, 'PROCESSING');
+    const completedRequests = countOf(requestGroups, 'COMPLETED');
+    const failedRequests = countOf(requestGroups, 'FAILED');
+    const rejectedRequests = countOf(requestGroups, 'REJECTED');
+    const cancelledRequests = countOf(requestGroups, 'CANCELLED');
+
     // Job statistics
-    const [totalJobs, queuedJobs, processingJobs, completedJobs, failedJobs] =
-      await Promise.all([
-        this.prisma.job.count({ where: dateFilter }),
-        this.prisma.job.count({ where: { ...dateFilter, status: 'QUEUED' } }),
-        this.prisma.job.count({
-          where: { ...dateFilter, status: 'PROCESSING' },
-        }),
-        this.prisma.job.count({
-          where: { ...dateFilter, status: 'COMPLETED' },
-        }),
-        this.prisma.job.count({ where: { ...dateFilter, status: 'FAILED' } }),
-      ]);
+    const totalJobs = totalOf(jobGroups);
+    const queuedJobs = countOf(jobGroups, 'QUEUED');
+    const processingJobs = countOf(jobGroups, 'PROCESSING');
+    const completedJobs = countOf(jobGroups, 'COMPLETED');
+    const failedJobs = countOf(jobGroups, 'FAILED');
 
     // Chat statistics
-    const [totalChats, openChats, assignedChats, closedChats] =
-      await Promise.all([
-        this.prisma.chat.count(),
-        this.prisma.chat.count({ where: { status: 'OPEN' } }),
-        this.prisma.chat.count({ where: { status: 'ASSIGNED' } }),
-        this.prisma.chat.count({ where: { status: 'CLOSED' } }),
-      ]);
+    const totalChats = totalOf(chatGroups);
+    const openChats = countOf(chatGroups, 'OPEN');
+    const assignedChats = countOf(chatGroups, 'ASSIGNED');
+    const closedChats = countOf(chatGroups, 'CLOSED');
 
     const unreadMessages = await this.prisma.message.count({
       where: { isRead: false },
@@ -349,28 +380,160 @@ export class DashboardService {
    * Get failure queue (validation failed + job failed)
    */
   async getFailureQueue() {
-    const [validationFailures, jobFailures] = await Promise.all([
-      this.prisma.request.findMany({
-        where: { status: 'VALIDATION_FAILED' },
-        include: {
-          user: { select: { id: true, email: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      }),
-      this.prisma.job.findMany({
-        where: { status: 'FAILED' },
-        include: {
-          request: {
-            include: {
-              user: { select: { id: true, email: true } },
+    // Un fallo de discovery deja el Request en FAILED SIN fila Job: el bot nunca se
+    // despacha porque nunca se resolvio un panel. Esos casos caian entre las dos
+    // consultas de abajo (no son VALIDATION_FAILED y no tienen Job fallido) y quedaban
+    // invisibles para el operador: se veian en "Solicitudes" pero sin ninguna accion
+    // posible. Corte a 7 dias para que filas viejas sin resolver no inunden la cola.
+    const discoveryCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    // Las otras dos colas no tenian ningun corte: se arrastraban fallos de
+    // meses que nadie va a resolver (habia filas de 134 dias en la cola de
+    // "pendientes"). 30 dias cubre de sobra lo accionable; lo mas viejo sigue
+    // consultable por los endpoints de requests/jobs, que si paginan.
+    const failureCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [validationFailures, jobFailures, discoveryFailures] =
+      await Promise.all([
+        this.prisma.request.findMany({
+          where: {
+            status: 'VALIDATION_FAILED',
+            createdAt: { gte: failureCutoff },
+          },
+          // Sin `validationDetails`: el JSON del OCR viajaba entero desde
+          // Supabase en cada payload inicial. Se pide recortado mas abajo.
+          select: {
+            id: true,
+            userId: true,
+            targetUsername: true,
+            amount: true,
+            status: true,
+            proofUrl: true,
+            proofHash: true,
+            extractedTransactionId: true,
+            validationScore: true,
+            validationError: true,
+            createdAt: true,
+            user: { select: { id: true, email: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        }),
+        this.prisma.job.findMany({
+          where: {
+            status: 'FAILED',
+            createdAt: { gte: failureCutoff },
+            // El job queda FAILED para siempre, pero el caso puede haberse
+            // resuelto por otro lado: el usuario canceló la carga, un operador
+            // la marcó cargada a mano o la rechazó. El job fallido seguía
+            // apareciendo en la bandeja sin nada que hacer con él —muerto—
+            // porque esta consulta sólo miraba el estado del job.
+            //
+            // Los jobs sin request (retiro de fichas, cambio de contraseña,
+            // creación de usuario) no tienen a quién mirar, así que pasan.
+            OR: [
+              { requestId: null },
+              {
+                request: {
+                  is: {
+                    status: { notIn: ['CANCELLED', 'COMPLETED', 'REJECTED'] },
+                  },
+                },
+              },
+            ],
+          },
+          // `select` en vez de `include`: antes traia la fila entera del Job
+          // (result, screenshot, newPassword) y del Request, para descartar
+          // casi todo en el mapper de abajo.
+          select: {
+            id: true,
+            requestId: true,
+            error: true,
+            screenshot: true,
+            createdAt: true,
+            request: {
+              select: {
+                id: true,
+                userId: true,
+                targetUsername: true,
+                amount: true,
+                proofUrl: true,
+                // Para marcar "comprobante repetido" sin comparar a ojo.
+                proofHash: true,
+                extractedTransactionId: true,
+                user: { select: { id: true, email: true } },
+              },
             },
           },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      }),
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        }),
+        this.prisma.request.findMany({
+          where: {
+            status: 'FAILED',
+            job: { is: null },
+            createdAt: { gte: discoveryCutoff },
+          },
+          select: {
+            id: true,
+            userId: true,
+            targetUsername: true,
+            amount: true,
+            status: true,
+            proofUrl: true,
+            proofHash: true,
+            extractedTransactionId: true,
+            validationScore: true,
+            validationError: true,
+            createdAt: true,
+            user: { select: { id: true, email: true } },
+            statusHistory: {
+              where: { status: 'FAILED' },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: { metadata: true },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        }),
+      ]);
+
+    // Lo unico que se usa del JSON del OCR, recortado por Postgres.
+    const summaries = await fetchValidationSummaries(this.prisma, [
+      ...validationFailures.map((r) => r.id),
+      ...jobFailures.map((j) => j.request?.id ?? ''),
+      ...discoveryFailures.map((r) => r.id),
     ]);
+
+    // Los repetidos de las tres listas salen de una sola query: el operador que
+    // recibe un segundo comprobante necesita saber si es el mismo de antes.
+    const twinsById = new Map(
+      (
+        await attachProofTwins(this.prisma, [
+          ...validationFailures.map((r) => ({
+            id: r.id,
+            userId: r.userId,
+            proofHash: r.proofHash,
+            extractedTransactionId: r.extractedTransactionId,
+          })),
+          ...jobFailures
+            .filter((j) => j.request)
+            .map((j) => ({
+              id: j.request!.id,
+              userId: j.request!.userId,
+              proofHash: j.request!.proofHash,
+              extractedTransactionId: j.request!.extractedTransactionId,
+            })),
+          ...discoveryFailures.map((r) => ({
+            id: r.id,
+            userId: r.userId,
+            proofHash: r.proofHash,
+            extractedTransactionId: r.extractedTransactionId,
+          })),
+        ])
+      ).map((r) => [r.id, r.proofTwins] as const),
+    );
 
     return {
       validationFailures: validationFailures.map((r) => ({
@@ -380,10 +543,17 @@ export class DashboardService {
         userEmail: r.user.email,
         targetUsername: r.targetUsername,
         amount: Number(r.amount),
-        proofUrl: r.proofUrl,
+        // Normalize PDF proofs (Personal Pay etc.) to a first-page JPG so the
+        // operator's <img> can render them — raw Cloudinary PDFs return 401.
+        proofUrl: this.uploadsService.toDeliverableUrl(r.proofUrl ?? ''),
+        proofTwins: twinsById.get(r.id) ?? [],
         validationScore: r.validationScore,
         validationError: r.validationError,
-        validationDetails: r.validationDetails,
+        validationDetails: summaries.get(r.id) ?? null,
+        // Plano, ademas de anidado: el panel decide con este numero (cuanto
+        // transfirio de verdad) y leerlo de adentro de validationDetails es lo
+        // que fallaba — el boton "aceptar y cargar $X" nunca aparecia.
+        extractedAmount: extractedAmountOf(summaries.get(r.id)),
         createdAt: r.createdAt,
       })),
       jobFailures: jobFailures
@@ -398,9 +568,37 @@ export class DashboardService {
           amount: Number(j.request!.amount),
           error: j.error,
           screenshot: j.screenshot,
+          // El comprobante ya venia en la query (el include trae la fila entera
+          // del Request) y se descartaba. Cuesta cero mandarlo, y le sirve al
+          // operador para ver que pago la persona antes de decidir si carga a
+          // mano: el bot casi nunca deja screenshot.
+          proofUrl: this.uploadsService.toDeliverableUrl(j.request!.proofUrl ?? ''),
+          proofTwins: twinsById.get(j.request!.id) ?? [],
+          extractedAmount: extractedAmountOf(summaries.get(j.request!.id)),
           createdAt: j.createdAt,
         })),
-      total: validationFailures.length + jobFailures.length,
+      // Van keyed por el id del Request (no de un Job): approve/reject/retry del panel
+      // resuelven un Request via `requestId ?? id`, asi que ambos campos apuntan ahi.
+      discoveryFailures: discoveryFailures.map((r) => ({
+        id: r.id,
+        type: 'job_failed',
+        requestId: r.id,
+        userId: r.userId,
+        userEmail: r.user.email,
+        targetUsername: r.targetUsername,
+        amount: Number(r.amount),
+        proofUrl: this.uploadsService.toDeliverableUrl(r.proofUrl ?? ''),
+        proofTwins: twinsById.get(r.id) ?? [],
+        error:
+          ((r.statusHistory[0]?.metadata as any)?.reason as string) ||
+          'No se pudo asignar un panel para este usuario',
+        extractedAmount: extractedAmountOf(summaries.get(r.id)),
+        createdAt: r.createdAt,
+      })),
+      total:
+        validationFailures.length +
+        jobFailures.length +
+        discoveryFailures.length,
     };
   }
 
@@ -412,32 +610,55 @@ export class DashboardService {
       this.prisma.request.findMany({
         orderBy: { updatedAt: 'desc' },
         take: limit,
-        include: {
+        select: {
+          id: true,
+          status: true,
+          targetUsername: true,
+          amount: true,
+          updatedAt: true,
           user: { select: { id: true, email: true } },
         },
       }),
       this.prisma.job.findMany({
         orderBy: { createdAt: 'desc' },
         take: limit,
-        include: {
+        select: {
+          id: true,
+          status: true,
+          createdAt: true,
+          completedAt: true,
           request: {
             select: { targetUsername: true, amount: true },
           },
         },
       }),
+      // Sin `include: { messages: { take: 1 } }`: Prisma 6 lo resolvia trayendo
+      // todos los mensajes de esos chats. El ultimo va aparte, uno por chat.
       this.prisma.chat.findMany({
         where: { status: { in: ['OPEN', 'ASSIGNED'] } },
         orderBy: { updatedAt: 'desc' },
         take: limit,
-        include: {
+        select: {
+          id: true,
+          status: true,
+          updatedAt: true,
           user: { select: { id: true, email: true } },
-          messages: {
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-          },
         },
       }),
     ]);
+
+    const lastByChat = new Map(
+      (recentChats.length
+        ? await this.prisma.$queryRaw<Array<{ chatId: string; content: string }>>`
+            SELECT c.id AS "chatId", m.content
+            FROM unnest(${recentChats.map((c) => c.id)}::text[]) AS c(id)
+            CROSS JOIN LATERAL (
+              SELECT left(content, 300) AS content FROM "Message"
+              WHERE "chatId" = c.id ORDER BY "createdAt" DESC LIMIT 1
+            ) m`
+        : []
+      ).map((r) => [r.chatId, r.content] as const),
+    );
 
     // Combine and sort by timestamp
     const activities = [
@@ -465,7 +686,7 @@ export class DashboardService {
         id: c.id,
         action: c.status,
         description: `Chat ${c.status.toLowerCase()} with ${c.user.email}`,
-        lastMessage: c.messages[0]?.content,
+        lastMessage: lastByChat.get(c.id),
         timestamp: c.updatedAt,
       })),
     ];
@@ -860,12 +1081,14 @@ export class DashboardService {
       update: { value: 'true' },
       create: { key: 'KILL_SWITCH', value: 'true' },
     });
+    invalidateSettingsCache();
     if (reason) {
       await this.prisma.setting.upsert({
         where: { key: 'KILL_SWITCH_REASON' },
         update: { value: reason },
         create: { key: 'KILL_SWITCH_REASON', value: reason },
       });
+      invalidateSettingsCache();
     }
     return { active: true, reason };
   }
@@ -876,6 +1099,7 @@ export class DashboardService {
       update: { value: 'false' },
       create: { key: 'KILL_SWITCH', value: 'false' },
     });
+    invalidateSettingsCache();
     return { active: false };
   }
 

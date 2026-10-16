@@ -18,6 +18,18 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import colors from '@/constants/colors';
 
+// Listing concrete MIME types instead of `image/*` keeps Chrome on Android from
+// replacing the file chooser with the camera app.
+const FILE_ACCEPT = [
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+  'application/pdf',
+].join(',');
+
 interface ImageFile {
   uri: string;
   type: string;
@@ -36,26 +48,50 @@ export default function ProofUploadCard({
 }: ProofUploadCardProps) {
   const [selectedFile, setSelectedFile] = useState<ImageFile | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [pickError, setPickError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   const pickFile = () => {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const takePhoto = () => {
+    cameraInputRef.current?.click();
+  };
 
-    const uri = URL.createObjectURL(file);
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = event.target.files?.[0];
+    // Reset input so the same file can be selected again
+    event.target.value = '';
+    if (!picked) return;
+
+    setPickError(null);
+
+    // Copy the file into memory right away. On Android, a file picked from
+    // Google Photos/Drive/WhatsApp is only a handle to the content provider:
+    // it can come back with 0 bytes, or Chrome aborts the upload later
+    // (ERR_UPLOAD_FILE_CHANGED) and the user only sees "NetworkError".
+    let file: File;
+    try {
+      const bytes = await picked.arrayBuffer();
+      if (bytes.byteLength === 0) throw new Error('empty file');
+      file = new File([bytes], picked.name || 'comprobante', {
+        type: picked.type || 'application/octet-stream',
+      });
+    } catch {
+      setPickError(
+        'No pudimos abrir ese archivo. Guardalo primero en el teléfono (o sacale una captura) y elegilo de nuevo.',
+      );
+      return;
+    }
+
     setSelectedFile({
-      uri,
-      type: file.type || 'application/octet-stream',
+      uri: URL.createObjectURL(file),
+      type: file.type,
       name: file.name,
       file,
     });
-
-    // Reset input so the same file can be selected again
-    event.target.value = '';
   };
 
   const handleUpload = async () => {
@@ -86,18 +122,42 @@ export default function ProofUploadCard({
 
   return (
     <View style={styles.container}>
-      {/* Hidden HTML file input */}
+      {/* Hidden file input — explicit MIME list on purpose.
+          `image/*` makes Chrome on Android hijack the picker with the camera
+          intent, so the user never reaches their gallery or downloads folder. */}
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,application/pdf"
+        accept={FILE_ACCEPT}
+        onChange={handleFileChange}
+        style={{ display: 'none' }}
+      />
+
+      {/* Separate input for the camera, so taking a photo is an explicit choice */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
         onChange={handleFileChange}
         style={{ display: 'none' }}
       />
 
       {!selectedFile ? (
-        // Upload Button
+        // Upload Buttons
         <View style={styles.uploadButtons}>
+          <TouchableOpacity
+            style={styles.uploadButton}
+            onPress={takePhoto}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="camera" size={40} color={colors.primary} />
+            <Text style={styles.uploadButtonTitle}>Tomar Foto</Text>
+            <Text style={styles.uploadButtonSubtitle}>
+              Usa la camara
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.uploadButton}
             onPress={pickFile}
@@ -161,6 +221,8 @@ export default function ProofUploadCard({
           )}
         </View>
       )}
+
+      {pickError && <Text style={styles.pickErrorText}>{pickError}</Text>}
 
       {/* Info Box */}
       <View style={styles.infoBox}>
@@ -268,6 +330,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.textOnPrimary,
+  },
+  pickErrorText: {
+    fontSize: 14,
+    color: colors.error,
+    textAlign: 'center',
   },
   changeButton: {
     paddingVertical: 12,

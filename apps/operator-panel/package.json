@@ -1,6 +1,6 @@
 {
   "name": "operator-panel",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Panel de Operadores - Monitoreo y gestión de automatización",
   "main": "src/main.js",
   "author": "Game Automation Platform",
@@ -36,7 +36,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.ico",

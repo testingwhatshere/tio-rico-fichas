@@ -691,21 +691,13 @@ function createOllamaManager(deps) {
       const heapTotalMB = Math.round(memoryUsage.heapTotal / 1024 / 1024);
       const heapPercentage = (memoryUsage.heapUsed / memoryUsage.heapTotal) * 100;
 
-      // Warn if heap usage is above 80%
-      if (heapPercentage > 80) {
-        logger.warn('MEMORY', `High memory usage: ${heapUsedMB}MB / ${heapTotalMB}MB (${Math.round(heapPercentage)}%)`, {
-          heapUsed: heapUsedMB,
-          heapTotal: heapTotalMB,
-          heapPercentage: Math.round(heapPercentage),
-          rss: Math.round(memoryUsage.rss / 1024 / 1024),
-        });
-        deps.sendToRenderer('log', { message: `Advertencia: Uso de memoria alto (${Math.round(heapPercentage)}%)`, type: 'warning' });
-      }
-
-      // Critical if above 90%
+      // NOTE: heapUsed/heapTotal is a MISLEADING ratio — V8 grows heapTotal on
+      // demand, so >80% is normal and does NOT mean the machine is out of memory.
+      // These warnings used to be pushed to the operator's log panel and made
+      // the operator think the validator was broken. We now keep them ONLY in
+      // the on-disk log (for debugging), never surfaced in the UI.
       if (heapPercentage > 90) {
-        logger.error('MEMORY', `Critical memory usage: ${heapUsedMB}MB / ${heapTotalMB}MB (${Math.round(heapPercentage)}%)`);
-        deps.sendToRenderer('log', { message: `CRITICO: Memoria casi llena (${Math.round(heapPercentage)}%)`, type: 'error' });
+        logger.warn('MEMORY', `Heap ${heapUsedMB}MB / ${heapTotalMB}MB (${Math.round(heapPercentage)}%), rss ${Math.round(memoryUsage.rss / 1024 / 1024)}MB`);
       }
     }, 60000); // Check every minute
   }

@@ -1,7 +1,7 @@
 // api-mock.js — Browser-compatible mock of Electron's IPC bridge (preload.js)
 // Connects directly to Socket.IO /operator namespace instead of going through main.js
 
-const BACKEND_URL = 'https://tiorico-api.onrender.com';
+const BACKEND_URL = 'https://tiorico-api-axfb.onrender.com';
 const API_KEY = 'Narciso';
 const OPERATOR_NAME = 'E2E_TestOperator';
 

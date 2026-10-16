@@ -2,7 +2,7 @@
   "expo": {
     "name": "Operator Panel",
     "slug": "operator-mobile",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "operator-mobile",
@@ -21,7 +21,8 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#151921"
-      }
+      },
+      "versionCode": 3
     },
     "web": {
       "bundler": "metro",

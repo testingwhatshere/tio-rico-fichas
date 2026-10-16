@@ -100,7 +100,10 @@ async function validateWithOllama(request, config) {
   // Backend uses Settings + 5s buffer, so we subtract 2s here.
   const reqTimeout = Number.isFinite(request.validationTimeoutMs) && request.validationTimeoutMs > 0
     ? Math.max(60_000, request.validationTimeoutMs - 2_000)
-    : 120_000;
+    // Fallback for an older backend that doesn't send the hint. Kept UNDER the
+    // backend's default (90s) so a slow Ollama still lands a result before the
+    // backend rejects with "Validation timeout" and drops it.
+    : 80_000;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => { controller.abort(); }, reqTimeout);
 

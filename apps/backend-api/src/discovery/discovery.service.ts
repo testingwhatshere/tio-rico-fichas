@@ -22,11 +22,24 @@ interface DiscoveryState {
   status: 'IN_PROGRESS' | 'FOUND' | 'NOT_FOUND' | 'FAILED' | 'CREATING_USER';
   foundPanelId?: string;
   pendingCreationPanelId?: string; // Panel where creation should retry when idle
+  excludePanelId?: string; // Panel excluded from this discovery (re-discovery: reported NOT_FOUND)
+  resendCounts?: Record<string, number>; // panelId → times search_user was re-sent on reconnect
   timeoutTimer: ReturnType<typeof setTimeout>;
   createdAt: Date;
 }
 
+// Max times we re-ask a single panel that flapped mid-discovery before giving up.
+const MAX_DISCOVERY_RESENDS_PER_PANEL = 2;
+
 const DISCOVERY_TIMEOUT_MS = 180_000; // 180s — gives margin for panels busy with long jobs
+
+/**
+ * How far back we look for successful loads when judging a NOT_FOUND report.
+ * A user who completed a load on this panel inside this window is almost certainly
+ * still there, so a NOT_FOUND is treated as a bot failure rather than as proof the
+ * user is gone. 14d comfortably covers even occasional players.
+ */
+const SUSPECT_NOT_FOUND_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
 /**
  * Marker stored in Job.error when a job was failed because the user wasn't on the
@@ -67,6 +80,70 @@ export class DiscoveryService {
     } catch (err: any) {
       this.logger.warn(
         `Failed to emit discovery_failed to /operator: ${err?.message || err}`,
+      );
+    }
+
+    // El panel arma la cola de "Fallos" con VALIDATION_FAILED + Jobs FAILED, y una
+    // discovery fallida no es ninguno de los dos (no hay Job porque nunca hubo panel).
+    // `discovery_failed` solo dispara un toast, asi que la carga quedaba sin forma de
+    // aprobarse/reintentarse. La re-emitimos como `job_failed` — evento que el panel ya
+    // consume — para que entre a la cola sin necesidad de redistribuir el .exe.
+    if (payload.requestId) {
+      void this.emitFailureToOperatorQueue(payload.requestId, payload.reason);
+    }
+  }
+
+  /**
+   * Re-emite un Request FAILED sin Job como `job_failed` hacia /operator.
+   * Solo emite si el Request quedo efectivamente en FAILED y no tiene Job: los paths
+   * recuperables (ej. "No bots connected", donde el Request sigue APPROVED esperando
+   * que vuelva un bot) no deben ensuciar la cola del operador.
+   */
+  private async emitFailureToOperatorQueue(
+    requestId: string,
+    reason?: string,
+  ): Promise<void> {
+    try {
+      const request = await this.prisma.request.findUnique({
+        where: { id: requestId },
+        include: {
+          user: { select: { email: true } },
+          job: { select: { id: true } },
+        },
+      });
+      if (!request || request.status !== 'FAILED' || request.job) return;
+
+      let proofUrl = request.proofUrl ?? undefined;
+      try {
+        const { UploadsService } = require('../uploads/uploads.service');
+        const uploadsService = this.moduleRef.get(UploadsService, {
+          strict: false,
+        });
+        proofUrl = uploadsService.toDeliverableUrl(request.proofUrl ?? '');
+      } catch {
+        // Sin normalizar: un PDF de Cloudinary no va a renderizar, pero el resto
+        // del fallo (monto, usuario, motivo, acciones) sigue siendo util.
+      }
+
+      const { OperatorGateway } = require('../events/operator.gateway');
+      const opGateway = this.moduleRef.get(OperatorGateway, { strict: false });
+      // id === requestId a proposito: approve/reject/retry del panel resuelven un
+      // Request usando `requestId ?? id`.
+      opGateway?.emitJobFailed({
+        id: requestId,
+        requestId,
+        type: 'job_failed',
+        userId: request.userId,
+        userEmail: request.user?.email,
+        targetUsername: request.targetUsername,
+        amount: Number(request.amount),
+        proofUrl,
+        error: reason || 'No se pudo asignar un panel para este usuario',
+        createdAt: request.createdAt,
+      });
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to emit discovery failure to operator queue: ${err?.message || err}`,
       );
     }
   }
@@ -115,17 +192,20 @@ export class DiscoveryService {
         (excludePanelId ? ` — excluding panel ${excludePanelId}` : ''),
     );
 
+    const skip = await this.nonDiscoverablePanelIds();
+
     // Send search to idle panels (optionally excluding the stale panel)
     const sentTo = this.botGateway.pushDiscoveryToIdlePanels(
       taskId,
       targetUsername,
       excludePanelId,
+      skip,
     );
 
     // Track which panels were busy (for retry later) — also exclude the stale panel
     const allConnected = this.botGateway
       .getConnectedPanelIds()
-      .filter((id) => id !== excludePanelId);
+      .filter((id) => id !== excludePanelId && !skip.has(id));
     const busyPanels = allConnected.filter((id) => !sentTo.includes(id));
 
     if (sentTo.length === 0 && busyPanels.length === 0) {
@@ -158,6 +238,7 @@ export class DiscoveryService {
       responses: {},
       busyPanels,
       status: 'IN_PROGRESS',
+      excludePanelId,
       timeoutTimer,
       createdAt: new Date(),
     });
@@ -186,6 +267,26 @@ export class DiscoveryService {
   }
 
   /**
+   * Paneles que no participan de la busqueda automatica.
+   *
+   * Un panel aislado (billetera propia, usuarios cargados a mano) tiene que
+   * quedar afuera: si la busqueda encontrara ahi a un usuario sin panel, ese
+   * usuario ya pago a la billetera compartida y las fichas se cargarian en la
+   * caja equivocada. Sigue recibiendo jobs de SUS usuarios con normalidad.
+   *
+   * Se consulta en el momento y no se cachea: la busqueda no es un camino
+   * caliente —corre una vez por usuario nuevo— y un cache mal invalidado aca
+   * significa plata en el lugar equivocado.
+   */
+  private async nonDiscoverablePanelIds(): Promise<Set<string>> {
+    const panels = await this.prisma.panel.findMany({
+      where: { discoverable: false },
+      select: { id: true },
+    });
+    return new Set(panels.map((p) => p.id));
+  }
+
+  /**
    * Fire-and-forget check that compares active panels in DB against currently connected
    * bots. If any active panel has no bot online, emit a warning to operators (the user
    * UX is unaffected — discovery still resolves with whatever panels did respond).
@@ -196,7 +297,7 @@ export class DiscoveryService {
     requestId?: string,
   ): Promise<void> {
     const activePanels = await this.prisma.panel.findMany({
-      where: { isActive: true },
+      where: { isActive: true, discoverable: true },
       select: { id: true, name: true },
     });
     const connectedIds = new Set(this.botGateway.getConnectedPanelIds());
@@ -262,11 +363,16 @@ export class DiscoveryService {
       `Starting user discovery for "${targetUsername}" (user ${userId})`,
     );
 
+    const skip = await this.nonDiscoverablePanelIds();
     const sentTo = this.botGateway.pushDiscoveryToIdlePanels(
       taskId,
       targetUsername,
+      undefined,
+      skip,
     );
-    const allConnected = this.botGateway.getConnectedPanelIds();
+    const allConnected = this.botGateway
+      .getConnectedPanelIds()
+      .filter((id) => !skip.has(id));
     const busyPanels = allConnected.filter((id) => !sentTo.includes(id));
 
     if (sentTo.length === 0 && busyPanels.length === 0) {
@@ -479,6 +585,51 @@ export class DiscoveryService {
   }
 
   /**
+   * Re-send search_user to a panel that just reconnected while a discovery it was
+   * supposed to answer is still in progress. This covers the flap case: the panel
+   * received the original search_user and then its MV3 service worker suspended
+   * before it could reply, which otherwise leaves discovery hanging until timeout
+   * (this is what left "ariel985t" stuck). Called by BotGateway on reconnect.
+   *
+   * Guards:
+   *  - only IN_PROGRESS discoveries
+   *  - skip panels that already responded (a fresh answer is authoritative)
+   *  - skip the excluded panel (re-discovery already ruled it out)
+   *  - cap re-sends per panel to avoid a reconnect-storm loop
+   */
+  async retryDiscoveryOnPanelReconnect(panelId: string): Promise<void> {
+    // Un panel que no participa de la busqueda tampoco la retoma al reconectar.
+    if ((await this.nonDiscoverablePanelIds()).has(panelId)) return;
+
+    for (const [taskId, state] of this.discoveries) {
+      if (state.status !== 'IN_PROGRESS') continue;
+      if (panelId === state.excludePanelId) continue;
+      if (state.responses[panelId] !== undefined) continue;
+
+      state.resendCounts ??= {};
+      if (
+        (state.resendCounts[panelId] ?? 0) >= MAX_DISCOVERY_RESENDS_PER_PANEL
+      ) {
+        continue;
+      }
+
+      const sent = this.botGateway.pushDiscoveryToPanel(panelId, {
+        taskId,
+        targetUsername: state.targetUsername,
+      });
+      if (!sent) continue;
+
+      state.resendCounts[panelId] = (state.resendCounts[panelId] ?? 0) + 1;
+      if (!state.sentTo.includes(panelId)) state.sentTo.push(panelId);
+      state.busyPanels = state.busyPanels.filter((id) => id !== panelId);
+      this.logger.log(
+        `Re-sent discovery ${taskId} to reconnected panel ${panelId} ` +
+          `for "${state.targetUsername}" (attempt ${state.resendCounts[panelId]}/${MAX_DISCOVERY_RESENDS_PER_PANEL})`,
+      );
+    }
+  }
+
+  /**
    * Handle discovery timeout
    */
   private async handleDiscoveryTimeout(taskId: string): Promise<void> {
@@ -609,7 +760,10 @@ export class DiscoveryService {
     // If a busy panel never reported back (job still running, socket flapped, etc.) we
     // could auto-create on the wrong panel while the user actually exists where we never
     // looked. Always require full coverage before autocreate.
-    const connectedPanels = this.botGateway.getConnectedPanelIds();
+    const skipPanels = await this.nonDiscoverablePanelIds();
+    const connectedPanels = this.botGateway
+      .getConnectedPanelIds()
+      .filter((p) => !skipPanels.has(p));
     const respondedPanels = new Set(Object.keys(state.responses));
     const unanswered = connectedPanels.filter((p) => !respondedPanels.has(p));
 
@@ -678,6 +832,38 @@ export class DiscoveryService {
     this.logger.warn(
       `Discovery failed for "${state.targetUsername}": ${reason}`,
     );
+
+    // ----- RESTORE THE PANEL WE INVALIDATED -----
+    // A re-discovery starts by clearing User.panelId so discovery doesn't loop back to
+    // the panel that reported NOT_FOUND. If discovery then finds nothing, leaving the
+    // user with panelId=null strands them: every future load starts from blind discovery
+    // and fails the same way, needing manual repair. The NOT_FOUND that triggered all of
+    // this is exactly the report we no longer trust, so on failure we put the previous
+    // assignment back — it is strictly better evidence than nothing. A successful
+    // discovery (resolveDiscovery / triggerUserCreation) overwrites it anyway.
+    if (state.excludePanelId) {
+      try {
+        const restored = await this.prisma.user.updateMany({
+          where: { id: state.userId, panelId: null },
+          data: { panelId: state.excludePanelId },
+        });
+        if (restored.count > 0) {
+          this.logger.log(
+            `Restored panelId ${state.excludePanelId} for "${state.targetUsername}" after failed re-discovery — user is not left unassigned`,
+          );
+        }
+        if (state.requestId) {
+          await this.prisma.request.updateMany({
+            where: { id: state.requestId, panelId: null },
+            data: { panelId: state.excludePanelId },
+          });
+        }
+      } catch (err: any) {
+        this.logger.error(
+          `Failed to restore panelId after discovery failure: ${err.message}`,
+        );
+      }
+    }
 
     // Mark request FAILED in DB so the operator panel queue picks it up. Seamless UX:
     // we do NOT emit the FAILED transition to the user — the chat-app keeps the previous
@@ -785,6 +971,88 @@ export class DiscoveryService {
         `Panel mismatch on user-not-found: job ${jobId} assigned to ${stalePanelId} but ` +
           `report came from ${reportingPanelId}. Trusting reporter.`,
       );
+    }
+
+    // Guard: don't take NOT_FOUND at face value for a user who has been loading on
+    // this very panel. A single glitchy report (selector timeout, panel under load,
+    // extension service worker restarting mid-search) used to be enough to wipe the
+    // user's panel assignment and send the load into blind discovery — on 2026-08-24
+    // that cost nieva3 a $17.000 load while sitting on the panel that was searched.
+    // Recent COMPLETED loads are strong evidence the user is still there, so we keep
+    // the assignment and put the case in front of an operator instead.
+    const recentLoadsOnThisPanel = await this.prisma.request.count({
+      where: {
+        userId,
+        // Must match the SAME panel username. Scoping by userId alone would count
+        // loads made under a previous savedTargetUsername, and then a genuine
+        // NOT_FOUND after a username change would be suppressed as "suspect".
+        targetUsername,
+        panelId: reportingPanelId,
+        status: 'COMPLETED',
+        createdAt: { gte: new Date(Date.now() - SUSPECT_NOT_FOUND_WINDOW_MS) },
+      },
+    });
+
+    if (recentLoadsOnThisPanel > 0) {
+      this.logger.warn(
+        `Suspect NOT_FOUND: "${targetUsername}" reported missing on panel ${reportingPanelId} ` +
+          `(job ${jobId}) but has ${recentLoadsOnThisPanel} COMPLETED load(s) there in the last ` +
+          `${SUSPECT_NOT_FOUND_WINDOW_MS / 86400000}d — keeping panel assignment, sending to operator queue`,
+      );
+
+      const suspectError =
+        `El bot no encontró a "${targetUsername}" en el panel, pero el usuario ya cargó ahí ` +
+        `${recentLoadsOnThisPanel} vez/veces hace poco. Probable falla del bot, no usuario inexistente. ` +
+        `Revisá manualmente antes de reintentar.`;
+
+      await this.prisma.job.update({
+        where: { id: jobId },
+        data: {
+          status: 'FAILED',
+          error: suspectError,
+          completedAt: new Date(),
+        },
+      });
+
+      // Request stays FAILED *with its panelId intact*, so an operator retry goes
+      // straight back to the right panel instead of re-running discovery.
+      await this.prisma.request.update({
+        where: { id: request.id },
+        data: { status: 'FAILED' },
+      });
+
+      try {
+        await this.prisma.requestStatusHistory.create({
+          data: {
+            requestId: request.id,
+            status: 'FAILED',
+            changedBy: 'system-rediscovery',
+            metadata: {
+              reason: 'suspect_user_not_found_recent_loads_on_panel',
+              reportedBy: reportingPanelId,
+              recentLoadsOnThisPanel,
+              jobId,
+            },
+          },
+        });
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to write suspect-NOT_FOUND status history: ${err.message}`,
+        );
+      }
+
+      this.eventsGateway.emitJobFailed(userId, {
+        jobId,
+        requestId: request.id,
+        targetUsername,
+        amount: Number(request.amount),
+        error: suspectError,
+      });
+
+      return {
+        success: false,
+        message: 'Suspect NOT_FOUND — panel assignment kept, operator review required',
+      };
     }
 
     this.logger.log(

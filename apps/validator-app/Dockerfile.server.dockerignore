@@ -1,0 +1,9 @@
+# Contexto mínimo para Dockerfile.server
+*
+!server/package.json
+!server/package-lock.json
+!server/bench.js
+!spa.traineddata
+!src/**
+src/api-mock.js
+src/test-index.html

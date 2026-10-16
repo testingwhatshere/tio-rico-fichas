@@ -39,6 +39,9 @@ interface SocketHandlerDeps {
   // Restart-load handler (for post-completion "Cargar de nuevo" card)
   handleStartNewLoad?: (prefillAmount?: number) => void;
   handleAmountSelected?: (amount: number) => Promise<void> | void;
+
+  // "Transferiste de mas": muestra la pregunta Aceptar/Rechazar
+  showOverpaidOffer?: (requestId: string, offer: any) => void;
 }
 
 const SOCKET_POLL_INTERVAL_MS = 200;
@@ -60,6 +63,7 @@ export function useSocketHandlers(deps: SocketHandlerDeps) {
     handleProofUpload,
     handleStartNewLoad,
     handleAmountSelected,
+    showOverpaidOffer,
   } = deps;
 
   const typingIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -201,7 +205,17 @@ export function useSocketHandlers(deps: SocketHandlerDeps) {
         }
       };
 
+      const handleRequestUpdated = (data: any) => {
+        if (
+          data?.overpaidOffer?.status === 'PENDING' &&
+          data.requestId === activeRequestRef.current?.id
+        ) {
+          showOverpaidOffer?.(data.requestId, data.overpaidOffer);
+        }
+      };
+
       // ---- subscribe ----
+      socket.on('request:updated', handleRequestUpdated);
       socket.on('message:new', handleNewMessage);
       socket.on('validation:started', handleValidationStarted);
       socket.on('validation:completed', handleValidationCompleted);
@@ -228,6 +242,7 @@ export function useSocketHandlers(deps: SocketHandlerDeps) {
       socket.on('messages:read', handleMessagesRead);
 
       cleanupFn = () => {
+        socket.off('request:updated', handleRequestUpdated);
         socket.off('message:new', handleNewMessage);
         socket.off('validation:started', handleValidationStarted);
         socket.off('validation:completed', handleValidationCompleted);

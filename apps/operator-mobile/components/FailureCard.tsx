@@ -1,9 +1,13 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import colors from '@/constants/colors';
+import { CopyableText, CopyButton } from '@/components/Copyable';
 import { parseAmount, formatAmount } from '@/utils/amount';
 import { isFailureResolved } from '@/stores/operator.store';
+import ProofImage from '@/components/ProofImage';
+import { proofTwinAlert } from '@/utils/proofTwins';
+import { overpaidOfferTag } from '@/utils/overpaidOffer';
 
 interface FailureCardProps {
   failure: any;
@@ -33,6 +37,8 @@ export default function FailureCard({ failure, onPress }: FailureCardProps) {
   const timestamp = failure.createdAt || failure.request?.createdAt || '';
   const proofUrl = failure.proofUrl || failure.request?.proofUrl;
   const isResolved = isFailureResolved(failure);
+  const twin = proofTwinAlert(failure.proofTwins || failure.request?.proofTwins);
+  const overpaid = overpaidOfferTag(failure.validationDetails?.overpaidOffer);
 
   return (
     <TouchableOpacity
@@ -41,7 +47,7 @@ export default function FailureCard({ failure, onPress }: FailureCardProps) {
       activeOpacity={0.7}
     >
       {proofUrl ? (
-        <Image source={{ uri: proofUrl }} style={styles.thumbnail} resizeMode="cover" />
+        <ProofImage uri={proofUrl} style={styles.thumbnail} resizeMode="cover" compact />
       ) : (
         <View style={styles.thumbnailPlaceholder}>
           <Ionicons name="document-text-outline" size={22} color={colors.textMuted} />
@@ -49,10 +55,19 @@ export default function FailureCard({ failure, onPress }: FailureCardProps) {
       )}
 
       <View style={styles.center}>
-        <Text style={styles.username} numberOfLines={1}>
-          {targetUsername}
-        </Text>
-        <Text style={styles.amount}>${formatAmount(amount)}</Text>
+        <CopyableText value={targetUsername} label="Usuario" style={styles.username} iconSize={11} />
+        <View style={styles.copyRow}>
+          <Text style={styles.amount}>${formatAmount(amount)}</Text>
+          <CopyButton value={amount} label="Monto" size={11} />
+          {!!twin && (
+            <Text style={[styles.twinTag, twin.severe && { color: colors.error }]}>
+              {twin.label.toLowerCase()}
+            </Text>
+          )}
+        </View>
+        {!!overpaid && (
+          <Text style={[styles.twinTag, { color: overpaid.color }]}>{overpaid.label}</Text>
+        )}
       </View>
 
       <View style={styles.right}>
@@ -66,6 +81,8 @@ export default function FailureCard({ failure, onPress }: FailureCardProps) {
 }
 
 const styles = StyleSheet.create({
+  twinTag: { fontSize: 11, fontWeight: '700', color: colors.warning },
+  copyRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   card: {
     flexDirection: 'row',
     alignItems: 'center',

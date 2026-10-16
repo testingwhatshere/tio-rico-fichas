@@ -170,21 +170,6 @@ export async function deleteWallet(id) {
   }
 }
 
-export async function toggleWalletVerification(id, requiresVerification) {
-  try {
-    const result = await window.api.updateWallet({ id, requiresVerification });
-    if (result.success) {
-      showToast(requiresVerification ? 'Verificacion de pago activada' : 'Verificacion de pago desactivada', 'success');
-    } else {
-      showToast('Error: ' + (result.error || 'No se pudo actualizar'), 'error');
-      renderWalletsList(); // Re-render to revert checkbox
-    }
-  } catch (error) {
-    showToast('Error al actualizar verificacion', 'error');
-    renderWalletsList(); // Re-render to revert checkbox
-  }
-}
-
 export async function emptyWallet(id) {
   if (!confirm('\u00bfVaciar billetera? Esto resetea el monto acumulado a $0. Confirma que ya retiraste los fondos.')) return;
   try {
@@ -256,16 +241,6 @@ export function renderWalletsList() {
             </span>
           </div>
         ` : ''}
-      </div>
-      <div class="wallet-verification-toggle" style="margin-top:6px;">
-        <label class="toggle-label" style="display:flex;align-items:center;gap:6px;font-size:0.85em;cursor:pointer;">
-          <input type="checkbox" ${wallet.requiresVerification ? 'checked' : ''}
-            onchange="toggleWalletVerification('${wallet.id}', this.checked)"
-            style="accent-color:var(--accent-color,#10b981);">
-          <span style="color:${wallet.requiresVerification ? 'var(--success-color,#4CAF50)' : 'var(--text-muted,#888)'}">
-            ${wallet.requiresVerification ? 'Verificacion de pago activa' : 'Sin verificacion de pago'}
-          </span>
-        </label>
       </div>
       <div class="wallet-actions">
         ${!wallet.isSelected ? `

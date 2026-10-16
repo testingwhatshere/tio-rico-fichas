@@ -1,4 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { JwtModule } from '@nestjs/jwt';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 import { ProofValidationService } from './proof-validation.service';
@@ -15,6 +17,15 @@ import { NotificationsModule } from '../notifications/notifications.module';
     forwardRef(() => SettingsModule),
     UploadsModule,
     NotificationsModule,
+    // Para leer (sin exigir) el token en GET /payments/wallet y saber a que
+    // panel pertenece quien pregunta. Mismo secreto que AuthModule.
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        secret: config.get<string>('JWT_SECRET'),
+      }),
+    }),
   ],
   controllers: [PaymentsController],
   providers: [PaymentsService, ProofValidationService],

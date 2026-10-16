@@ -37,7 +37,7 @@ import {
 } from './renderer/entry-helpers.js';
 
 import { updateDashboard } from './renderer/views/dashboard.js';
-import { renderFailuresList, openFailureModal, approveSelectedFailure, rejectSelectedFailure } from './renderer/views/failures.js';
+import { renderFailuresList, openFailureModal, approveSelectedFailure, rejectSelectedFailure, markSelectedFailureLoaded } from './renderer/views/failures.js';
 import { renderJobsList, retryJob } from './renderer/views/jobs.js';
 import {
   renderChatsList, selectChat, loadChatMessages, loadMoreChatMessages, renderChatMain,
@@ -47,8 +47,8 @@ import {
   loadPendingSummary, refreshPendingSummaryForUser,
 } from './renderer/views/chats.js';
 import { renderActivityList } from './renderer/views/activity.js';
-import { renderWalletsList, updateSelectedWalletDisplay, selectWallet, deleteWallet, emptyWallet, toggleWalletVerification } from './renderer/views/wallets.js';
-import { renderUsersList, toggleUserActive, createPanelUser, refreshClients } from './renderer/views/users.js';
+import { renderWalletsList, updateSelectedWalletDisplay, selectWallet, deleteWallet, emptyWallet } from './renderer/views/wallets.js';
+import { renderUsersList, toggleUserActive, createPanelUser, refreshClients, assignUserPanel, editUserPhone } from './renderer/views/users.js';
 import {
   renderPrizesView, updatePrizesBadge,
   processPrizeClaim, completePrizeClaim, rejectPrizeClaim,
@@ -385,6 +385,8 @@ function setupEventListeners() {
   if (approveBtn) approveBtn.onclick = approveSelectedFailure;
   const rejectBtn = document.getElementById('modal-reject-btn');
   if (rejectBtn) rejectBtn.onclick = rejectSelectedFailure;
+  const markLoadedBtn = document.getElementById('modal-mark-loaded-btn');
+  if (markLoadedBtn) markLoadedBtn.onclick = markSelectedFailureLoaded;
 
   // Export buttons
   document.getElementById('export-failures-btn')?.addEventListener('click', () => exportData('failures'));
@@ -394,20 +396,34 @@ function setupEventListeners() {
   // Notification settings
   setupNotificationSettingsListeners();
 
-  // Delegated click handler for copyable wallet values (event delegation - O3 FIX)
+  // Delegated click handler for copyable values (event delegation - O3 FIX)
   document.addEventListener('click', (e) => {
     const copyable = e.target.closest('[data-copy]');
-    if (copyable) {
-      const text = copyable.dataset.copy;
-      navigator.clipboard.writeText(text).then(() => {
-        const original = copyable.textContent;
-        copyable.textContent = '\u00a1Copiado!';
-        copyable.classList.add('copied');
-        setTimeout(() => {
-          copyable.textContent = original;
-          copyable.classList.remove('copied');
-        }, 1200);
+    if (!copyable) return;
+    const text = copyable.dataset.copy;
+
+    const showCopied = () => {
+      const original = copyable.textContent;
+      copyable.textContent = '\u00a1Copiado!';
+      copyable.classList.add('copied');
+      setTimeout(() => {
+        copyable.textContent = original;
+        copyable.classList.remove('copied');
+      }, 1200);
+    };
+
+    // navigator.clipboard can be unavailable/blocked in Electron's isolated
+    // renderer; fall back to the native Electron clipboard via IPC.
+    const nativeCopy = () =>
+      window.api?.copyToClipboard(text).then((r) => {
+        if (r?.success) showCopied();
+        else showToast('No se pudo copiar', 'error');
       }).catch(() => showToast('No se pudo copiar', 'error'));
+
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(showCopied).catch(nativeCopy);
+    } else {
+      nativeCopy();
     }
   });
 
@@ -546,10 +562,26 @@ function setupIpcListeners() {
     loadNotificationSettings();
   }));
 
+  // Espejo del dedupe de main.js: el id del fallo es el requestId, asi que un
+  // request que fallo, se rechazo pidiendo comprobante nuevo y volvio a fallar
+  // llegaba con un id ya presente y se descartaba. Duplicado real = la entrada
+  // previa sigue sin resolver; si ya estaba resuelta, la sacamos y dejamos
+  // entrar al fallo nuevo. Tambien la sacamos de recentlyActionedFailures para
+  // que OP11 no la vuelva a marcar como resuelta en el proximo state sync.
+  const dropResolvedFailure = (id) => {
+    const idx = store.failures.findIndex(f => f.id === id);
+    if (idx >= 0) {
+      if (!store.failures[idx].resolvedAt) return true;
+      store.failures.splice(idx, 1);
+    }
+    recentlyActionedFailures.delete(id);
+    return false;
+  };
+
   fns.push(window.api.onNewFailure((failure) => {
-    if (store.failures.some(f => f.id === failure.id)) return;
+    if (dropResolvedFailure(failure.id)) return;
     store.failures.unshift(failure);
-    state.pendingFailures++;
+    state.pendingFailures = store.failures.filter(f => !f.resolvedAt).length;
     updateBadges();
     if (getCurrentView() === 'failures') renderFailuresList();
     if (getCurrentView() === 'dashboard') updateDashboard();
@@ -557,9 +589,9 @@ function setupIpcListeners() {
   }));
 
   fns.push(window.api.onJobFailed((job) => {
-    if (store.failures.some(f => f.id === job.id)) return;
+    if (dropResolvedFailure(job.id)) return;
     store.failures.unshift({ ...job, type: 'JOB_FAILURE' });
-    state.pendingFailures++;
+    state.pendingFailures = store.failures.filter(f => !f.resolvedAt).length;
     updateBadges();
     if (getCurrentView() === 'failures') renderFailuresList();
     playSound('alert');
@@ -763,8 +795,11 @@ function setupIpcListeners() {
   fns.push(window.api.onUserUpdated((user) => {
     const idx = store.clients.findIndex(c => c.id === user.id);
     if (idx >= 0) {
-      store.clients[idx] = user;
-    } else {
+      // Merge — some emitters send a partial patch (e.g. { id, panelId } from
+      // assign_user_panel); replacing outright would wipe username/phone/etc.
+      store.clients[idx] = { ...store.clients[idx], ...user };
+    } else if (user.username !== undefined) {
+      // Only add when we got a full user object, never a partial patch.
       store.clients.unshift(user);
     }
     if (getCurrentView() === 'users') {
@@ -828,8 +863,15 @@ function setupIpcListeners() {
   if (window.api.onNewPrizeClaim) {
     fns.push(window.api.onNewPrizeClaim((data) => {
       store.prizeClaims = store.prizeClaims || [];
-      if (!store.prizeClaims.find(c => c.id === data.id)) {
+      const existing = store.prizeClaims.find(c => c.id === data.id);
+      if (existing) {
+        // Already known (e.g. the post-verification re-emit) — refresh, don't re-alert.
+        Object.assign(existing, data);
+      } else {
         store.prizeClaims.unshift(data);
+        // Audible + visual alert, same as failures — the operator asked for this.
+        playSound('alert');
+        showToast(`Nuevo premio de ${data.targetUsername || 'usuario'}`, 'info');
       }
       updatePrizesBadge();
       if (getCurrentView() === 'prizes') renderPrizesView();
@@ -982,7 +1024,6 @@ window.openImageZoom = openImageZoom;
 window.selectWallet = selectWallet;
 window.deleteWallet = deleteWallet;
 window.emptyWallet = emptyWallet;
-window.toggleWalletVerification = toggleWalletVerification;
 window.loadChatMessages = loadChatMessages;
 window.loadMoreChatMessages = loadMoreChatMessages;
 window.handleOperatorTyping = handleOperatorTyping;
@@ -993,6 +1034,8 @@ window.saveQuickReplyFromModal = saveQuickReplyFromModal;
 window.toggleUserActive = toggleUserActive;
 window.createPanelUser = createPanelUser;
 window.refreshClients = refreshClients;
+window.assignUserPanel = assignUserPanel;
+window.editUserPhone = editUserPhone;
 window.processPrizeClaim = processPrizeClaim;
 window.completePrizeClaim = completePrizeClaim;
 window.rejectPrizeClaim = rejectPrizeClaim;

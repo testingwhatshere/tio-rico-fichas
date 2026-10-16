@@ -7,14 +7,18 @@ import { useOperatorStore } from '@/stores/operator.store';
 import { connectSocket, getSocket } from '@/services/socket';
 import { setApiConfig } from '@/services/api';
 import { notifyAlert, notifyMessage, notifyCritical } from '@/services/notifications';
+import { notifyPrizeClaim } from '@/services/webNotifications';
 import { useAuthStore } from '@/stores/auth.store';
-import ToastContainer from '@/components/Toast';
+import ToastContainer, { toast } from '@/components/Toast';
 import ConnectionBar from '@/components/ConnectionBar';
+import BreakerBanner from '@/components/BreakerBanner';
+import WebGate from '@/components/WebGate';
 import colors from '@/constants/colors';
+import { humanizeError } from '@/utils/errors';
 
 // Honour EXPO_PUBLIC_* env vars when present (E2E + local dev override).
 // Falls back to the production URLs so existing builds keep working.
-const BACKEND_URL = process.env.EXPO_PUBLIC_DEFAULT_API_URL || 'https://tiorico-api.onrender.com';
+const BACKEND_URL = process.env.EXPO_PUBLIC_DEFAULT_API_URL || 'https://tiorico-api-axfb.onrender.com';
 const API_KEY = process.env.EXPO_PUBLIC_OPERATOR_API_KEY || 'Narciso';
 
 // Prevent auto-hide so we control when splash disappears
@@ -24,6 +28,28 @@ SplashScreen.preventAutoHideAsync();
  * Register all socket event listeners on the given socket instance.
  * Must be called BEFORE socket.connect() so no events are missed.
  */
+/**
+ * Reintento cuando el payload inicial llega incompleto.
+ *
+ * El servidor arma la bandeja con varias consultas en paralelo y, si alguna
+ * falla (típicamente el pool de conexiones saturado cuando todos reconectan
+ * después de un deploy), manda `loadErrors` con lo que no pudo traer. Sin
+ * reintento el operador se queda con una pantalla a medias hasta que recarga a
+ * mano, y lo que no cargó se ve igual que "no hay nada pendiente".
+ */
+let initialDataRetries = 0;
+const MAX_INITIAL_DATA_RETRIES = 3;
+
+function scheduleInitialDataRetry(missing: string[]) {
+  if (initialDataRetries >= MAX_INITIAL_DATA_RETRIES) {
+    toast.error('Algunos datos no cargaron. Tocá refrescar para reintentar.');
+    return;
+  }
+  const attempt = ++initialDataRetries;
+  console.warn('[App] initial_data incompleto:', missing.join(', '), `— reintento ${attempt}`);
+  setTimeout(() => getSocket()?.emit('get_initial_data', {}), attempt * 2500);
+}
+
 function registerSocketListeners(socket: ReturnType<typeof getSocket>) {
   if (!socket) return () => {};
 
@@ -33,6 +59,10 @@ function registerSocketListeners(socket: ReturnType<typeof getSocket>) {
     console.log('[App] Received initial_data event, keys:', data ? Object.keys(data) : 'null');
     store().setInitialData(data);
     useAuthStore.getState().setConnected(true);
+
+    const missing = data?.loadErrors ? Object.keys(data.loadErrors) : [];
+    if (missing.length) scheduleInitialDataRetry(missing);
+    else initialDataRetries = 0;
   });
   socket.on('connect', () => {
     console.log('[App] Socket connected (listener in registerSocketListeners)');
@@ -50,7 +80,13 @@ function registerSocketListeners(socket: ReturnType<typeof getSocket>) {
   });
 
   socket.on('validation_failed', (data: any) => { store().addFailure({ ...data, type: 'VALIDATION_FAILURE' }); notifyAlert(); });
-  socket.on('job_failed', (data: any) => { store().addFailure({ ...data, type: 'JOB_FAILURE' }); notifyAlert(); });
+  // Real-time bot job failures arrive as { jobId, requestId, targetUsername, amount, error }.
+  // Set `id` to the jobId so dedup matches the initial-data shape (getFailureQueue uses the
+  // job id). Actions (retry/approve/reject) key off `requestId`, which is always present here.
+  socket.on('job_failed', (data: any) => {
+    store().addFailure({ ...data, id: data.id || data.jobId || data.requestId, type: 'JOB_FAILURE' });
+    notifyAlert();
+  });
   socket.on('failure_resolved', (data: any) => store().resolveFailure(data.failureId, data.action));
   socket.on('validation_completed', (data: any) => store().resolveFailure(data.requestId, 'auto_approved'));
   socket.on('request:rejected', (data: any) => store().resolveFailure(data.requestId || data.failureId, 'REJECTED'));
@@ -97,7 +133,16 @@ function registerSocketListeners(socket: ReturnType<typeof getSocket>) {
     store().addFailure({ id: `discovery-${data.requestId}`, type: 'DISCOVERY_FAILURE', requestId: data.requestId, targetUsername: data.targetUsername, reason: data.reason, timestamp: new Date().toISOString() });
     notifyAlert();
   });
-  socket.on('new_prize_claim', (data: any) => { store().addPrizeClaim(data); notifyAlert(); });
+  socket.on('new_prize_claim', (data: any) => {
+    // El backend emite el mismo premio hasta tres veces (al crearse, al llegar
+    // los datos de cobro, al verificar las fichas). El store dedupea por id;
+    // el aviso tiene que dedupear igual o el operador escucha tres campanas
+    // por un solo pedido.
+    const isNew = !useOperatorStore.getState().prizeClaims.some((c: any) => c.id === data?.id);
+    store().addPrizeClaim(data);
+    notifyAlert();
+    if (isNew) notifyPrizeClaim({ id: data?.id, username: data?.targetUsername || data?.username, amount: data?.amount });
+  });
   socket.on('prize_claim_updated', (data: any) => { if (data.id) store().updatePrizeClaim(data.id, data); });
   socket.on('wallet_created', (data: any) => store().addWallet(data));
   socket.on('wallet_updated', (data: any) => store().updateWallet(data));
@@ -116,10 +161,24 @@ function registerSocketListeners(socket: ReturnType<typeof getSocket>) {
     if (idx >= 0) { const updated = [...chats]; updated[idx] = { ...updated[idx], status: 'CLOSED', closedAt: data.timestamp }; store().setChats(updated); }
   });
   socket.on('messages:read', (data: any) => { if (data.chatId) store().markChatRead(data.chatId); });
+  // Cierre del "Crear en Panel": el botón sólo dice "en proceso" y la creación
+  // la hace el bot después. Sin este aviso el operador no sabe si terminó, y
+  // vuelve a apretar o pregunta.
+  socket.on('create_user_succeeded', (data: any) => {
+    toast.success(`Listo: "${data?.targetUsername || 'el usuario'}" ya está creado en el panel`);
+  });
+  socket.on('create_user_failed', (data: any) => {
+    notifyAlert();
+    toast.error(
+      `No se pudo crear "${data?.targetUsername || 'el usuario'}": ${humanizeError(data?.error)}`,
+    );
+  });
   socket.on('wallets_all_full', () => { notifyCritical(); Alert.alert('Billeteras Llenas', 'Todas las billeteras alcanzaron su limite.'); });
   socket.on('system_alert', (data: any) => {
     if (data.severity === 'critical' || data.severity === 'warning') {
       data.severity === 'critical' ? notifyCritical() : notifyAlert();
+      // Alert.alert no muestra nada en la web: el toast es lo que ve el operador ahí.
+      toast.error(data.message);
       Alert.alert(data.severity === 'critical' ? 'ALERTA CRITICA' : 'Advertencia', data.message);
     }
   });
@@ -131,9 +190,15 @@ function registerSocketListeners(socket: ReturnType<typeof getSocket>) {
   // Extension monitoring events
   socket.on('extension:heartbeat', (data: any) => { if (data.extensionId) store().upsertExtension(data); });
   socket.on('extension:circuit_breaker', (data: any) => {
-    if (data.extensionId) store().upsertExtension({ extensionId: data.extensionId, status: 'error', circuitBreakerActive: true, consecutiveErrors: data.errors });
+    if (!data.extensionId) return;
+    // El reset ("Reactivar") llega por este mismo evento con active:false.
+    if (data.active === false) {
+      store().upsertExtension({ extensionId: data.extensionId, status: 'online', circuitBreakerActive: false, consecutiveErrors: 0, breakerReasons: [] });
+      return;
+    }
+    store().upsertExtension({ extensionId: data.extensionId, status: 'error', circuitBreakerActive: true, consecutiveErrors: data.errors, breakerReasons: data.reasons || [] });
+    // El aviso visible es el BreakerBanner (Alert.alert no muestra nada en la web).
     notifyCritical();
-    Alert.alert('Circuit Breaker', `Extension ${data.extensionId || ''} pausada por ${data.errors || 0} errores consecutivos`);
   });
   socket.on('extension:selector_health', (data: any) => {
     if (data.extensionId && data.failed > 0) {
@@ -149,6 +214,7 @@ function registerSocketListeners(socket: ReturnType<typeof getSocket>) {
     'validator:status', 'discovery_failed', 'new_prize_claim', 'prize_claim_updated',
     'wallet_created', 'wallet_updated', 'wallet_selected', 'wallet_deleted', 'wallet_emptied',
     'user_updated', 'settings_updated', 'chat_closed', 'messages:read',
+    'create_user_succeeded', 'create_user_failed',
     'wallets_all_full', 'system_alert',
     'outbound_payment_created', 'outbound_payment_updated', 'outbound_payment_completed', 'outbound_payment_failed',
     'extension:heartbeat', 'extension:circuit_breaker', 'extension:selector_health',
@@ -192,6 +258,11 @@ export default function RootLayout() {
                   console.log('[App] Got initial data via callback');
                   useOperatorStore.getState().setInitialData(response.data);
                   useAuthStore.getState().setConnected(true);
+                } else if (response?.pending) {
+                  // El servidor ya lo está armando por la conexión y lo va a
+                  // emitir como evento `initial_data`. Reintentar sólo haría
+                  // que las ~45 queries corran de nuevo al pedo.
+                  console.log('[App] Initial data en camino, esperando el evento');
                 } else {
                   console.warn('[App] get_initial_data failed:', response?.error);
                   if (attempt < maxAttempts) {
@@ -214,6 +285,7 @@ export default function RootLayout() {
 
           // Android mata el socket cuando la app queda en background un rato.
           // Al volver a primer plano: reconectar si hace falta y refrescar datos.
+          let lastForegroundRefresh = Date.now();
           const appStateSub = AppState.addEventListener('change', (nextState) => {
             if (nextState !== 'active') return;
             const s = getSocket();
@@ -222,6 +294,12 @@ export default function RootLayout() {
               console.log('[App] Foreground: socket disconnected, reconnecting...');
               s.connect();
             } else {
+              // En la web esto salta con cada cambio de pestaña o de foco, y
+              // cada pedido recorre ~11 consultas contra la base (Supabase
+              // cobra el egress). Con el socket vivo los eventos ya mantienen
+              // la pantalla al día: el repaso completo, como mucho cada 2 min.
+              if (Date.now() - lastForegroundRefresh < 2 * 60 * 1000) return;
+              lastForegroundRefresh = Date.now();
               s.emit('get_initial_data', {}, (response: any) => {
                 if (response?.success && response?.data) {
                   useOperatorStore.getState().setInitialData(response.data);
@@ -258,18 +336,22 @@ export default function RootLayout() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <StatusBar style="light" />
-      <ConnectionBar />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="wizard" options={{ presentation: 'fullScreenModal' }} />
-        <Stack.Screen name="chat/[id]" options={{ presentation: 'card' }} />
-        <Stack.Screen name="failure/[id]" options={{ presentation: 'card' }} />
-        <Stack.Screen name="prize/[id]" options={{ presentation: 'card' }} />
-      </Stack>
-      <ToastContainer />
-    </View>
+    <WebGate>
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <StatusBar style="light" />
+        <ConnectionBar />
+        <BreakerBanner />
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="wizard" options={{ presentation: 'fullScreenModal' }} />
+          <Stack.Screen name="chat/[id]" options={{ presentation: 'card' }} />
+          <Stack.Screen name="failure/[id]" options={{ presentation: 'card' }} />
+          <Stack.Screen name="prize/[id]" options={{ presentation: 'card' }} />
+          <Stack.Screen name="user/[id]" options={{ presentation: 'card' }} />
+        </Stack>
+        <ToastContainer />
+      </View>
+    </WebGate>
   );
 }
 

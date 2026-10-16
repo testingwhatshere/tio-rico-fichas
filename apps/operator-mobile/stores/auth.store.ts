@@ -5,7 +5,7 @@ import { connectSocket, disconnectSocket } from '@/services/socket';
 import { setApiConfig } from '@/services/api';
 import { useOperatorStore } from '@/stores/operator.store';
 
-const BACKEND_URL = 'https://tiorico-api.onrender.com';
+const BACKEND_URL = 'https://tiorico-api-axfb.onrender.com';
 const API_KEY = 'Narciso';
 const STORAGE_KEY = 'operator_name';
 

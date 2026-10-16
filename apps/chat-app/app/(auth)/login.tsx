@@ -18,6 +18,7 @@ import { getErrorMessage } from '@/services/api';
 import colors from '@/constants/colors';
 import FloatingParticles from '@/components/effects/FloatingParticles';
 import { hapticMedium } from '@/utils/haptics';
+import DownloadAppBanner from '@/components/DownloadAppBanner';
 
 export default function LoginScreen() {
   const { login, isLoading } = useAuthStore();
@@ -212,6 +213,10 @@ export default function LoginScreen() {
           </Text>
         </View>
       </View>
+
+      {/* Descargar la app (solo web + Android). Va al final para no empujar el
+          formulario ni competir con el logo. */}
+      <DownloadAppBanner style={{ marginHorizontal: 0, marginTop: 20 }} />
     </>
   );
 

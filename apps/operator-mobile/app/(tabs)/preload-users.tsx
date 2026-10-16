@@ -8,8 +8,11 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Modal,
+  TextInput,
+  Platform,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
@@ -18,6 +21,7 @@ import {
   bulkImportPreloaded,
   listPreloadedUsers,
   unflagPreloadedUser,
+  updateUserPhone,
   PreloadedEntry,
   PreloadedUser,
   BulkImportResult,
@@ -126,6 +130,26 @@ function parseCSV(text: string): ParseResult {
 
 // ---------- Screen ----------
 
+/**
+ * Lee el archivo elegido como texto.
+ *
+ * En el APK el picker devuelve una ruta del filesystem y `expo-file-system` la
+ * lee. En web devuelve un blob URI que `readAsStringAsync` no sabe abrir: el
+ * import de CSV directamente no funcionaba en el browser. Ahí se usa `fetch`
+ * sobre el blob, que es la forma nativa de leerlo.
+ */
+async function readAssetText(asset: any): Promise<string> {
+  if (Platform.OS === 'web') {
+    // `asset.file` es el File del input cuando el picker lo expone.
+    if (asset.file instanceof Blob) return await asset.file.text();
+    const res = await fetch(asset.uri);
+    return await res.text();
+  }
+  return await FileSystem.readAsStringAsync(asset.uri, {
+    encoding: FileSystem.EncodingType.UTF8,
+  });
+}
+
 export default function PreloadUsersScreen() {
   const insets = useSafeAreaInsets();
 
@@ -138,6 +162,11 @@ export default function PreloadUsersScreen() {
   const [list, setList] = useState<PreloadedUser[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Phone edit modal
+  const [editingUser, setEditingUser] = useState<PreloadedUser | null>(null);
+  const [phoneInput, setPhoneInput] = useState('');
+  const [savingPhone, setSavingPhone] = useState(false);
 
   const loadList = useCallback(async () => {
     try {
@@ -164,9 +193,7 @@ export default function PreloadUsersScreen() {
       if (res.canceled || !res.assets?.[0]) return;
       const asset = res.assets[0];
       setPickedFilename(asset.name);
-      const text = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
+      const text = await readAssetText(asset);
       const { entries, errors } = parseCSV(text);
       setParsedEntries(entries);
       setParseErrors(errors);
@@ -230,6 +257,34 @@ export default function PreloadUsersScreen() {
     },
     [loadList],
   );
+
+  const openPhoneEdit = useCallback((user: PreloadedUser) => {
+    setEditingUser(user);
+    setPhoneInput(user.phone || '');
+  }, []);
+
+  const handleSavePhone = useCallback(async () => {
+    if (!editingUser) return;
+    const digits = (phoneInput || '').replace(/\D/g, '');
+    if (digits.length < 7 || digits.length > 15) {
+      toast.error('El teléfono debe tener entre 7 y 15 dígitos');
+      return;
+    }
+    setSavingPhone(true);
+    try {
+      await updateUserPhone(editingUser.id, phoneInput.trim());
+      hapticSuccess();
+      toast.success('Teléfono actualizado');
+      setEditingUser(null);
+      setPhoneInput('');
+      await loadList();
+    } catch (err: any) {
+      hapticError();
+      toast.error(err?.message || 'No se pudo actualizar el teléfono');
+    } finally {
+      setSavingPhone(false);
+    }
+  }, [editingUser, phoneInput, loadList]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -338,6 +393,9 @@ export default function PreloadUsersScreen() {
                   {u.panelId ? ` · panel ${u.panelId}` : ''}
                 </Text>
               </View>
+              <TouchableOpacity onPress={() => openPhoneEdit(u)} style={styles.unflagBtn}>
+                <Ionicons name="create-outline" size={21} color={colors.primary} />
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => handleUnflag(u)} style={styles.unflagBtn}>
                 <Ionicons name="close-circle-outline" size={22} color={colors.error} />
               </TouchableOpacity>
@@ -345,6 +403,53 @@ export default function PreloadUsersScreen() {
           ))
         )}
       </View>
+
+      {/* Edit phone modal */}
+      <Modal
+        visible={!!editingUser}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditingUser(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Cambiar teléfono</Text>
+            <Text style={styles.modalUser}>{editingUser?.username}</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={phoneInput}
+              onChangeText={setPhoneInput}
+              placeholder="Ej: 11 3456 7890"
+              placeholderTextColor={colors.placeholder}
+              keyboardType="phone-pad"
+              autoFocus
+            />
+            <Text style={styles.modalHint}>
+              Se guarda en formato canónico (549…) para que el login coincida.
+            </Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setEditingUser(null)}
+                disabled={savingPhone}
+              >
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalSaveBtn}
+                onPress={handleSavePhone}
+                disabled={savingPhone}
+              >
+                {savingPhone ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Text style={styles.modalSaveText}>Guardar</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -519,5 +624,72 @@ const styles = StyleSheet.create({
   },
   unflagBtn: {
     padding: 6,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  modalCard: {
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: 16,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  modalUser: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 2,
+    marginBottom: 14,
+  },
+  modalInput: {
+    backgroundColor: colors.input,
+    borderWidth: 1,
+    borderColor: colors.inputBorder,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: colors.textPrimary,
+  },
+  modalHint: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 8,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 18,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: colors.backgroundTertiary,
+  },
+  modalCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  modalSaveBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+  },
+  modalSaveText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.white,
   },
 });

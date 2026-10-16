@@ -35,6 +35,7 @@ function buildProofResult(overrides: Record<string, any> = {}) {
     bankName: null,
     transactionStatus: null,
     authenticityChecks: null,
+    ocrText: null,
     ...overrides,
   };
 }
@@ -61,7 +62,7 @@ describe('PaymentsService', () => {
   let requestsService: Record<string, jest.Mock>;
   let uploadsService: Record<string, any>;
   let settingsService: { getSetting: jest.Mock };
-  let proofValidationService: { validateProof: jest.Mock };
+  let proofValidationService: { validateProof: jest.Mock; waitForValidator: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
@@ -114,6 +115,7 @@ describe('PaymentsService', () => {
 
     proofValidationService = {
       validateProof: jest.fn().mockResolvedValue(buildProofResult()),
+      waitForValidator: jest.fn().mockResolvedValue(true),
     };
 
     const pushService = { sendToUser: jest.fn().mockResolvedValue(undefined) };
@@ -765,18 +767,39 @@ describe('PaymentsService', () => {
   // Fraud detection: RECIPIENT_MISMATCH / RECIPIENT_ACCOUNT_MISMATCH
   // ========================================================
   describe('fraud detection - recipient verification', () => {
+    // Billetera asignada al request + una segunda billetera nuestra activa. Un pago
+    // a cualquiera de las dos es valido: la billetera rota mientras el usuario paga.
+    const ASSIGNED_WALLET = {
+      id: 'wallet-1',
+      label: 'MP Juan',
+      holderName: 'Juan Perez',
+      holderLegalName: 'Juan Alberto Perez',
+      holderDni: '12345678',
+      type: 'MERCADOPAGO',
+      details: { alias: 'juan.mp', cbu: '1234567890123456789012' },
+    };
+    const OTHER_WALLET = {
+      id: 'wallet-2',
+      label: 'MP Sofia',
+      holderName: 'Sofia Ramirez',
+      holderLegalName: null,
+      holderDni: null,
+      type: 'MERCADOPAGO',
+      details: { cbu: '9876543210987654321098' },
+    };
+
     beforeEach(() => {
-      prisma.paymentConfig.findFirst.mockResolvedValue({
-        id: 'wallet-1',
-        holderName: 'Juan Perez',
-        holderLegalName: 'Juan Alberto Perez',
-        holderDni: '12345678',
-        type: 'MERCADOPAGO',
-        details: { alias: 'juan.mp', cbu: '1234567890123456789012' },
-      });
+      prisma.paymentConfig.findFirst.mockResolvedValue(ASSIGNED_WALLET);
+      prisma.paymentConfig.findMany.mockResolvedValue([
+        ASSIGNED_WALLET,
+        OTHER_WALLET,
+      ]);
     });
 
-    it('should flag RECIPIENT_MISMATCH when extracted name does not match wallet holder', async () => {
+    it('should flag RECIPIENT_MISMATCH but NOT block without raw OCR text', async () => {
+      // Sin texto crudo la extracción del destinatario no es confiable (confunde
+      // remitente con destinatario en el formato "Origen y destino" de MP), así que
+      // el flag queda como aviso al operador y la carga sigue.
       prisma.request.findUnique.mockResolvedValue(buildRequest());
       proofValidationService.validateProof.mockResolvedValue(
         buildProofResult({ recipientName: 'Maria Rodriguez' }),
@@ -785,6 +808,7 @@ describe('PaymentsService', () => {
       const result = await service.validateProof('req-1');
 
       expect(result.details?.flags).toContain('RECIPIENT_MISMATCH');
+      expect(result.valid).toBe(true);
     });
 
     it('should not flag when recipient name matches holder name', async () => {
@@ -796,9 +820,24 @@ describe('PaymentsService', () => {
       const result = await service.validateProof('req-1');
 
       expect(result.details?.flags).not.toContain('RECIPIENT_MISMATCH');
+      expect(result.valid).toBe(true);
     });
 
-    it('should flag RECIPIENT_ACCOUNT_MISMATCH when account does not match', async () => {
+    it('should accept a payment to another active wallet, not just the assigned one', async () => {
+      // El caso que generaba falsos positivos: la billetera rota y el usuario paga
+      // a la anterior (o a la siguiente), que sigue siendo nuestra.
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ recipientAccount: '9876543210987654321098' }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).not.toContain('RECIPIENT_ACCOUNT_MISMATCH');
+      expect(result.valid).toBe(true);
+    });
+
+    it('should flag RECIPIENT_ACCOUNT_MISMATCH but NOT block without raw OCR text', async () => {
       prisma.request.findUnique.mockResolvedValue(buildRequest());
       proofValidationService.validateProof.mockResolvedValue(
         buildProofResult({ recipientAccount: 'totally.different.alias' }),
@@ -807,6 +846,29 @@ describe('PaymentsService', () => {
       const result = await service.validateProof('req-1');
 
       expect(result.details?.flags).toContain('RECIPIENT_ACCOUNT_MISMATCH');
+      expect(result.valid).toBe(true);
+    });
+
+    it('should NOT flag when the sender CVU was mis-parsed as the recipient account', async () => {
+      // Caso darian88 (2026-08-20): el parser tomó el CVU del REMITENTE. Con el
+      // texto completo, nuestra cuenta aparece igual y la carga se verifica.
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          recipientName: null,
+          recipientAccount: '9999999999999999999999',
+          ocrText:
+            'Comprobante de transferencia\n$ 5.000\nOrigen y destino\n' +
+            'Brian Ezequiel Gimenez\nCVU: 9999999999999999999999\n' +
+            'Juan Perez\nCVU: 1234567890123456789012\n',
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).not.toContain('RECIPIENT_ACCOUNT_MISMATCH');
+      expect(result.details?.recipientVerifiedBy).toBe('cbu:MP Juan');
+      expect(result.valid).toBe(true);
     });
 
     it('should not flag when recipient account matches wallet alias', async () => {
@@ -818,6 +880,118 @@ describe('PaymentsService', () => {
       const result = await service.validateProof('req-1');
 
       expect(result.details?.flags).not.toContain('RECIPIENT_ACCOUNT_MISMATCH');
+    });
+
+    it('should let the account override a garbage OCR name', async () => {
+      // El OCR devuelve basura en el campo "Para" seguido ("Entidad", "Zo",
+      // "Codigo"). Si la cuenta destino es nuestra, el nombre no importa.
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          recipientName: 'Entidad',
+          recipientAccount: '1234567890123456789012',
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).not.toContain('RECIPIENT_MISMATCH');
+      expect(result.details?.flags).not.toContain('RECIPIENT_ACCOUNT_MISMATCH');
+      expect(result.valid).toBe(true);
+    });
+
+    it('should flag RECIPIENT_UNVERIFIABLE but NOT block without raw OCR text', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ recipientName: null, recipientAccount: null }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).toContain('RECIPIENT_UNVERIFIABLE');
+      expect(result.valid).toBe(true);
+    });
+
+    it('should block with RECIPIENT_UNVERIFIABLE when the raw OCR text has nothing of ours', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          recipientName: null,
+          recipientAccount: null,
+          ocrText: 'Comprobante\n$ 5.000\nTransferencia realizada con exito\n',
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).toContain('RECIPIENT_UNVERIFIABLE');
+      expect(result.valid).toBe(false);
+    });
+
+    it('should verify from the raw OCR text when the parser missed the recipient field', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          recipientName: null,
+          recipientAccount: null,
+          ocrText:
+            'Transferencia enviada\nCVU 1234 5678 9012 3456 7890 12\nMonto $5.000',
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).not.toContain('RECIPIENT_UNVERIFIABLE');
+      expect(result.details?.recipientVerifiedBy).toBe('cbu:MP Juan');
+      expect(result.valid).toBe(true);
+    });
+
+    it('should verify from the raw OCR text by holder name', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          recipientName: null,
+          recipientAccount: null,
+          ocrText: 'Enviaste $5.000\nPara\nSOFIA RAMIREZ\nMercado Pago',
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).not.toContain('RECIPIENT_UNVERIFIABLE');
+      expect(result.details?.recipientVerifiedBy).toBe('holderName:MP Sofia');
+      expect(result.valid).toBe(true);
+    });
+
+    it('should flag when the raw OCR text has no trace of any of our wallets', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          recipientName: 'Roberto Gomez',
+          recipientAccount: '0000003100019667814404',
+          ocrText:
+            'Transferiste $5.000 a Roberto Gomez\nCVU 0000003100019667814404',
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).toContain('RECIPIENT_ACCOUNT_MISMATCH');
+      expect(result.details?.recipientVerifiedBy).toBeNull();
+      expect(result.valid).toBe(false);
+    });
+
+    it('should not block when no active wallet has usable identifiers (misconfiguration)', async () => {
+      prisma.paymentConfig.findMany.mockResolvedValue([]);
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ recipientName: null, recipientAccount: null }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).not.toContain('RECIPIENT_UNVERIFIABLE');
+      expect(result.valid).toBe(true);
     });
   });
 
@@ -903,6 +1077,246 @@ describe('PaymentsService', () => {
   });
 
   // ========================================================
+  // Transferir de mas vs de menos
+  // ========================================================
+  describe('resultado del cache del validador (nieva3, 2026-10-08)', () => {
+    const texto = 'Transferencia exitosa\nMonto $10.000\nDestino CVU 000';
+
+    it('el "monto no coincide" de la carga anterior no rechaza la nueva', async () => {
+      // Primera carga: pidio $15.000 con un comprobante de $10.000 (rechazo
+      // correcto). Segunda: pide $10.000 con el mismo comprobante y el cache
+      // del validador repite el veredicto viejo.
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 10000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          isValid: false,
+          extractedAmount: 10000,
+          ocrText: texto,
+          flags: ['AMOUNT_MISMATCH', 'OCR_FAST_PATH', 'CACHED_RESULT'],
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.valid).toBe(true);
+      expect(result.details?.flags).not.toContain('AMOUNT_MISMATCH');
+    });
+
+    it('si el cache trae otro problema (imagen editada), sigue rechazado', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 10000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          isValid: false,
+          extractedAmount: 10000,
+          ocrText: texto,
+          flags: ['AMOUNT_MISMATCH', 'EDITED_IMAGE', 'CACHED_RESULT'],
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.valid).toBe(false);
+    });
+
+    it('si con el monto nuevo sigue transfiriendo de menos, sigue rechazado', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 15000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          isValid: false,
+          extractedAmount: 10000,
+          ocrText: texto,
+          flags: ['AMOUNT_MISMATCH', 'OCR_FAST_PATH', 'CACHED_RESULT'],
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.valid).toBe(false);
+      expect(result.details?.flags).toContain('AMOUNT_MISMATCH');
+    });
+  });
+
+  describe('monto transferido distinto al pedido', () => {
+    // El comprobante dice 5300 y el usuario pidio 5000: texto que lo corrobora.
+    const conTexto = (monto: number) => `Transferencia exitosa\nMonto $${monto.toLocaleString('es-AR')}\nDestino CVU 000`;
+
+    it('frena y marca AMOUNT_OVERPAID cuando transfirio de mas: lo acepta un operador', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ extractedAmount: 5300, ocrText: conTexto(5300) }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).toContain('AMOUNT_OVERPAID');
+      // No se acredita solo: queda esperando el boton del operador.
+      expect(result.valid).toBe(false);
+      // El motivo trae los dos numeros para decidir sin abrir nada.
+      expect(result.error).toContain('5.300');
+      expect(result.error).toContain('5.000');
+    });
+
+    it('bloquea cuando transfirio de MENOS', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ extractedAmount: 4000, ocrText: conTexto(4000) }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).toContain('AMOUNT_MISMATCH');
+      expect(result.details?.flags).not.toContain('AMOUNT_OVERPAID');
+      expect(result.valid).toBe(false);
+    });
+
+    it('avisa cuando el monto leido no aparece en el texto del comprobante', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ extractedAmount: 5300, ocrText: 'Transferencia exitosa\nMonto $999\n' }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).toContain('AMOUNT_TEXT_UNCONFIRMED');
+      expect(result.error).toContain('mal leido');
+    });
+
+    it('sin texto OCR no inventa la advertencia de mal lectura', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ extractedAmount: 5300, ocrText: null }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).toContain('AMOUNT_OVERPAID');
+      expect(result.details?.flags).not.toContain('AMOUNT_TEXT_UNCONFIRMED');
+    });
+
+    // Todas las lecturas de la imagen vieron el mismo monto (validador >= 1.1.2).
+    const firme = { agree: 8, disagree: 0, unanimous: true };
+    // Lo que manda de verdad el validador cuando el monto no es el pedido.
+    const soloMonto = { isValid: false, flags: ['OCR_FAST_PATH', 'AMOUNT_MISMATCH'] };
+
+    it('transfirio de mas con el monto bien leido: se le puede preguntar al jugador', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ ...soloMonto, extractedAmount: 5300, ocrText: conTexto(5300), amountConsensus: firme }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.valid).toBe(false);
+      expect(result.details?.flags).toEqual(expect.arrayContaining(['AMOUNT_OVERPAID']));
+      expect(result.details?.overpaidOfferable).toBe(true);
+    });
+
+    it('transfirio de MENOS con el monto bien leido: tambien se le pregunta', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ ...soloMonto, extractedAmount: 3000, ocrText: conTexto(3000), amountConsensus: firme }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.valid).toBe(false);
+      expect(result.details?.flags).toContain('AMOUNT_MISMATCH');
+      expect(result.details?.overpaidOfferable).toBe(true);
+    });
+
+    it('si alguna lectura vio otro monto, no se pregunta: va al operador', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          ...soloMonto,
+          extractedAmount: 3000,
+          ocrText: conTexto(3000),
+          amountConsensus: { agree: 6, disagree: 1, unanimous: false },
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.overpaidOfferable).toBe(false);
+    });
+
+    it('validador viejo (sin consenso): no se pregunta', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ ...soloMonto, extractedAmount: 5300, ocrText: conTexto(5300) }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.overpaidOfferable).toBe(false);
+    });
+
+    it('de mas, pero mas del triple de lo pedido: va al operador', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ ...soloMonto, extractedAmount: 16000, ocrText: conTexto(16000), amountConsensus: firme }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.valid).toBe(false);
+      expect(result.details?.overpaidOfferable).toBe(false);
+    });
+
+    it('si el validador objeta algo mas que el monto, no se pregunta', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          isValid: false,
+          flags: ['OCR_FAST_PATH', 'AMOUNT_MISMATCH', 'LIKELY_EDITED'],
+          extractedAmount: 3000,
+          ocrText: conTexto(3000),
+          amountConsensus: firme,
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.valid).toBe(false);
+      expect(result.details?.overpaidOfferable).toBe(false);
+    });
+
+    it('lectura dudosa del monto: no se le pregunta al jugador, va al operador', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ extractedAmount: 5300, ocrText: 'Transferencia exitosa\nMonto $999\n' }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.overpaidOfferable).toBe(false);
+    });
+
+    it('sin texto OCR no se le pregunta al jugador', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ extractedAmount: 5300, ocrText: null }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.overpaidOfferable).toBe(false);
+    });
+
+    it('una diferencia de menos de un peso no es nada', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest({ amount: 5000 }));
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ extractedAmount: 5000.5, ocrText: conTexto(5000) }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).not.toContain('AMOUNT_OVERPAID');
+      expect(result.details?.flags).not.toContain('AMOUNT_MISMATCH');
+    });
+  });
+
+  // ========================================================
   // Details structure
   // ========================================================
   describe('result details structure', () => {
@@ -911,6 +1325,7 @@ describe('PaymentsService', () => {
       proofValidationService.validateProof.mockResolvedValue(
         buildProofResult({
           transactionStatus: 'Pendiente',
+          extractedAmount: 4000,
           flags: ['AMOUNT_MISMATCH'],
         }),
       );

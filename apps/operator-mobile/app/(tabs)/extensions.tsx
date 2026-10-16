@@ -1,15 +1,19 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, FlatList, StyleSheet, RefreshControl, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import colors from '@/constants/colors';
+import { useFirstLoad } from '@/hooks/useFirstLoad';
+import { EmptyState } from '@/components/ui';
 import { useOperatorStore } from '@/stores/operator.store';
 import { getSocket, emitWithTimeout } from '@/services/socket';
 import ExtensionCard from '@/components/ExtensionCard';
+import ExtensionDownload from '@/components/ExtensionDownload';
 import { hapticSuccess, hapticError } from '@/utils/haptics';
 import { toast } from '@/components/Toast';
 
 export default function ExtensionsScreen() {
+  const { isLoadingFirst, isConnected } = useFirstLoad();
   const insets = useSafeAreaInsets();
   const extensions = useOperatorStore((s) => s.extensions);
   const [refreshing, setRefreshing] = useState(false);
@@ -60,7 +64,7 @@ export default function ExtensionsScreen() {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Image source={require('@/assets/icon.png')} style={{ width: 32, height: 32, borderRadius: 8 }} />
+            <Image source={require('@/assets/logo.png')} style={{ width: 32, height: 32, borderRadius: 8 }} />
             <Text style={styles.headerTitle}>Extensiones</Text>
           </View>
           <Text style={styles.headerSubtitle}>
@@ -87,6 +91,12 @@ export default function ExtensionsScreen() {
         </View>
       </View>
 
+      <ExtensionDownload
+        installedVersions={Object.fromEntries(
+          extensions.filter((e: any) => e.extensionId && e.version).map((e: any) => [e.extensionId, e.version]),
+        )}
+      />
+
       {/* List */}
       <FlatList
         data={extensions}
@@ -106,6 +116,9 @@ export default function ExtensionsScreen() {
           />
         }
         ListEmptyComponent={
+          isLoadingFirst ? (
+            <EmptyState loading connected={isConnected} title="" />
+          ) : (
           <View style={styles.emptyState}>
             <View style={styles.emptyIconContainer}>
               <Ionicons name="extension-puzzle-outline" size={56} color={colors.textMuted} />
@@ -115,6 +128,7 @@ export default function ExtensionsScreen() {
               Las extensiones aparecen aqui cuando se conectan al servidor
             </Text>
           </View>
+          )
         }
       />
     </View>

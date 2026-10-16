@@ -1,11 +1,12 @@
 import axios, { AxiosInstance } from 'axios';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ============================================
 // Constants
 // ============================================
 
-const BACKEND_URL = 'https://tiorico-api.onrender.com';
+const BACKEND_URL = 'https://tiorico-api-axfb.onrender.com';
 const API_KEY = 'Narciso';
 const STORAGE_KEY = 'operator_name';
 
@@ -59,6 +60,17 @@ export async function clearConfig(): Promise<void> {
 // ============================================
 // Axios instance management
 // ============================================
+
+/**
+ * Config efectiva de la conexión.
+ *
+ * `authStore.config` nunca se popula (su `checkAuth()` está definido y no lo
+ * llama nadie), así que Ajustes mostraba "—" en Servidor y Operador aunque la
+ * conexión estuviera andando.
+ */
+export function getApiConfig(): ApiConfig | null {
+  return currentConfig;
+}
 
 export function setApiConfig(config: ApiConfig): void {
   currentConfig = config;
@@ -146,11 +158,7 @@ export async function uploadChatImage(
 
   try {
     const formData = new FormData();
-    formData.append('file', {
-      uri,
-      name: filename,
-      type: mimeType,
-    } as any);
+    formData.append('file', await toUploadPart(uri, filename, mimeType));
 
     const response = await apiInstance.post(
       '/uploads/operator/chat-image',
@@ -218,6 +226,34 @@ export async function unflagPreloadedUser(userId: string): Promise<void> {
   await api.delete(`/users/preloaded/${encodeURIComponent(userId)}`);
 }
 
+/**
+ * Change a user's phone number (operator support flow — fixes a bad number that
+ * blocks the user from logging in). Backend stores it canonical for login match.
+ */
+export async function updateUserPhone(userId: string, phone: string): Promise<void> {
+  const api = getApi();
+  // Ruta `operator/...`: esta app se identifica con X-Operator-API-Key y no con
+  // JWT, asi que `/users/:id/phone` (protegida por el JwtAuthGuard global)
+  // devolvia 401 siempre. Mismo motivo que en el panel de escritorio.
+  await api.patch(`/users/operator/${encodeURIComponent(userId)}/phone`, { phone });
+}
+
+/**
+ * El adjunto, en la forma que entiende cada plataforma.
+ *
+ * En React Native se manda `{ uri, name, type }` y el runtime lo resuelve. En
+ * el browser eso se serializa como el string "[object Object]" y el backend
+ * recibe un archivo vacío, así que hay que leer el blob y armar un `File` real.
+ */
+async function toUploadPart(uri: string, filename: string, mimeType: string) {
+  if (Platform.OS !== 'web') {
+    return { uri, name: filename, type: mimeType } as any;
+  }
+  const res = await fetch(uri);
+  const blob = await res.blob();
+  return new File([blob], filename, { type: mimeType || blob.type });
+}
+
 export async function uploadPayoutProof(
   uri: string,
   filename: string,
@@ -229,11 +265,7 @@ export async function uploadPayoutProof(
 
   try {
     const formData = new FormData();
-    formData.append('file', {
-      uri,
-      name: filename,
-      type: mimeType,
-    } as any);
+    formData.append('file', await toUploadPart(uri, filename, mimeType));
 
     const response = await apiInstance.post(
       '/uploads/operator/payout-proof',

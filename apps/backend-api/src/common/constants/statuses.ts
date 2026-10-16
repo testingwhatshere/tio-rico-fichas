@@ -63,14 +63,19 @@ export const VALID_TRANSITIONS: Record<string, string[]> = {
     REQUEST_STATUS.REJECTED,
     REQUEST_STATUS.CANCELLED,
   ],
+  // Sin PENDING_MP_VERIFICATION a propósito: ya no hay verificación de acreditación
+  // estilo MP, así que nada puede entrar a ese estado. Las transiciones de SALIDA
+  // (abajo) se mantienen para poder cerrar los requests que quedaron colgados.
   [REQUEST_STATUS.VALIDATING]: [
-    REQUEST_STATUS.PENDING_MP_VERIFICATION,
+    REQUEST_STATUS.APPROVED,
     REQUEST_STATUS.VALIDATION_FAILED,
+    REQUEST_STATUS.PENDING_PROOF, // operador rebota para que el usuario re-suba comprobante
     REQUEST_STATUS.REJECTED,
     REQUEST_STATUS.CANCELLED,
   ],
   [REQUEST_STATUS.VALIDATION_FAILED]: [
     REQUEST_STATUS.APPROVED,
+    REQUEST_STATUS.PENDING_PROOF, // operador rebota para que el usuario re-suba comprobante
     REQUEST_STATUS.REJECTED,
     REQUEST_STATUS.CANCELLED,
   ],
@@ -83,6 +88,7 @@ export const VALID_TRANSITIONS: Record<string, string[]> = {
   [REQUEST_STATUS.APPROVED]: [
     REQUEST_STATUS.PROCESSING,
     REQUEST_STATUS.FAILED,
+    REQUEST_STATUS.PENDING_PROOF, // operador rebota para que el usuario re-suba comprobante
     REQUEST_STATUS.REJECTED,
   ],
   [REQUEST_STATUS.PROCESSING]: [
@@ -90,7 +96,14 @@ export const VALID_TRANSITIONS: Record<string, string[]> = {
     REQUEST_STATUS.FAILED,
   ],
   [REQUEST_STATUS.COMPLETED]: [],
-  [REQUEST_STATUS.FAILED]: [REQUEST_STATUS.APPROVED, REQUEST_STATUS.PROCESSING],
+  // CANCELLED: un intento fallido queda reemplazado cuando el usuario reenvia el
+  // mismo comprobante en una solicitud nueva. Cerrarlo evita que un retry
+  // posterior lo reviva y termine acreditando dos veces el mismo pago.
+  [REQUEST_STATUS.FAILED]: [
+    REQUEST_STATUS.APPROVED,
+    REQUEST_STATUS.PROCESSING,
+    REQUEST_STATUS.CANCELLED,
+  ],
   [REQUEST_STATUS.REJECTED]: [],
   [REQUEST_STATUS.CANCELLED]: [],
 };
@@ -100,7 +113,8 @@ export const REQUEST_STATUS_LABELS: Record<string, string> = {
   [REQUEST_STATUS.PENDING_PROOF]: 'Esperando comprobante',
   [REQUEST_STATUS.VALIDATING]: 'Validando',
   [REQUEST_STATUS.VALIDATION_FAILED]: 'Validacion fallida',
-  [REQUEST_STATUS.PENDING_MP_VERIFICATION]: 'Verificando pago en MP',
+  // Estado legado: ya no se entra acá. Sólo puede quedar en requests viejos colgados.
+  [REQUEST_STATUS.PENDING_MP_VERIFICATION]: 'En revision',
   [REQUEST_STATUS.APPROVED]: 'Aprobado',
   [REQUEST_STATUS.PROCESSING]: 'Procesando',
   [REQUEST_STATUS.COMPLETED]: 'Completado',

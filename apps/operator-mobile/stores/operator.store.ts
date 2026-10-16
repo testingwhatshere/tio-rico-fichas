@@ -88,16 +88,11 @@ interface OperatorState {
   setChats: (chats: any[]) => void;
   markChatRead: (chatId: string) => void;
   setQuickReplies: (replies: QuickReply[]) => void;
-  addQuickReply: (reply: QuickReply) => void;
-  updateQuickReply: (id: string, updates: Partial<QuickReply>) => void;
-  deleteQuickReply: (id: string) => void;
   setClients: (clients: any[]) => void;
-  setPrizeClaims: (claims: any[]) => void;
   addPrizeClaim: (claim: any) => void;
   updatePrizeClaim: (claimId: string, updates: any) => void;
   // Outbound payments
   outboundPayments: any[];
-  setOutboundPayments: (payments: any[]) => void;
   addOutboundPayment: (payment: any) => void;
   updateOutboundPayment: (paymentId: string, updates: any) => void;
   // Extension monitoring
@@ -174,19 +169,39 @@ export const useOperatorStore = create<OperatorState>((set, get) => ({
           )
         : {},
       connectedPanels: data.botStatus?.connectedPanels || [],
-      validatorConnected: data.validatorStatus === true || data.validatorStatus === 'connected',
+      // El backend manda { connected, validatorId, pendingValidations }; los
+      // formatos viejos (booleano / 'connected') quedan por compatibilidad.
+      validatorConnected:
+        data.validatorStatus?.connected === true ||
+        data.validatorStatus === true ||
+        data.validatorStatus === 'connected',
       pendingFailures: failures.length,
       pendingChats,
       processedFailureIds: processedIds,
       outboundPayments: data.outboundPayments || [],
+      // Los premios llegan en el payload inicial (findPending del server) y
+      // hasta ahora se descartaban acá: los que ya estaban pendientes no
+      // aparecían hasta que llegara un evento en vivo de uno nuevo.
+      prizeClaims: data.prizeClaims || [],
+      pendingPrizeClaims: (data.prizeClaims || []).filter((c: any) =>
+        PENDING_PRIZE_STATUSES.includes(c.status),
+      ).length,
       lastUpdate: new Date().toISOString(),
     });
   },
 
   addFailure: (failure: any) => {
-    const { processedFailureIds } = get();
+    const { processedFailureIds, failures } = get();
 
-    if (processedFailureIds.has(failure.id)) {
+    // El id del fallo es el requestId, y un mismo request puede fallar mas de
+    // una vez (el operador rechaza pidiendo comprobante nuevo, el usuario lo
+    // sube y vuelve a fallar). Solo es duplicado si el fallo previo sigue SIN
+    // resolver; si ya se resolvio, dejamos entrar el nuevo y sacamos el viejo.
+    const previous = failures.find((f: any) => f.id === failure.id);
+    if (previous && !isFailureResolved(previous)) {
+      return;
+    }
+    if (!previous && processedFailureIds.has(failure.id)) {
       return;
     }
 
@@ -200,12 +215,16 @@ export const useOperatorStore = create<OperatorState>((set, get) => ({
     }
     newIds.add(failure.id);
 
-    set((state) => ({
-      failures: [failure, ...state.failures],
-      pendingFailures: state.pendingFailures + 1,
-      processedFailureIds: newIds,
-      lastUpdate: new Date().toISOString(),
-    }));
+    set((state) => {
+      const withoutPrevious = state.failures.filter((f: any) => f.id !== failure.id);
+      const updatedFailures = [failure, ...withoutPrevious];
+      return {
+        failures: updatedFailures,
+        pendingFailures: updatedFailures.filter((f: any) => !isFailureResolved(f)).length,
+        processedFailureIds: newIds,
+        lastUpdate: new Date().toISOString(),
+      };
+    });
   },
 
   resolveFailure: (failureId: string, action: string) => {
@@ -481,10 +500,17 @@ export const useOperatorStore = create<OperatorState>((set, get) => ({
   },
 
   setConnectedPerPanel: (perPanel: Record<string, number>) => {
+    // El backend sólo manda los paneles con algún socket: uno que se desconectó
+    // no viene. Se conserva como 'offline' en vez de desaparecer, así el tablero
+    // muestra "1/2 paneles online" y no "1/1". Un panel conectado que ya estaba
+    // 'busy' (cargando) sigue busy: el conteo de sockets no dice si terminó.
+    const previous = get().botStatusPerPanel;
     const panelStatuses: Record<string, string> = {};
     const panels: string[] = [];
-    for (const [panelId, count] of Object.entries(perPanel)) {
-      panelStatuses[panelId] = count > 0 ? 'online' : 'offline';
+    for (const panelId of new Set([...Object.keys(previous), ...Object.keys(perPanel)])) {
+      const count = perPanel[panelId] ?? 0;
+      panelStatuses[panelId] =
+        count > 0 ? (previous[panelId] === 'busy' ? 'busy' : 'online') : 'offline';
       if (count > 0) panels.push(panelId);
     }
     set({
@@ -516,12 +542,19 @@ export const useOperatorStore = create<OperatorState>((set, get) => ({
   markChatRead: (chatId: string) => {
     set((state) => {
       const updatedChats = state.chats.map((c) =>
-        c.id === chatId ? { ...c, unreadCount: 0 } : c,
+        // Tambien se limpia `_count.messages`: es el contador que manda el
+        // server en el payload inicial, y si solo se ponia `unreadCount` en 0
+        // el chat volvia a contarse como pendiente en cuanto se recalculaba.
+        c.id === chatId
+          ? { ...c, unreadCount: 0, _count: { ...(c._count || {}), messages: 0 } }
+          : c,
       );
 
       return {
         chats: updatedChats,
-        pendingChats: updatedChats.filter((c) => c.unreadCount > 0).length,
+        pendingChats: updatedChats.filter(
+          (c) => (c.unreadCount ?? c._count?.messages ?? 0) > 0,
+        ).length,
         lastUpdate: new Date().toISOString(),
       };
     });
@@ -531,42 +564,18 @@ export const useOperatorStore = create<OperatorState>((set, get) => ({
     set({ quickReplies: replies.sort((a, b) => a.order - b.order) });
   },
 
-  addQuickReply: (reply: QuickReply) => {
-    set((state) => {
-      if (state.quickReplies.length >= MAX_QUICK_REPLIES) return state;
-      return {
-        quickReplies: [...state.quickReplies, reply].sort((a, b) => a.order - b.order),
-      };
-    });
-  },
-
-  updateQuickReply: (id: string, updates: Partial<QuickReply>) => {
-    set((state) => ({
-      quickReplies: state.quickReplies
-        .map((qr) => (qr.id === id ? { ...qr, ...updates } : qr))
-        .sort((a, b) => a.order - b.order),
-    }));
-  },
-
-  deleteQuickReply: (id: string) => {
-    set((state) => ({
-      quickReplies: state.quickReplies.filter((qr) => qr.id !== id),
-    }));
-  },
-
   setClients: (clients: any[]) => {
     set({ clients });
   },
 
-  setPrizeClaims: (claims) => set({
-    prizeClaims: claims,
-    pendingPrizeClaims: claims.filter((c: any) => PENDING_PRIZE_STATUSES.includes(c.status)).length,
-  }),
-
   addPrizeClaim: (claim) => set((state) => {
-    const existing = state.prizeClaims.find((c: any) => c.id === claim.id);
-    if (existing) return state;
-    const updated = [claim, ...state.prizeClaims];
+    // El backend re-emite `new_prize_claim` en cada transición (creado → datos de
+    // cobro → VERIFIED / VERIFICATION_FAILED). Si el repetido se descarta, el
+    // premio se queda en "verificando" y no aparece para pagar hasta recargar.
+    const exists = state.prizeClaims.some((c: any) => c.id === claim.id);
+    const updated = exists
+      ? state.prizeClaims.map((c: any) => (c.id === claim.id ? { ...c, ...claim } : c))
+      : [claim, ...state.prizeClaims];
     return {
       prizeClaims: updated,
       pendingPrizeClaims: updated.filter((c: any) => PENDING_PRIZE_STATUSES.includes(c.status)).length,
@@ -582,8 +591,6 @@ export const useOperatorStore = create<OperatorState>((set, get) => ({
   }),
 
   // Outbound payments
-  setOutboundPayments: (payments) => set({ outboundPayments: payments }),
-
   addOutboundPayment: (payment) => set((state) => {
     if (state.outboundPayments.some((p: any) => p.id === payment.id)) return state;
     return { outboundPayments: [payment, ...state.outboundPayments] };
