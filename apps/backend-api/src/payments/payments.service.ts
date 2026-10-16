@@ -321,6 +321,33 @@ export class PaymentsService implements OnApplicationBootstrap {
         ),
       );
     }, STUCK_VALIDATION_BOOT_DELAY_MS).unref();
+
+    void this.ensureSenderDniCuitIndex();
+  }
+
+  /**
+   * Índice para el chequeo "mismo DNI/CUIT en otro usuario" (Change 5), que filtra
+   * por "validationDetails"->>'senderDniCuit': sin índice recorría toda la tabla
+   * (~400 ms por comprobante). Prisma no puede declarar índices sobre JSON, y
+   * `prisma db push` (corre en cada deploy) los deja en paz, así que se crea acá.
+   * CONCURRENTLY: no frena las escrituras. Si ya existe, no hace nada.
+   */
+  private async ensureSenderDniCuitIndex() {
+    try {
+      const existe = await this.prisma.$queryRaw<{ n: number }[]>`
+        SELECT 1 AS n FROM pg_indexes WHERE indexname = 'Request_senderDniCuit_expr_idx'
+      `;
+      if (existe.length > 0) return;
+      // Por el pooler en modo transacción CONCURRENTLY puede fallar: en ese caso
+      // queda el aviso y se crea a mano por la DIRECT_URL (modo sesión).
+      await this.prisma.$executeRawUnsafe(
+        `CREATE INDEX CONCURRENTLY IF NOT EXISTS "Request_senderDniCuit_expr_idx" ON "Request" (("validationDetails"->>'senderDniCuit'))`,
+      );
+    } catch (err: any) {
+      this.logger.warn(
+        `No se pudo asegurar el índice de senderDniCuit: ${err?.message || err?.code || JSON.stringify(err?.meta ?? err)}`,
+      );
+    }
   }
 
   /**

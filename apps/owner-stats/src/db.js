@@ -20,7 +20,9 @@ if (!process.env.DATABASE_URL) {
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: Number(process.env.PG_POOL_MAX || 4),
-  idleTimeoutMillis: 30_000,
+  // 10 min: con 30 s, cada refresco (cache de 60 s) reabría conexiones contra el
+  // pooler de Supabase y cada una pasaba por pgbouncer.get_auth.
+  idleTimeoutMillis: 10 * 60_000,
   connectionTimeoutMillis: 10_000,
   ssl: process.env.PGSSL === 'off' ? false : { rejectUnauthorized: false },
 });

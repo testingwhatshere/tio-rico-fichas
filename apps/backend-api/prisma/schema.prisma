@@ -229,6 +229,8 @@ model Request {
   @@index([targetUsername])
   @@index([proofHash]) // Para detectar duplicados
   @@index([extractedTransactionId])
+  // Home del chat: último pedido terminado del usuario (findCurrentForUser)
+  @@index([userId, updatedAt])
   @@index([assignedOperatorId])
   @@index([walletId])
   @@index([panelId])
@@ -690,8 +692,7 @@ model Setting {
   key       String   @unique
   value     String
   updatedAt DateTime @updatedAt
-
-  @@index([key])
+  // Sin @@index([key]): repetía el índice del @unique (0 usos en producción).
 }
 
 // ========================================
@@ -827,7 +828,7 @@ model BotSessionLog {
   createdAt DateTime @default(now())
 
   @@index([sessionId])
-  @@index([action])
+  // Sin @@index([action]): 0 usos en producción y costaba en cada insert.
   @@index([jobId])
   @@index([createdAt])
   @@index([success])

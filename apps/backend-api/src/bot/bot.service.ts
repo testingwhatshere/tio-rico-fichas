@@ -1083,21 +1083,39 @@ export class BotService implements OnModuleInit {
    * Handle panel balance report from extension.
    * Compares with configurable threshold and emits alert to operators.
    */
+  private persistedPanelBalance = new Map<
+    string,
+    { value: string; at: number }
+  >();
+  private static readonly PANEL_BALANCE_PERSIST_MS = 10 * 60_000;
+
   async handlePanelBalance(balance: number, panelId?: string) {
     const key = panelId || 'default';
 
-    // Persist last known balance so /fichas command can show it
-    try {
-      await this.settingsService.setSetting(
-        `PANEL_BALANCE_${key.toUpperCase()}`,
-        String(balance),
-      );
-      await this.settingsService.setSetting(
-        `PANEL_BALANCE_UPDATED_AT`,
-        new Date().toISOString(),
-      );
-    } catch (err) {
-      this.logger.warn(`Failed to persist panel balance: ${err.message}`);
+    // Último saldo conocido. La extensión lo manda cada ~30 s: se escribe sólo si
+    // cambió o cada 10 min (antes eran 2 upserts por envío, ~16 mil por día, cada
+    // uno vaciando la caché de settings).
+    const value = String(balance);
+    const prev = this.persistedPanelBalance.get(key);
+    const now = Date.now();
+    if (
+      !prev ||
+      prev.value !== value ||
+      now - prev.at >= BotService.PANEL_BALANCE_PERSIST_MS
+    ) {
+      try {
+        await this.settingsService.setSetting(
+          `PANEL_BALANCE_${key.toUpperCase()}`,
+          value,
+        );
+        await this.settingsService.setSetting(
+          `PANEL_BALANCE_UPDATED_AT`,
+          new Date(now).toISOString(),
+        );
+        this.persistedPanelBalance.set(key, { value, at: now });
+      } catch (err) {
+        this.logger.warn(`Failed to persist panel balance: ${err.message}`);
+      }
     }
 
     // Skip if muted by operator

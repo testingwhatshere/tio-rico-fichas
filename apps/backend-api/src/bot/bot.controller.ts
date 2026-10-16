@@ -503,33 +503,26 @@ export class BotController {
   ) {
     const entries = Array.isArray(body?.entries) ? body.entries : [];
 
-    for (const entry of entries) {
-      // Una entrada corrupta no puede tirar abajo la tanda entera: BotSessionLog
-      // es la única traza forense de lo que hizo el bot, conviene guardar lo que
-      // se pueda antes que perder las 20 por una.
-      try {
-        await this.loggingService.logBotAction({
-          sessionId: entry.sessionId,
-          action: entry.action,
-          selector: entry.selector,
-          url: entry.url,
-          value: entry.value,
-          startedAt: new Date(entry.startedAt),
-          completedAt: entry.completedAt
-            ? new Date(entry.completedAt)
-            : undefined,
-          success: entry.success,
-          error: entry.error,
-          screenshotPath: entry.screenshotPath,
-          jobId: entry.jobId,
-          step: entry.step,
-          metadata: { ...entry.metadata, panelId },
-        });
-      } catch (err) {
-        const motivo = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Session log batch: entrada descartada (${motivo})`);
-      }
-    }
+    // Una entrada corrupta no tira abajo la tanda entera (ver logBotActionsBatch).
+    await this.loggingService.logBotActionsBatch(
+      entries.map((entry) => ({
+        sessionId: entry.sessionId,
+        action: entry.action,
+        selector: entry.selector,
+        url: entry.url,
+        value: entry.value,
+        startedAt: new Date(entry.startedAt),
+        completedAt: entry.completedAt
+          ? new Date(entry.completedAt)
+          : undefined,
+        success: entry.success,
+        error: entry.error,
+        screenshotPath: entry.screenshotPath,
+        jobId: entry.jobId,
+        step: entry.step,
+        metadata: { ...entry.metadata, panelId },
+      })),
+    );
 
     return { success: true, received: entries.length };
   }

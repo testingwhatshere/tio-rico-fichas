@@ -450,28 +450,62 @@ export class LoggingService implements OnModuleInit, OnModuleDestroy {
     step?: string;
     metadata?: Record<string, any>;
   }) {
+    return this.prisma.botSessionLog.create({
+      data: this.botSessionLogData(data),
+    });
+  }
+
+  /**
+   * Una tanda de la extensión en un solo INSERT (antes era uno por entrada). Si la
+   * tanda falla entera (una entrada corrupta), cae a guardarlas de a una para no
+   * perder las buenas: BotSessionLog es la traza forense del bot.
+   */
+  async logBotActionsBatch(
+    entries: Parameters<LoggingService['logBotAction']>[0][],
+  ): Promise<number> {
+    if (entries.length === 0) return 0;
+    try {
+      const res = await this.prisma.botSessionLog.createMany({
+        data: entries.map((e) => this.botSessionLogData(e)),
+      });
+      return res.count;
+    } catch {
+      let saved = 0;
+      for (const entry of entries) {
+        try {
+          await this.logBotAction(entry);
+          saved++;
+        } catch (err) {
+          const motivo = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`Session log batch: entrada descartada (${motivo})`);
+        }
+      }
+      return saved;
+    }
+  }
+
+  private botSessionLogData(
+    data: Parameters<LoggingService['logBotAction']>[0],
+  ) {
     const duration = data.completedAt
       ? data.completedAt.getTime() - data.startedAt.getTime()
       : undefined;
-
-    return this.prisma.botSessionLog.create({
-      data: {
-        sessionId: data.sessionId,
-        action: data.action,
-        selector: data.selector,
-        url: data.url,
-        value: data.value ? this.maskSensitiveData(data.value) : undefined,
-        startedAt: data.startedAt,
-        completedAt: data.completedAt,
-        duration,
-        success: data.success ?? true,
-        error: data.error,
-        screenshotPath: data.screenshotPath,
-        jobId: data.jobId,
-        step: data.step,
-        metadata: data.metadata,
-      },
-    });
+    return {
+      sessionId: data.sessionId,
+      action: data.action,
+      selector: data.selector,
+      url: data.url,
+      value: data.value ? this.maskSensitiveData(data.value) : undefined,
+      startedAt: data.startedAt,
+      completedAt: data.completedAt,
+      duration,
+      success: data.success ?? true,
+      error: data.error,
+      screenshotPath: data.screenshotPath,
+      jobId: data.jobId,
+      step: data.step,
+      metadata: data.metadata,
+    };
   }
 
   async getBotSessionLogs(sessionId: string) {
