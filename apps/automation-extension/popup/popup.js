@@ -54,6 +54,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadState();
   await loadStats();
   await loadRecentJobs();
+  await loadLedger();
   setupEventListeners();
 
   // Refresh state every 2 seconds
@@ -377,6 +378,28 @@ async function loadStats() {
     }
   } catch (error) {
     console.error('Error loading stats:', error);
+  }
+}
+
+// Operaciones de la libreta que no se cerraron (sin reportar, en duda, por verificar)
+const ETAPA_TEXTO = {
+  RECIBIDA: 'recibida', SESION_OK: 'sesión OK', USUARIO_ENCONTRADO: 'usuario encontrado',
+  MONTO_LISTO: 'monto listo', ACEPTAR_TOCADO: 'Aceptar tocado, verificando', VEREDICTO: 'falta avisar al servidor',
+};
+async function loadLedger() {
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'GET_LEDGER' });
+    const card = document.getElementById('ledger-card');
+    if (!r || !r.abiertas) { card.classList.add('hidden'); return; }
+    card.classList.remove('hidden');
+    document.getElementById('ledger-count').textContent = `${r.abiertas} abierta${r.abiertas === 1 ? '' : 's'}`;
+    document.getElementById('ledger-list').innerHTML = r.fichas.map((f) => `
+      <div class="bg-white/5 rounded-lg p-2" title="${escapeHtml(f.motivo || '')}">
+        <p class="text-white text-xs font-medium">${escapeHtml(f.username || '?')} · $${escapeHtml(String(f.amount ?? '?'))} ${f.type === 'WITHDRAW_CHIPS' ? '(descarga)' : ''}</p>
+        <p class="text-white/40 text-[11px]">${escapeHtml(f.veredicto ? `${f.veredicto} · ${ETAPA_TEXTO[f.etapa] || f.etapa}` : (ETAPA_TEXTO[f.etapa] || f.etapa))}</p>
+      </div>`).join('');
+  } catch (error) {
+    console.error('Error loading ledger:', error);
   }
 }
 

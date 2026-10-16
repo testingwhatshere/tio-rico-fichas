@@ -1,7 +1,70 @@
 import { ApiClient } from './api-client.js';
+import { JobLedger, VERIFICACION_MAX_MS } from './job-ledger.js';
+
+const fmtPesos = (n) => `$${Number(n).toLocaleString('es-AR')}`;
+const horaAR = () => new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' });
+const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Lo que ve el operador son tres cosas: se cargó, no se cargó, o error. Nada de
+// "en duda": si la extensión no lo pudo confirmar sola, es un error con una sola
+// indicación (mirar el saldo en el panel). El detalle técnico va a los logs.
+const esRetiro = (op) => op === 'addDebit' || op === 'WITHDRAW_CHIPS' || op === -1;
+export const textoNoSe = (op, razon) => `No se ${esRetiro(op) ? 'descargó' : 'cargó'}: ${razon}`;
+export const textoError = (op, username) => `Error: no se pudo confirmar si ${esRetiro(op) ? 'se descargó' : 'se cargó'}. Revisá el saldo de ${username || 'el usuario'} en el panel antes de volver a ${esRetiro(op) ? 'descargar' : 'cargar'}`;
+
+// Historial del panel: "1.100,00" → 1100, "-5.092,00" → -5092
+export const parseImporte = (s) => {
+  const n = parseFloat(String(s || '').replace(/[^\d,-]/g, '').replace(',', '.'));
+  return Number.isFinite(n) ? Math.round(n) : null;
+};
+// "28/08/26 06:47 PM" (hora local de la PC del bot) → ms
+export const parseFechaHistorial = (s) => {
+  const m = /^(\d{2})\/(\d{2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})\s*([AP]M)?/i.exec(String(s || '').trim());
+  if (!m) return null;
+  let [, dd, mm, yy, hh, mi, ap] = m;
+  let h = Number(hh);
+  if (ap) { ap = ap.toUpperCase(); if (ap === 'PM' && h < 12) h += 12; if (ap === 'AM' && h === 12) h = 0; }
+  const year = yy.length === 2 ? 2000 + Number(yy) : Number(yy);
+  return new Date(year, Number(mm) - 1, Number(dd), h, Number(mi)).getTime();
+};
 
 // Job Processor - Orchestrates automation flow
 export class JobProcessor {
+  /**
+   * Monto entero o error antes de tocar nada. Se tipea entero y el guardia compara
+   * contra este mismo valor: con decimales el guardia bloquearía y frenaría el bot.
+   */
+  static montoEntero(job) {
+    const n = Number(job.amount);
+    if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+      const error = new Error(textoNoSe(job.type, `el monto ${job.amount} no es válido (tiene que ser un número entero)`));
+      error.loadNotApplied = true;
+      throw error;
+    }
+    return n;
+  }
+
+  /**
+   * ¿Se puede rehacer esta carga después de un re-login? Sólo si es SEGURO que la
+   * primera no se aplicó: el panel la rechazó por sesión vencida, o no salió ningún
+   * envío y la sesión efectivamente estaba cerrada. Una sola vez por job.
+   */
+  static async _rehacerTrasRelogin(tab, job, config, error) {
+    let motivo = null;
+    if (error?.panelSessionExpired) {
+      motivo = 'el panel rechazó la carga por sesión vencida';
+    } else if (error?.nothingSent) {
+      const logueado = await this.checkLoginStatus(tab.id, config).catch(() => null);
+      if (logueado === false) motivo = 'la sesión se cerró antes de que saliera la carga';
+    }
+    if (!motivo) return null;
+    if (!(await JobLedger.reabrirPorSesion(job.id))) return null;
+    console.warn(`[JobProcessor] ${motivo}: re-login y se rehace la carga UNA vez (la primera NO se aplicó)`);
+    const t = await this.validateSession(tab, config);
+    await JobLedger.avanzar(job.id, 'SESION_OK');
+    return t;
+  }
+
   /**
    * Execute a credit loading job
    * Bot is already logged in and on the panel — go straight to automation.
@@ -10,6 +73,7 @@ export class JobProcessor {
     console.log('[JobProcessor] Starting job execution:', job.id);
     console.log('[JobProcessor] Panel URL:', config.panelUrl);
     console.log('[JobProcessor] Target:', job.targetUsername, 'Amount:', job.amount);
+    this.montoEntero(job);
 
     // Check activity window before executing
     const activityWindow = await ApiClient.checkActivityWindow(config);
@@ -23,6 +87,8 @@ export class JobProcessor {
 
     // Validate session (auto-login if needed)
     tab = await this.validateSession(tab, config);
+    await this.asegurarListaDeUsuarios(tab.id);
+    await JobLedger.avanzar(job.id, 'SESION_OK');
 
     // Pre-check: verify panel has enough credits before loading
     const panelBalance = await this.readPanelBalance(tab.id, config);
@@ -40,7 +106,14 @@ export class JobProcessor {
     // We must NOT auto-create here — that's what caused duplicate users across panels.
     console.log('[JobProcessor] Executing credit load...');
     try {
-      const result = await this.executeLoadCredits(tab.id, job, config);
+      let result;
+      try {
+        result = await this.executeLoadCredits(tab.id, job, config);
+      } catch (firstError) {
+        const relogged = await this._rehacerTrasRelogin(tab, job, config, firstError);
+        if (!relogged) throw firstError;
+        result = await this.executeLoadCredits(relogged.id, job, config);
+      }
       console.log('[JobProcessor] Job completed successfully');
       return result;
     } catch (loadError) {
@@ -116,6 +189,11 @@ export class JobProcessor {
    * dispara la carga de la página), se espera ese en vez de abrir otro. Dos
    * logins simultáneos contra el panel son una señal de bot.
    */
+  /** Error de Chrome porque la página navegó/recargó mientras corría un script. */
+  static esNavegacion(e) {
+    return /Frame with ID \d+ was removed|No frame with id|frame was removed|execution context was destroyed|The frame was removed|Cannot access contents of url "about:blank"/i.test(String(e?.message || e));
+  }
+
   static loginOnce(tabId, config) {
     if (!this._loginInFlight) {
       this._loginInFlight = this.performLogin(tabId, config).finally(() => {
@@ -152,13 +230,20 @@ export class JobProcessor {
       if (config) {
         await this.injectContentScripts(tabId, config);
       }
-      const [result] = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: () => {
-          return window.panelAutomation?.getPanelBalance() ?? null;
-        }
-      });
-      return result?.result ?? null;
+      // El saldo del encabezado se completa un momento después de cargar la página
+      // (lo trae getBalance): recién cargada dice 0. Se espera hasta ver un saldo
+      // mayor a cero, como mucho 8 s; si sigue en 0, es que es 0 de verdad.
+      let ultimo = null;
+      for (let i = 0; i < 16; i++) {
+        const [result] = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => window.panelAutomation?.getPanelBalance() ?? null,
+        });
+        ultimo = result?.result ?? null;
+        if (ultimo != null && ultimo > 0) return ultimo;
+        await esperar(500);
+      }
+      return ultimo;
     } catch (e) {
       console.warn('[JobProcessor] Could not read panel balance:', e.message);
       return null;
@@ -329,17 +414,34 @@ export class JobProcessor {
   static async performLogin(tabId, config) {
     await this.injectContentScripts(tabId, config);
 
-    const result = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: async (credentials) => {
-        // This will be handled by content script
-        return await window.panelAutomation.login(credentials);
-      },
-      args: [{
-        username: config.panelUsername,
-        password: config.panelPassword
-      }]
-    });
+    let result;
+    try {
+      result = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: async (credentials) => {
+          // This will be handled by content script
+          return await window.panelAutomation.login(credentials);
+        },
+        args: [{
+          username: config.panelUsername,
+          password: config.panelPassword
+        }]
+      });
+    } catch (e) {
+      // Si el login entra, el panel navega (p. ej. a /dashboard.php) y el script que
+      // esperaba la respuesta muere con la página ("Frame with ID 0 was removed").
+      // Eso no es un error: se espera la página nueva y se mira si quedó logueado.
+      if (!this.esNavegacion(e)) throw e;
+      console.log('[JobProcessor] La página navegó durante el login; verificando sesión...');
+      await esperar(1500);
+      await this.waitForTabLoad(tabId).catch(() => {});
+      await esperar(1500);
+      if (await this.checkLoginStatus(tabId, config).catch(() => false)) {
+        console.log('[JobProcessor] Login successful (la página navegó)');
+        return;
+      }
+      throw new Error('Login failed: la página navegó y la sesión no quedó abierta');
+    }
 
     if (!result?.[0]?.result) {
       throw new Error('Login failed: no result from content script');
@@ -388,6 +490,11 @@ export class JobProcessor {
       if (phase1.userNotFound) error.userNotFoundInPanel = true;
       throw error;
     }
+
+    await JobLedger.avanzar(job.id, 'USUARIO_ENCONTRADO', {
+      balanceBefore: phase1?.balanceBefore ?? null,
+      userKingboxId: phase1?.userKingboxId ?? null,
+    });
 
     // If phase 1 returned a navigateTo URL, navigate and run phase 2
     if (phase1?.phase === 'NAVIGATE_TO_ADD_CREDITS' && phase1.navigateTo) {
@@ -447,85 +554,372 @@ export class JobProcessor {
 
     const fillPhase = fillResult?.[0]?.result;
 
-    // If content script reported full success (no MAIN world click needed), we're done.
-    if (fillPhase?.success && !fillPhase?.needsMainWorldClick) {
-      console.log('[JobProcessor] fillAmountAndSubmit fully succeeded:', fillPhase.message);
-      return {
-        success: true,
-        targetUsername: job.targetUsername,
-        amount: job.amount,
-        message: fillPhase.message || 'Credits loaded'
-      };
+    // El resultado de una carga lo decide sólo la respuesta del panel, que se lee al
+    // clickear desde acá. Un "éxito" del content script sin ese clic, o un error
+    // explícito al tipear el monto, no habilitan a seguir: la carga no se hizo.
+    if (fillPhase?.success === false || (fillPhase?.success && !fillPhase?.needsMainWorldClick)) {
+      const error = new Error(textoNoSe('addCredit', `no se pudo poner el monto en el panel${fillPhase?.error ? ` (${fillPhase.error})` : ''}`));
+      error.screenshot = await this.captureScreenshotSafe();
+      error.loadNotApplied = true;
+      throw error;
     }
 
     // Amount is filled. Click Aceptar via MAIN world (bypasses CSP) + poll for result.
+    await JobLedger.avanzar(job.id, 'MONTO_LISTO');
     try {
-      return await this.mainWorldClickAndWait(tabId, job, parseFloat(job.amount) || 0, {
+      return await this.mainWorldClickAndWait(tabId, job, this.montoEntero(job), {
         op: 'addCredit',
         userKingboxId: phase1?.userKingboxId ?? null,
         balanceBefore: phase1?.balanceBefore ?? null,
+        config,
       });
     } catch (clickError) {
       // Sin señal después de Aceptar: la carga pudo haber entrado o no. En vez de dejar
       // la duda (reintentarla a ciegas puede cargar dos veces), se mira el saldo.
       if (!clickError.ambiguousAfterSubmit) throw clickError;
-      return await this.verifyLoadByBalance(tabId, job, config, phase1?.balanceBefore ?? null, clickError);
+      return await this.verifyLoadByBalance(job, config, phase1?.balanceBefore ?? null, clickError);
     }
   }
 
   /**
-   * Carga sin confirmación visible: decide por el saldo del usuario.
+   * Busca la operación en el historial del panel (/widthdraw, "Detalle de Cargas"),
+   * como haría un operador: entra a la página, mira las filas de arriba (las más
+   * nuevas) y, si no la ve, escribe el usuario y aprieta BUSCAR.
    *
-   * - Subió exactamente el monto → la carga entró (éxito).
-   * - No cambió → la carga NO entró: falla con ese motivo (el operador puede reintentar).
-   * - Cualquier otra cosa (el usuario jugó en el medio, no se pudo leer) → queda como
-   *   estaba: falla para revisión manual, ahora con los dos saldos a la vista.
+   * Coincide una fila con: Destino = usuario, Importe = +monto (carga) o −monto
+   * (descarga), y hora desde un poco antes del clic. Una misma fila no sirve para
+   * dos operaciones (se lleva la cuenta con `filaHistorial` en la libreta).
    *
-   * Nunca reintenta la carga: sólo lee.
-   *
-   * `direction` = -1 para retiros: ahí el saldo tiene que BAJAR en el monto.
+   * Devuelve { encontrada: true, fila, clave } | { encontrada: false } |
+   * null si la página no se pudo leer (no se sabe).
    */
-  static async verifyLoadByBalance(tabId, job, config, balanceBefore, originalError, direction = 1) {
-    const amount = Math.round(Number(job.amount) || 0);
-    const what = direction < 0 ? 'Retiro' : 'Carga';
-    const fmt = (n) => `$${Number(n).toLocaleString('es-AR')}`;
-    if (balanceBefore == null || !amount) {
-      originalError.message += ' (sin saldo previo para verificar: revisar a mano antes de reintentar)';
-      throw originalError;
-    }
-
-    let balanceAfter = null;
+  static async buscarEnHistorial(tabId, consulta) {
     try {
-      // La página quedó en un estado desconocido (modal abierto, alerta, nada): se recarga
-      // y se da un momento al panel para registrar la carga antes de leer.
-      await chrome.tabs.reload(tabId);
+      return await this._buscarEnHistorial(tabId, consulta);
+    } finally {
+      // Del historial siempre se vuelve a usuarios: es donde arranca todo lo demás.
+      await this.volverALaListaDeUsuarios(tabId);
+    }
+  }
+
+  static async _buscarEnHistorial(tabId, { jobId, username, amount, direction = 1, desdeMs }) {
+    const importe = direction * Math.round(Number(amount));
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      const url = new URL('/widthdraw', tab.url).href;
+      await chrome.tabs.update(tabId, { url });
+      await esperar(600);
       await this.waitForTabLoad(tabId);
-      await new Promise((r) => setTimeout(r, 3000));
-      const reading = await this.verifyChips(job.targetUsername, config);
-      if (reading?.success && Number.isFinite(Number(reading.balance))) balanceAfter = Number(reading.balance);
     } catch (e) {
-      console.warn('[JobProcessor] Verificación por saldo: no se pudo leer:', e.message);
+      console.warn('[JobProcessor] Historial: no se pudo abrir la página:', e.message);
+      return null;
     }
 
-    const detalle = `saldo antes ${fmt(balanceBefore)}, después ${balanceAfter == null ? '?' : fmt(balanceAfter)}`;
-    if (balanceAfter === balanceBefore + direction * amount) {
-      console.log(`[JobProcessor] ${what} confirmada por saldo (${detalle})`);
-      return {
-        success: true,
-        targetUsername: job.targetUsername,
-        amount: job.amount,
-        message: `${what} confirmad${direction < 0 ? 'o' : 'a'} por saldo (${detalle})`,
-        verifiedByBalance: true,
-      };
+    // Claves de filas que ya usó otra operación (dos cargas iguales en el mismo minuto).
+    const usadas = (await JobLedger.todas())
+      .filter((f) => f.jobId !== jobId && f.filaHistorial)
+      .map((f) => f.filaHistorial);
+
+    for (let intento = 0; intento < 2; intento++) {
+      let res;
+      try {
+        [res] = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: 'MAIN',
+          func: async (q) => {
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            const filas = () => [...document.querySelectorAll('#DataTables_Table_0 tbody tr')]
+              .filter((tr) => tr.cells.length >= 4)
+              .map((tr) => [...tr.cells].map((td) => (td.innerText ?? td.textContent ?? '').trim()));
+            const lista = () => {
+              const t = document.querySelector('#DataTables_Table_0');
+              const proc = document.querySelector('#DataTables_Table_0_processing');
+              const procesando = proc && getComputedStyle(proc).display !== 'none';
+              return t && !procesando;
+            };
+            // Esperar la tabla (hasta 10 s)
+            for (let i = 0; i < 50 && !lista(); i++) await sleep(200);
+            if (!lista()) return { ok: false, motivo: 'la tabla del historial no apareció' };
+
+            // Las filas del día llegan solas un momento después de cargar la página.
+            // Primera vuelta: esperar hasta 8 s a que aparezcan; si no, apretar BUSCAR.
+            // Segunda vuelta: buscar con el usuario escrito.
+            const esperarFilas = async (ms) => {
+              for (let i = 0; i < ms / 200; i++) {
+                if (lista() && filas().length > 0) return true;
+                await sleep(200);
+              }
+              return lista() && filas().length > 0;
+            };
+            const buscar = async (usuario) => {
+              const input = document.querySelector('.md-form.mb-3 input') || document.querySelector('input[aria-label="Username"]');
+              const btn = [...document.querySelectorAll('button.btn-cyan')].find((b) => (b.innerText ?? b.textContent ?? '').trim().toUpperCase() === 'BUSCAR');
+              if (!btn) return false;
+              if (input) {
+                const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                setter.call(input, usuario);
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+              await sleep(300 + Math.random() * 500);
+              btn.click();
+              return true;
+            };
+            let busco = false;
+            if (!q.buscarUsuario) {
+              if (!(await esperarFilas(8000))) {
+                busco = await buscar('');
+                await esperarFilas(10000);
+              }
+            } else {
+              busco = await buscar(q.username);
+              if (!busco) return { ok: false, motivo: 'no se encontró el botón BUSCAR del historial' };
+              await sleep(800);
+              await esperarFilas(10000);
+            }
+            const vacia = (document.querySelector('#DataTables_Table_0 .dataTables_empty')?.innerText || '').trim();
+            return { ok: true, filas: filas().slice(0, 50), url: window.location?.href, vacia, busco };
+          },
+          args: [{ username, buscarUsuario: intento === 1 }],
+        });
+      } catch (e) {
+        console.warn('[JobProcessor] Historial: no se pudo leer:', e.message);
+        return null;
+      }
+      const r = res?.result;
+      if (!r?.ok) {
+        this.log('WARN', `Historial: ${r?.motivo || 'sin resultado'}`);
+        return null;
+      }
+      this.log('INFO', `Historial (${intento === 0 ? 'sin buscar' : `buscando ${username}`}): ${r.filas.length} fila(s)`, { primeras: r.filas.slice(0, 3), url: r.url, vacia: r.vacia });
+
+      const ahora = Date.now();
+      const candidatas = [];
+      for (const [fecha, , destino, importeTxt] of r.filas) {
+        if ((destino || '').toLowerCase() !== String(username).toLowerCase()) continue;
+        if (parseImporte(importeTxt) !== importe) continue;
+        const t = parseFechaHistorial(fecha);
+        if (t == null || t < desdeMs - 3 * 60000 || t > ahora + 3 * 60000) continue;
+        candidatas.push(`${fecha}|${destino}|${importe}`);
+      }
+      for (const clave of candidatas) {
+        const iguales = candidatas.filter((c) => c === clave).length;
+        const yaUsadas = usadas.filter((c) => c === clave).length;
+        if (iguales > yaUsadas) {
+          this.log('INFO', `Historial: encontrada ${clave}`);
+          return { encontrada: true, clave };
+        }
+      }
+      if (intento === 0) await esperar(500 + Math.random() * 700);
+    }
+    this.log('WARN', `Historial: no figura ${username} ${importe} desde ${new Date(desdeMs - 180000).toLocaleTimeString('es-AR')}`);
+    return { encontrada: false };
+  }
+
+  /**
+   * Vuelve a la lista de usuarios como lo haría una persona: entra por el link del
+   * menú (o recarga si no lo encuentra). Deja la pestaña limpia (sin modal, toast
+   * ni alerta) para lo que sigue. Nunca tira error: si no puede, el paso siguiente
+   * (que valida sesión y busca al usuario) se arregla solo.
+   */
+  static async volverALaListaDeUsuarios(tabId) {
+    try {
+      await esperar(800 + Math.random() * 1700);
+      let usersUrl = null;
+      try {
+        const [res] = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => document.querySelector('a.mdbvue-sidenav__item[href*="/users"], a[href*="/users"]')?.href || null,
+        });
+        usersUrl = res?.result || null;
+      } catch { /* página en blanco o navegando */ }
+      if (!usersUrl) {
+        const tab = await chrome.tabs.get(tabId);
+        try { usersUrl = new URL('/users', tab.url).href; } catch { usersUrl = null; }
+      }
+      if (usersUrl) await chrome.tabs.update(tabId, { url: usersUrl });
+      else await chrome.tabs.reload(tabId);
+      // Que la navegación arranque antes de esperar el "complete" (si no, el estado
+      // viejo de la pestaña ya dice "complete" y se sigue antes de tiempo).
+      await esperar(600);
+      await this.waitForTabLoad(tabId);
+      await this.esperarListaDeUsuariosVisible(tabId);
+    } catch (e) {
+      console.warn('[JobProcessor] No se pudo volver a la lista de usuarios:', e.message);
+    }
+  }
+
+  /**
+   * Como una persona: no hace nada hasta ver la lista de usuarios armada (buscador
+   * y tabla visibles, sin el "procesando" de DataTables). Hasta 10 s.
+   */
+  static async esperarListaDeUsuariosVisible(tabId) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const visible = (el) => !!el && el.offsetParent !== null;
+          for (let i = 0; i < 50; i++) {
+            const buscador = document.querySelector('#filter-input');
+            const tabla = document.querySelector('#DataTables_Table_0');
+            const proc = document.querySelector('#DataTables_Table_0_processing');
+            const procesando = proc && getComputedStyle(proc).display !== 'none';
+            if (visible(buscador) && tabla && !procesando) return true;
+            if (document.querySelector('input[type="password"]')) return false; // sesión cerrada
+            await sleep(200);
+          }
+          return false;
+        },
+      });
+    } catch { /* la página navegó: el paso siguiente valida la sesión */ }
+  }
+
+  /** Log que además viaja al backend (lo ven los operadores en vivo). */
+  static log(level, msg, data) {
+    (level === 'WARN' ? console.warn : console.log)(`[JobProcessor] ${msg}`, data ?? '');
+    try { this.onLog?.(level, msg, data); } catch { /* opcional */ }
+  }
+
+  /** Antes de operar: la pestaña tiene que estar en la lista de usuarios. */
+  static async asegurarListaDeUsuarios(tabId) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (new URL(tab.url).pathname.replace(/\/+$/, '') === '/users') return;
+    } catch { /* si no se puede leer la URL, se navega igual */ }
+    await this.volverALaListaDeUsuarios(tabId);
+  }
+
+  /**
+   * Lee el saldo de un usuario como una persona: va a la lista, valida la sesión
+   * (re-login una vez si hace falta) y lo busca. null si no se pudo leer.
+   */
+  static async leerSaldoDelUsuario(username, config) {
+    try {
+      const tab = await this.ensurePanelTab(config.panelUrl);
+      await this.volverALaListaDeUsuarios(tab.id);
+      const reading = await this.verifyChips(username, config);
+      if (reading?.success && Number.isFinite(Number(reading.balance))) return Number(reading.balance);
+    } catch (e) {
+      console.warn('[JobProcessor] Lectura de saldo falló:', e.message);
+    }
+    return null;
+  }
+
+  /**
+   * Carga que salió al panel y no tuvo respuesta clara: la extensión lo resuelve
+   * sola, como haría un operador. Mira el historial de cargas del panel (la fuente
+   * más confiable: no depende de que el usuario esté jugando) y el saldo del
+   * usuario como respaldo. Repite a los 0 s, 15 s y 30 s. Nunca reintenta: sólo lee.
+   *
+   * - Aparece en el historial, o el saldo subió exactamente el monto → se cargó.
+   * - El historial se leyó al menos dos veces y no aparece → no se cargó.
+   * - Sin historial legible: saldo quieto en todas las lecturas → no se cargó;
+   *   saldo movido por otro monto → error (mirar el saldo en el panel).
+   * - No se pudo leer nada → error ahora; la ficha queda abierta y el barrido la
+   *   sigue verificando sola (si entró, el backend avisa).
+   *
+   * `direction` = -1 para retiros (en el historial figuran con importe negativo).
+   */
+  static async verifyLoadByBalance(job, config, balanceBefore, originalError, direction = 1) {
+    const ficha = await JobLedger.get(job.id);
+    const amount = Math.round(Number(job.amount ?? ficha?.amount) || 0);
+    const username = job.targetUsername ?? ficha?.username;
+    const what = direction < 0 ? 'Retiro' : 'Carga';
+    const o = direction < 0 ? 'o' : 'a';
+    const motivoOriginal = originalError?.message || 'sin respuesta del panel';
+    const op = direction < 0 ? 'addDebit' : 'addCredit';
+    const desdeMs = Date.parse(ficha?.aceptarAt || ficha?.creada || new Date().toISOString());
+    // Para el operador es un error con una sola indicación; el detalle va a los logs.
+    const enDuda = async (detalle) => {
+      console.warn(`[JobProcessor] Sin confirmar (${username}): ${detalle}`);
+      const msg = textoError(op, username);
+      await JobLedger.veredicto(job.id, 'EN_DUDA', { motivo: msg, detalle });
+      const error = new Error(msg);
+      error.screenshot = originalError?.screenshot;
+      error.uncertain = true;
+      throw error;
+    };
+    const confirmada = async (message, datos) => {
+      await JobLedger.veredicto(job.id, 'OK', { motivo: message, ...datos });
+      console.log(`[JobProcessor] ${message}`);
+      return { success: true, targetUsername: username, amount: job.amount ?? amount, message, verifiedByBalance: true };
+    };
+    const noSeHizo = async (razon, detalle) => {
+      const motivo = textoNoSe(op, razon);
+      console.warn(`[JobProcessor] ${motivo} — ${detalle} (${motivoOriginal})`);
+      await JobLedger.veredicto(job.id, 'NO_APLICADA', { motivo, certeza: 'verificacion', detalle });
+      const error = new Error(motivo);
+      error.screenshot = originalError?.screenshot;
+      error.loadNotApplied = true;
+      throw error;
+    };
+
+    if (!amount || !username) {
+      return enDuda(`sin respuesta clara del panel (${motivoOriginal}) y sin datos de la operación`);
     }
 
-    const error = balanceAfter === balanceBefore
-      ? new Error(`${what} NO realizad${direction < 0 ? 'o' : 'a'}: el saldo del usuario no cambió (${detalle}). Se puede reintentar.`)
-      : new Error(`${originalError.message} — ${detalle}: revisar a mano antes de reintentar`);
-    error.screenshot = originalError.screenshot;
-    if (balanceAfter === balanceBefore) error.loadNotApplied = true;
-    console.warn(`[JobProcessor] Verificación por saldo: ${error.message}`);
-    throw error;
+    const esperado = balanceBefore != null ? balanceBefore + direction * amount : null;
+    const ESPERAS_MS = [0, 15000, 15000];
+    let historialSinFila = 0;
+    const saldos = [];
+    for (let i = 0; i < ESPERAS_MS.length; i++) {
+      if (ESPERAS_MS[i]) await esperar(ESPERAS_MS[i]);
+      if ((await JobLedger.get(job.id))?.cancelada && !originalError?.recovery) break;
+
+      const tab = await this.ensurePanelTab(config.panelUrl).catch(() => null);
+      const h = tab ? await this.buscarEnHistorial(tab.id, { jobId: job.id, username, amount, direction, desdeMs }) : null;
+      if (h?.encontrada) {
+        return confirmada(`${what} confirmad${o} en el historial del panel`, { certeza: 'historial', filaHistorial: h.clave });
+      }
+      if (h) historialSinFila++;
+
+      // Saldo: en la primera vuelta siempre (control cruzado del historial) y
+      // después sólo si el historial no se pudo leer.
+      if (esperado != null && (i === 0 || !h)) {
+        const saldo = await this.leerSaldoDelUsuario(username, config);
+        saldos.push(saldo);
+        if (saldo === esperado) {
+          return confirmada(`${what} confirmad${o} por saldo (antes ${fmtPesos(balanceBefore)}, después ${fmtPesos(saldo)})`, {
+            certeza: 'saldo', respuestaPanel: { balance: saldo },
+          });
+        }
+      }
+    }
+
+    if (historialSinFila >= 2) {
+      return noSeHizo('el panel no la aplicó (no figura en el historial)', `historial leído ${historialSinFila} veces sin la fila`);
+    }
+    const leidos = saldos.filter((x) => x != null);
+    if (leidos.length >= 2 && leidos.every((x) => x === balanceBefore)) {
+      return noSeHizo('el panel no la aplicó (el saldo no se movió)', `${leidos.length} lecturas en ${fmtPesos(balanceBefore)}, ${horaAR()}`);
+    }
+    if (leidos.length && leidos[leidos.length - 1] !== balanceBefore) {
+      return enDuda(`saldo antes ${fmtPesos(balanceBefore)}, ahora ${fmtPesos(leidos[leidos.length - 1])}, esperado ${fmtPesos(esperado)}; historial sin leer`);
+    }
+    // No se pudo leer casi nada: la ficha queda abierta y el barrido la sigue verificando.
+    if (Date.now() - desdeMs < VERIFICACION_MAX_MS) {
+      console.warn(`[JobProcessor] No se pudo verificar ${username} todavía; se sigue verificando solo (${motivoOriginal})`);
+      const error = new Error(textoError(op, username));
+      error.screenshot = originalError?.screenshot;
+      error.uncertain = true;
+      error.pendingVerification = true;
+      throw error;
+    }
+    return enDuda(`en 30 min no se pudo leer ni el historial ni el saldo de ${username} (${motivoOriginal})`);
+  }
+
+  /**
+   * Verificación de una ficha que quedó en duda (Chrome se cerró, timeout, o no se
+   * pudo leer el saldo antes). La usa el service worker al arrancar/reconectar.
+   * Sólo lee: nunca toca Aceptar.
+   */
+  static async verificarFicha(ficha, config) {
+    const job = { id: ficha.jobId, type: ficha.type, targetUsername: ficha.username, amount: ficha.amount };
+    const direction = ficha.type === 'WITHDRAW_CHIPS' ? -1 : 1;
+    const original = new Error(ficha.motivo || 'la extensión se cortó después de tocar Aceptar');
+    original.recovery = true;
+    return this.verifyLoadByBalance(job, config, ficha.balanceBefore, original, direction);
   }
 
   /**
@@ -656,13 +1050,20 @@ export class JobProcessor {
   }
 
   /**
-   * Click Aceptar in MAIN world and poll for success/error result.
-   * Reusable for LOAD_CREDITS, WITHDRAW_CHIPS, and any modal with submit button.
+   * Toca Aceptar (MAIN world) y decide el resultado SÓLO por la respuesta del panel
+   * a addCredit/addDebit, que lee el guardia de red. La pantalla no se mira.
    *
-   * El resultado lo decide sólo la respuesta del panel a addCredit/addDebit (guardia
-   * de red); la pantalla no se mira. Si no llega respuesta, o el panel dio 5xx / se
-   * cortó la red, queda "en duda" (`ambiguousAfterSubmit`) y se verifica por saldo.
-   * Al terminar se recarga la página.
+   * Antes del clic se anota ACEPTAR_TOCADO en la libreta (si no se puede anotar, no
+   * se clickea). Apenas hay veredicto se anota, y recién después se vuelve a la
+   * lista de usuarios. Casos:
+   *   - Panel dijo OK → éxito.
+   *   - Panel rechazó (4xx, header≠200) o el guardia bloqueó → NO se hizo (seguro).
+   *   - No salió ningún envío → se confirma mirando el saldo (por si el guardia no
+   *     vio el envío) y se marca NO se hizo.
+   *   - Salió y no hubo respuesta (60 s), 5xx o corte → `ambiguousAfterSubmit`: el
+   *     llamador lo decide por saldo (verifyLoadByBalance).
+   *
+   * opts: { op, userKingboxId, balanceBefore, config }
    */
   static async mainWorldClickAndWait(tabId, job, amountNum, opts = {}) {
     console.log('[JobProcessor] Executing MAIN world click for Aceptar...');
@@ -683,7 +1084,7 @@ export class JobProcessor {
       console.warn('[JobProcessor] No se pudo armar el guardia de red:', e.message);
     }
     if (!armed?.armed) {
-      const error = new Error('No se pudo preparar la verificación de la carga; NO se tocó Aceptar (la carga no se hizo)');
+      const error = new Error(textoNoSe(op, 'la extensión no pudo prepararse para controlar el envío'));
       error.screenshot = await this.captureScreenshotSafe();
       error.loadNotApplied = true;
       throw error;
@@ -692,27 +1093,158 @@ export class JobProcessor {
       console.warn('[JobProcessor] Sin data-id del usuario: el guardia controla monto y doble envío, no el usuario');
     }
 
+    // Anotar ANTES de clickear. Si la libreta lo niega (cancelada por timeout, ya
+    // tocado, ya resuelta) o no se puede guardar, no se clickea.
     try {
-      return await this._clickAndPoll(tabId, job, amountNum, op, armed.armedAt, opts);
+      await JobLedger.avanzar(job.id, 'ACEPTAR_TOCADO', {
+        op,
+        balanceBefore: opts.balanceBefore ?? null,
+        userKingboxId: opts.userKingboxId ?? null,
+      });
+    } catch (e) {
+      await this.disarmNetworkGuard(tabId);
+      console.warn('[JobProcessor] Libreta negó o no pudo anotar ACEPTAR_TOCADO:', e.message);
+      const error = new Error(textoNoSe(op, e.message.includes('NO se toca') ? 'la operación ya se había procesado o se canceló' : 'la extensión no pudo guardar su progreso'));
+      error.loadNotApplied = true;
+      throw error;
+    }
+    try { this.onProgress?.(job.id, 'ACEPTAR_TOCADO'); } catch { /* aviso opcional */ }
+
+    let outcome;
+    try {
+      outcome = await this._clickAndPoll(tabId, amountNum, op, armed.armedAt);
     } finally {
       await this.disarmNetworkGuard(tabId);
-      // Lo que haya quedado en pantalla (modal, toast, alerta) no importa: se recarga
-      // y la página queda limpia para la próxima operación.
-      await this.reloadAfterSubmit(tabId);
     }
+
+    const what = op === 'addDebit' ? 'El retiro' : 'La carga';
+
+    if (outcome.success) {
+      let message = outcome.message;
+      // Saldo nuevo vs. el leído antes: si no cierra, entró igual (lo dijo el panel)
+      // pero queda anotado — puede ser que el usuario jugó en el medio.
+      if (opts.balanceBefore != null && outcome.balanceAfter != null) {
+        const delta = Number(outcome.balanceAfter) - Number(opts.balanceBefore);
+        const expected = op === 'addDebit' ? -Math.round(amountNum) : Math.round(amountNum);
+        if (Math.round(delta) !== expected) {
+          message += ` — ojo: saldo ${opts.balanceBefore} → ${outcome.balanceAfter} (esperado ${expected >= 0 ? '+' : ''}${expected})`;
+        }
+      }
+      await JobLedger.veredicto(job.id, 'OK', {
+        motivo: message, certeza: 'panel',
+        respuestaPanel: { status: 200, transaction: outcome.transaction ?? null, balance: outcome.balanceAfter ?? null },
+      }).catch((e) => console.error('[JobProcessor] Libreta: no se pudo anotar el OK:', e.message));
+      // Como un operador: ir al historial y ver la operación arriba de la tabla.
+      // La respuesta del panel ya es la verdad; el historial la confirma y deja la
+      // fila anotada (para que no sirva para otra carga igual).
+      const h = await this.buscarEnHistorial(tabId, {
+        jobId: job.id, username: job.targetUsername, amount: amountNum,
+        direction: op === 'addDebit' ? -1 : 1, desdeMs: Date.now() - 60000,
+      });
+      if (h?.encontrada) {
+        message += ' · visto en el historial';
+        await JobLedger.avanzar(job.id, 'VEREDICTO', { filaHistorial: h.clave }).catch(() => {});
+      } else {
+        console.warn(`[JobProcessor] El panel confirmó pero la operación no apareció en el historial (${h ? 'no figura' : 'historial ilegible'})`);
+      }
+      console.log('[JobProcessor] Operation confirmed:', message);
+      return {
+        success: true,
+        targetUsername: job.targetUsername,
+        amount: job.amount,
+        message,
+        panelTransaction: outcome.transaction ?? undefined,
+      };
+    }
+
+    if (outcome.notApplied) {
+      const error = new Error(textoNoSe(op, outcome.error));
+      error.screenshot = await this.captureScreenshotSafe();
+      error.loadNotApplied = true;
+      if (outcome.sessionExpired) error.panelSessionExpired = true;
+      if (outcome.guardBlocked) error.guardBlocked = true;
+      await JobLedger.veredicto(job.id, 'NO_APLICADA', {
+        motivo: outcome.error, certeza: outcome.guardBlocked ? 'guardia' : 'panel',
+        respuestaPanel: { status: outcome.status ?? null },
+      }).catch((e) => console.error('[JobProcessor] Libreta: no se pudo anotar el rechazo:', e.message));
+      await this.volverALaListaDeUsuarios(tabId);
+      throw error;
+    }
+
+    if (outcome.nothingSent) {
+      return this._confirmarQueNoSalio(tabId, job, amountNum, op, opts);
+    }
+
+    // Salió y no hubo respuesta clara: lo decide el saldo (el llamador).
+    const error = new Error(`Operation failed: No success/error response detected after clicking Aceptar${outcome.detail ? ` (${outcome.detail})` : ''}`);
+    error.screenshot = await this.captureScreenshotSafe();
+    error.ambiguousAfterSubmit = true;
+    throw error;
   }
 
-  static async reloadAfterSubmit(tabId) {
-    try {
-      await new Promise((r) => setTimeout(r, 1000 + Math.random() * 1500));
-      await chrome.tabs.reload(tabId);
-      await this.waitForTabLoad(tabId);
-    } catch (e) {
-      console.warn('[JobProcessor] No se pudo recargar después de Aceptar:', e.message);
+  /**
+   * El guardia no vio salir ningún envío. Casi seguro que no se hizo, pero como el
+   * guardia podría no ver un envío (cambio en el panel), se confirma mirando el
+   * saldo una vez antes de decir "no se hizo".
+   */
+  static async _confirmarQueNoSalio(tabId, job, amountNum, op, opts) {
+    const what = op === 'addDebit' ? 'El retiro' : 'La carga';
+    const direction = op === 'addDebit' ? -1 : 1;
+    const screenshot = await this.captureScreenshotSafe();
+    const sesionAbierta = opts.config
+      ? await this.checkLoginStatus(tabId, opts.config).catch(() => null)
+      : null;
+
+    // Por si el guardia no vio el envío: ¿figura en el historial?
+    const h = await this.buscarEnHistorial(tabId, {
+      jobId: job.id, username: job.targetUsername, amount: amountNum, direction, desdeMs: Date.now() - 90000,
+    });
+    if (h?.encontrada) {
+      const message = `${what} confirmad${op === 'addDebit' ? 'o' : 'a'} en el historial del panel`;
+      console.error('[JobProcessor] El guardia no vio el envío pero figura en el historial: revisar la extensión');
+      await JobLedger.veredicto(job.id, 'OK', { motivo: message, certeza: 'historial', filaHistorial: h.clave });
+      return { success: true, targetUsername: job.targetUsername, amount: job.amount, message, verifiedByBalance: true };
     }
+
+    let saldo = null;
+    if (!h && opts.config && opts.balanceBefore != null) {
+      saldo = await this.leerSaldoDelUsuario(job.targetUsername, opts.config);
+    }
+    if (saldo != null && opts.balanceBefore != null && saldo === opts.balanceBefore + direction * Math.round(amountNum)) {
+      // El saldo dice que entró aunque el guardia no vio el envío: vale el saldo.
+      const message = `${what} confirmad${op === 'addDebit' ? 'o' : 'a'} por saldo`;
+      console.error('[JobProcessor] El guardia no vio el envío pero el saldo dice que entró: revisar la extensión');
+      console.error(`[JobProcessor] ${message}`);
+      await JobLedger.veredicto(job.id, 'OK', { motivo: message, certeza: 'saldo', respuestaPanel: { balance: saldo } });
+      return { success: true, targetUsername: job.targetUsername, amount: job.amount, message, verifiedByBalance: true };
+    }
+    if (saldo != null && opts.balanceBefore != null && saldo !== opts.balanceBefore) {
+      const detalle = `no se vio salir el envío pero el saldo cambió (${fmtPesos(opts.balanceBefore)} → ${fmtPesos(saldo)})`;
+      console.warn(`[JobProcessor] ${detalle}`);
+      const msg = textoError(op, job.targetUsername);
+      await JobLedger.veredicto(job.id, 'EN_DUDA', { motivo: msg, detalle });
+      const error = new Error(msg);
+      error.screenshot = screenshot;
+      error.uncertain = true;
+      throw error;
+    }
+
+    const msg = textoNoSe(op, sesionAbierta === false ? 'la sesión del panel estaba cerrada' : 'el panel no recibió el pedido');
+    await JobLedger.veredicto(job.id, 'NO_APLICADA', { motivo: msg, certeza: 'guardia' });
+    const error = new Error(msg);
+    error.screenshot = screenshot;
+    error.loadNotApplied = true;
+    error.nothingSent = true;
+    if (sesionAbierta === false) error.panelSessionExpired = true;
+    throw error;
   }
 
-  static async _clickAndPoll(tabId, job, amountNum, op, armedAt, opts) {
+  /**
+   * Clickea Aceptar y espera la respuesta del panel (vía guardia de red).
+   * Devuelve { success, message, balanceAfter, transaction } | { notApplied, error, ... }
+   *        | { nothingSent } | { ambiguous, detail }. No tira errores.
+   */
+  static async _clickAndPoll(tabId, amountNum, op, armedAt) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
@@ -752,21 +1284,24 @@ export class JobProcessor {
       console.warn('[JobProcessor] MAIN world script failed:', mainWorldError.message);
     }
 
-    // Wait for click + panel processing
-    await new Promise(r => setTimeout(r, 2000));
-
-    // Poll for result — up to 15 seconds
-    console.log('[JobProcessor] Polling for result...');
-    let finalResult = null;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      await new Promise(r => setTimeout(r, 500));
-      let resultCheck;
+    // Sin envío en 15 s → no salió nada. Con el envío en vuelo se espera hasta 45 s:
+    // cortarlo antes (recargar, navegar) deja la carga en duda.
+    const NADA_SALIO_MS = 15000;
+    const EN_VUELO_MAX_MS = 45000;
+    const t0 = Date.now();
+    let pudoLeer = false;
+    let enVuelo = false;
+    console.log('[JobProcessor] Esperando la respuesta del panel...');
+    while (Date.now() - t0 < EN_VUELO_MAX_MS) {
+      await esperar(500);
+      let r;
       try {
-        resultCheck = await chrome.scripting.executeScript({
+        const [res] = await chrome.scripting.executeScript({
           target: { tabId },
           world: 'MAIN',
           func: (since, expectedOp) => {
-            // 1. Lo que respondió el panel a addCredit/addDebit (guardia de red)
+            // window.__trBot se pierde si la página navegó (p. ej. al login); la copia
+            // en sessionStorage sobrevive en la pestaña.
             let all = window.__trBot?.events;
             if (!all) { try { all = JSON.parse(sessionStorage.getItem('__trBotEvents') || '[]'); } catch { all = []; } }
             const events = all.filter((e) => e.at >= since && e.op === expectedOp);
@@ -777,91 +1312,57 @@ export class JobProcessor {
               if (real.status === 200 && real.header?.status === 200) {
                 return {
                   success: true,
-                  source: 'api',
                   message: `Confirmado por el panel (${expectedOp} OK${real.transaction != null ? `, transacción ${real.transaction}` : ''})`,
                   balanceAfter: real.balance,
                   transaction: real.transaction,
                 };
               }
               if (real.status === 401 || real.status === 419) {
-                return { success: false, source: 'api', notApplied: true, sessionExpired: true,
-                  error: `El panel rechazó la carga: sesión vencida (HTTP ${real.status}). La carga NO se hizo` };
+                return { notApplied: true, sessionExpired: true, status: real.status,
+                  error: `la sesión del panel estaba vencida (HTTP ${real.status})` };
               }
               if (real.status === 429) {
-                return { success: false, source: 'api', notApplied: true,
-                  error: 'El panel rechazó la carga por exceso de pedidos (HTTP 429). La carga NO se hizo' };
+                return { notApplied: true, status: 429,
+                  error: 'el panel rechazó por exceso de pedidos (HTTP 429)' };
               }
               if (real.status >= 400 && real.status < 500) {
-                return { success: false, source: 'api', notApplied: true,
-                  error: `El panel rechazó la carga (HTTP ${real.status}${desc ? `: ${desc}` : ''}). La carga NO se hizo` };
+                return { notApplied: true, status: real.status,
+                  error: `el panel la rechazó (HTTP ${real.status}${desc ? `: ${desc}` : ''})` };
               }
               if (real.status === 200) {
                 // HTTP 200 pero el panel dice que no (header.status ≠ 200)
-                return { success: false, source: 'api', notApplied: true,
-                  error: `El panel respondió error${desc ? `: ${desc}` : ''} (código ${real.header?.status ?? '?'}). La carga NO se hizo` };
+                return { notApplied: true, status: 200,
+                  error: `el panel respondió error${desc ? `: ${desc}` : ''} (código ${real.header?.status ?? '?'})` };
               }
               // 5xx o corte de red: el panel pudo haberla aplicado o no
               return { ambiguous: true, detail: real.networkError ? `corte de red (${real.networkError})` : `HTTP ${real.status}` };
             }
             const blocked = events.find((e) => e.blocked);
             if (blocked) {
-              return { success: false, source: 'guard', notApplied: true, guardBlocked: true,
-                error: `La extensión bloqueó el envío antes de que saliera: ${blocked.reason}. La carga NO se hizo` };
+              return { notApplied: true, guardBlocked: true,
+                error: `la extensión frenó el envío (${blocked.reason})` };
             }
-            // La pantalla no se mira: sin respuesta de addCredit/addDebit no hay veredicto.
-            return null;
+            return { none: true };
           },
           args: [armedAt, op]
         });
+        r = res?.result;
       } catch (e) {
-        // La página navegó (p. ej. el panel mandó al login): seguir mirando hasta agotar el tiempo.
-        console.warn('[JobProcessor] Poll falló (¿navegó la página?):', e.message);
+        // La página está navegando: seguir mirando.
         continue;
       }
-
-      const r = resultCheck?.[0]?.result;
-      if (!r || r.pending) continue;
-      finalResult = r;
-      break;
-    }
-
-    if (finalResult?.success) {
-      let message = finalResult.message;
-      // Saldo nuevo vs. el leído antes: si no cierra, la carga entró igual (lo dijo el
-      // panel) pero queda anotado — puede ser que el usuario jugó en el medio.
-      if (finalResult.source === 'api' && opts.balanceBefore != null && finalResult.balanceAfter != null) {
-        const delta = Number(finalResult.balanceAfter) - Number(opts.balanceBefore);
-        const expected = op === 'addDebit' ? -Math.round(amountNum) : Math.round(amountNum);
-        if (Math.round(delta) !== expected) {
-          message += ` — ojo: saldo ${opts.balanceBefore} → ${finalResult.balanceAfter} (esperado ${expected >= 0 ? '+' : ''}${expected})`;
-        }
+      if (!r) continue;
+      pudoLeer = true;
+      if (r.pending) { enVuelo = true; continue; }
+      if (r.none) {
+        if (Date.now() - t0 >= NADA_SALIO_MS) return { nothingSent: true };
+        continue;
       }
-      console.log('[JobProcessor] Operation confirmed:', message);
-      return {
-        success: true,
-        targetUsername: job.targetUsername,
-        amount: job.amount,
-        message,
-        panelTransaction: finalResult.transaction ?? undefined,
-      };
+      return r;
     }
-
-    if (finalResult && finalResult.success === false) {
-      const error = new Error(`Operation failed: ${finalResult.error}`);
-      error.screenshot = await this.captureScreenshotSafe();
-      if (finalResult.notApplied) error.loadNotApplied = true;
-      if (finalResult.sessionExpired) error.panelSessionExpired = true;
-      if (finalResult.guardBlocked) error.guardBlocked = true;
-      throw error;
-    }
-
-    // Sin respuesta de addCredit/addDebit en 15s, o el panel dio 5xx / cortó la red
-    const detail = finalResult?.ambiguous ? ` (${finalResult.detail})` : '';
-    const error = new Error(`Operation failed: No success/error response detected after clicking Aceptar${detail}`);
-    error.screenshot = await this.captureScreenshotSafe();
-    // Ya se tocó Aceptar y no hubo señal: el resultado real es desconocido.
-    error.ambiguousAfterSubmit = true;
-    throw error;
+    if (enVuelo) return { ambiguous: true, detail: 'el panel no respondió en 45 s' };
+    if (!pudoLeer) return { ambiguous: true, detail: 'no se pudo leer la pestaña del panel' };
+    return { nothingSent: true };
   }
 
   /**
@@ -938,6 +1439,7 @@ export class JobProcessor {
   static async executeWithdrawChips(job, config) {
     console.log('[JobProcessor] Starting chip withdrawal:', job.id);
     console.log('[JobProcessor] Target:', job.targetUsername, 'Amount:', job.amount);
+    this.montoEntero(job);
 
     const activityWindow = await ApiClient.checkActivityWindow(config);
     if (!activityWindow.allowed) {
@@ -947,11 +1449,24 @@ export class JobProcessor {
     let tab = await this.ensurePanelTab(config.panelUrl);
     await this.waitForTabLoad(tab.id);
     tab = await this.validateSession(tab, config);
-    await this.injectContentScripts(tab.id, config);
+    await this.asegurarListaDeUsuarios(tab.id);
+    await JobLedger.avanzar(job.id, 'SESION_OK');
+
+    try {
+      return await this._withdrawOnce(tab.id, job, config);
+    } catch (firstError) {
+      const relogged = await this._rehacerTrasRelogin(tab, job, config, firstError);
+      if (!relogged) throw firstError;
+      return await this._withdrawOnce(relogged.id, job, config);
+    }
+  }
+
+  static async _withdrawOnce(tabId, job, config) {
+    await this.injectContentScripts(tabId, config);
 
     console.log('[JobProcessor] Executing chip withdrawal...');
-    const result = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+    const correr = () => chrome.scripting.executeScript({
+      target: { tabId },
       func: async (jobData) => {
         return await window.panelAutomation.withdrawChips(jobData);
       },
@@ -960,6 +1475,19 @@ export class JobProcessor {
         amount: job.amount
       }]
     });
+    let result;
+    try {
+      result = await correr();
+    } catch (e) {
+      // La página navegó en el medio (todavía no se tocó Aceptar: no se envió nada).
+      // Se espera que cargue y se arranca de nuevo desde la lista de usuarios.
+      if (!this.esNavegacion(e)) throw e;
+      console.warn('[JobProcessor] La página navegó durante la descarga (antes de Aceptar); se reintenta desde usuarios');
+      await this.waitForTabLoad(tabId).catch(() => {});
+      await this.asegurarListaDeUsuarios(tabId);
+      await this.injectContentScripts(tabId, config);
+      result = await correr();
+    }
 
     if (!result?.[0]?.result) {
       const error = new Error('Chip withdrawal failed: no result from content script');
@@ -969,30 +1497,35 @@ export class JobProcessor {
 
     const withdrawResult = result[0].result;
 
-    // If content script returned needsMainWorldClick (CSP blocked inline script)
-    if (withdrawResult?.success && withdrawResult?.needsMainWorldClick) {
-      console.log('[JobProcessor] Withdraw amount filled, executing MAIN world click...');
-      try {
-        return await this.mainWorldClickAndWait(tab.id, job, parseFloat(job.amount) || 0, {
-          op: 'addDebit',
-          userKingboxId: withdrawResult.userKingboxId ?? null,
-          balanceBefore: withdrawResult.balanceBefore ?? null,
-        });
-      } catch (clickError) {
-        // Mismo criterio que la carga: en duda se decide por saldo, nunca se repite.
-        if (!clickError.ambiguousAfterSubmit) throw clickError;
-        return await this.verifyLoadByBalance(tab.id, job, config, withdrawResult.balanceBefore ?? null, clickError, -1);
-      }
-    }
-
-    if (!withdrawResult.success) {
-      const error = new Error(`Chip withdrawal failed: ${withdrawResult.error}`);
+    // Sólo se sigue si el content script dejó el monto listo para el clic que se
+    // hace (y se verifica) desde acá. Cualquier otra cosa: el retiro NO se hizo.
+    if (!withdrawResult?.success || !withdrawResult?.needsMainWorldClick) {
+      const error = new Error(textoNoSe('addDebit', withdrawResult?.error || 'el panel no quedó listo para descargar'));
       error.screenshot = await this.captureScreenshotSafe();
+      error.loadNotApplied = true;
+      if (withdrawResult?.userNotFound) error.userNotFoundInPanel = true;
       throw error;
     }
 
-    console.log('[JobProcessor] Chip withdrawal completed successfully');
-    return withdrawResult;
+    await JobLedger.avanzar(job.id, 'USUARIO_ENCONTRADO', {
+      balanceBefore: withdrawResult.balanceBefore ?? null,
+      userKingboxId: withdrawResult.userKingboxId ?? null,
+    });
+    await JobLedger.avanzar(job.id, 'MONTO_LISTO');
+
+    console.log('[JobProcessor] Withdraw amount filled, executing MAIN world click...');
+    try {
+      return await this.mainWorldClickAndWait(tabId, job, this.montoEntero(job), {
+        op: 'addDebit',
+        userKingboxId: withdrawResult.userKingboxId ?? null,
+        balanceBefore: withdrawResult.balanceBefore ?? null,
+        config,
+      });
+    } catch (clickError) {
+      // Mismo criterio que la carga: en duda se decide por saldo, nunca se repite.
+      if (!clickError.ambiguousAfterSubmit) throw clickError;
+      return await this.verifyLoadByBalance(job, config, withdrawResult.balanceBefore ?? null, clickError, -1);
+    }
   }
 
   /**

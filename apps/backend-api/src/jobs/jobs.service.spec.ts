@@ -469,6 +469,129 @@ describe('JobsService', () => {
       expect(events.emitDashboardUpdate).not.toHaveBeenCalled();
     });
 
+    it('no da por colgado un job cuya extensión avisó hace poco que sigue trabajando', async () => {
+      prisma.job.findMany.mockResolvedValue([
+        {
+          id: 'vivo-1',
+          type: 'LOAD_CREDITS',
+          status: 'PROCESSING',
+          startedAt: new Date(Date.now() - 6 * 60 * 1000),
+          request: {
+            id: 'req-v',
+            targetUsername: 'p1',
+            amount: 1000,
+            userId: 'u1',
+          },
+        },
+      ]);
+      service.noteJobProgress('vivo-1', 'ACEPTAR_TOCADO');
+
+      await callCheckForStuckJobs(service);
+
+      expect(prisma.job.update).not.toHaveBeenCalled();
+    });
+
+    it('si ya tocó Aceptar y se cortó, el operador ve "revisá el saldo"', async () => {
+      prisma.job.findMany.mockResolvedValue([
+        {
+          id: 'tocado-1',
+          type: 'LOAD_CREDITS',
+          targetUsername: 'juan77',
+          status: 'PROCESSING',
+          startedAt: new Date(Date.now() - 6 * 60 * 1000),
+          request: {
+            id: 'req-t',
+            targetUsername: 'juan77',
+            amount: 1000,
+            userId: 'u2',
+          },
+        },
+      ]);
+      service.noteJobProgress('tocado-1', 'ACEPTAR_TOCADO');
+      // El aviso es viejo: la extensión dejó de hablar.
+      (service as any).jobProgress.get('tocado-1').at =
+        Date.now() - 5 * 60 * 1000;
+      botService.checkKillSwitch.mockResolvedValue({
+        active: true,
+        reason: 'test',
+      });
+
+      await callCheckForStuckJobs(service);
+
+      expect(prisma.job.update).toHaveBeenCalledWith({
+        where: { id: 'tocado-1' },
+        data: expect.objectContaining({
+          status: 'FAILED',
+          error: expect.stringContaining('Revisá el saldo de juan77'),
+        }),
+      });
+    });
+
+    it('carga cortada antes de tocar Aceptar: "No se cargó"', async () => {
+      prisma.job.findMany.mockResolvedValue([
+        {
+          id: 'antes-1',
+          type: 'LOAD_CREDITS',
+          status: 'PROCESSING',
+          startedAt: new Date(Date.now() - 6 * 60 * 1000),
+          request: {
+            id: 'req-a',
+            targetUsername: 'p2',
+            amount: 1000,
+            userId: 'u3',
+          },
+        },
+      ]);
+      // La extensión avisó que estaba en curso (antes de Aceptar) y después se calló.
+      service.noteJobProgress('antes-1', 'EN_CURSO');
+      (service as any).jobProgress.get('antes-1').at =
+        Date.now() - 5 * 60 * 1000;
+      botService.checkKillSwitch.mockResolvedValue({
+        active: true,
+        reason: 'test',
+      });
+
+      await callCheckForStuckJobs(service);
+
+      expect(prisma.job.update).toHaveBeenCalledWith({
+        where: { id: 'antes-1' },
+        data: expect.objectContaining({
+          error: expect.stringContaining('No se cargó'),
+        }),
+      });
+    });
+
+    it('sin avisos de la extensión (backend reiniciado) → error seguro, nunca "no se cargó"', async () => {
+      prisma.job.findMany.mockResolvedValue([
+        {
+          id: 'sin-aviso-1',
+          type: 'LOAD_CREDITS',
+          targetUsername: 'p3',
+          status: 'PROCESSING',
+          startedAt: new Date(Date.now() - 6 * 60 * 1000),
+          request: {
+            id: 'req-s',
+            targetUsername: 'p3',
+            amount: 1000,
+            userId: 'u4',
+          },
+        },
+      ]);
+      botService.checkKillSwitch.mockResolvedValue({
+        active: true,
+        reason: 'test',
+      });
+
+      await callCheckForStuckJobs(service);
+
+      expect(prisma.job.update).toHaveBeenCalledWith({
+        where: { id: 'sin-aviso-1' },
+        data: expect.objectContaining({
+          error: expect.stringContaining('Revisá el saldo de p3'),
+        }),
+      });
+    });
+
     it('should mark stuck PROCESSING jobs as FAILED and emit events', async () => {
       const stuckJob = {
         id: 'stuck-1',
@@ -497,7 +620,7 @@ describe('JobsService', () => {
         where: { id: 'stuck-1' },
         data: expect.objectContaining({
           status: 'FAILED',
-          error: expect.stringContaining('timed out'),
+          error: expect.stringContaining('no respondió'),
           completedAt: expect.any(Date),
         }),
       });
@@ -803,7 +926,8 @@ describe('JobsService', () => {
       expect(botService.checkKillSwitch).not.toHaveBeenCalled();
 
       // Advance timer past cooldown
-      jest.advanceTimersByTime(30000);
+      // Pausa máxima: mínimo + extra al azar
+      jest.advanceTimersByTime(60000);
 
       // Allow the async callback to resolve
       await Promise.resolve();

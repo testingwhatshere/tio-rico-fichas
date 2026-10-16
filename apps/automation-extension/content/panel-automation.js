@@ -294,9 +294,22 @@ window.panelAutomation = {
         const timeout = 15000;
 
         while (Date.now() - startTime < timeout) {
-          // Check for error message
-          const errorMsg = document.querySelector(SELECTORS.ERROR_MESSAGE);
-          if (errorMsg && errorMsg.offsetParent !== null) {
+          const enLogin = !!document.querySelector('input[type="password"]');
+
+          // Primero: ¿ya entró? (después del login el panel muestra botones rojos como
+          // "Nuevo jugador" — .btn-danger — que no son errores).
+          if (!enLogin && (document.querySelector('a[href*="logout"], a[href*="salir"], a[href*="cerrar"]')
+            || document.querySelector(SELECTORS.USER_MENU) || !window.location.pathname.includes('login'))) {
+            humanize.log('Login verified: ya no está la pantalla de login');
+            return;
+          }
+
+          // Mensaje de error: sólo si seguimos en la pantalla de login, y nunca botones ni links.
+          const errorMsg = enLogin
+            ? [...document.querySelectorAll(SELECTORS.ERROR_MESSAGE)]
+              .find((el) => el.offsetParent !== null && !el.closest('button, a') && el.textContent.trim())
+            : null;
+          if (errorMsg) {
             throw new Error(`Panel login error: ${errorMsg.textContent.trim()}`);
           }
 

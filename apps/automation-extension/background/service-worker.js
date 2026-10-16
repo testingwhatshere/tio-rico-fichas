@@ -2,6 +2,7 @@
 import '../shared/panel-lock.js';
 import { ApiClient } from './api-client.js';
 import { JobProcessor } from './job-processor.js';
+import { JobLedger, conPlata, pasoAceptar, necesitaVerificacion, VERIFICACION_MAX_MS } from './job-ledger.js';
 
 // Constants
 const KEEPALIVE_ALARM_NAME = 'keepalive';
@@ -39,6 +40,9 @@ let state = {
   sessionValid: undefined,     // Último estado de login visto (undefined = no se sabe)
   lastChallengeAlertAt: 0,     // Throttle del aviso de desafío (captcha/Cloudflare)
   flushingFailedReports: false,
+  procesandoLibreta: false,
+  ultimaLibretaAt: 0,
+  ledgerResumen: null,         // { abiertas, sinConfirmar, porVerificar } para el heartbeat
   notificationSettings: {
     jobStarted: true,
     jobCompleted: true,
@@ -125,52 +129,315 @@ function startSessionLogFlusher() {
 
 
 
-// Persist a failed job report to chrome.storage.local for manual recovery
-async function persistFailedReport(jobId, result) {
+// Los resultados sin reportar ahora viven en la libreta (ver procesarLibreta).
+// Se mantiene el nombre porque lo llama la reconexión del WebSocket.
+async function flushFailedReports() {
+  await procesarLibreta({ forzar: true });
+}
+
+// ─── Libreta de cargas ───────────────────────────────────────────────────────
+// Cada job tiene una ficha persistente (background/job-ledger.js). Acá se reporta
+// lo que quedó sin reportar, se verifica por saldo lo que quedó en duda y se
+// cierra lo que se cortó antes de tocar Aceptar. Nunca se toca Aceptar desde acá.
+
+/** APPLIED | NOT_APPLIED | UNCERTAIN para que el backend y el operador sepan qué hacer. */
+function outcomeDe(ficha, error) {
+  if (!error) return 'APPLIED';
+  if (error.loadNotApplied) return 'NOT_APPLIED';
+  if (error.uncertain || error.pendingVerification || error.timeoutDespuesDeAceptar) return 'UNCERTAIN';
+  if (ficha && conPlata(ficha) && pasoAceptar(ficha)) {
+    if (ficha.veredicto === 'OK') return 'APPLIED';
+    if (ficha.veredicto === 'NO_APLICADA') return 'NOT_APPLIED';
+    return 'UNCERTAIN';
+  }
+  // Falló antes de tocar Aceptar: seguro que no se movió plata.
+  return conPlata(ficha || {}) ? 'NOT_APPLIED' : undefined;
+}
+
+/** Arma el resultado a reportar a partir del veredicto anotado en la ficha. */
+function payloadDesdeFicha(ficha) {
+  if (ficha.veredicto === 'OK') {
+    return {
+      success: true,
+      outcome: 'APPLIED',
+      completedAt: new Date().toISOString(),
+      ...(ficha.respuestaPanel?.transaction != null ? { panelTransaction: String(ficha.respuestaPanel.transaction) } : {}),
+    };
+  }
+  return {
+    success: false,
+    outcome: ficha.veredicto === 'NO_APLICADA' ? 'NOT_APPLIED' : 'UNCERTAIN',
+    error: ficha.motivo || (ficha.veredicto === 'NO_APLICADA'
+      ? `No se ${ficha.type === 'WITHDRAW_CHIPS' ? 'descargó' : 'cargó'}`
+      : `Error: no se pudo confirmar. Revisá el saldo de ${ficha.username || 'el usuario'} en el panel antes de volver a ${ficha.type === 'WITHDRAW_CHIPS' ? 'descargar' : 'cargar'}`),
+  };
+}
+
+/**
+ * Guarda el resultado en la ficha y lo manda al backend. Si el backend no contesta,
+ * queda en la libreta y el barrido lo reenvía (sin tope: no se pierde ninguno).
+ */
+async function reportarFicha(jobId, payload, { intentos = 2 } = {}) {
+  await JobLedger.resultado(jobId, payload).catch((e) => console.error('[ServiceWorker] Libreta: no se pudo guardar el resultado:', e.message));
   try {
-    const stored = await chrome.storage.local.get(['failedReports']);
-    const failedReports = stored.failedReports || [];
-    failedReports.push({
-      jobId,
-      result,
-      failedAt: new Date().toISOString()
-    });
-    // Keep last 20 failed reports
-    if (failedReports.length > 20) {
-      failedReports.splice(0, failedReports.length - 20);
-    }
-    await chrome.storage.local.set({ failedReports });
-    console.error(`[ServiceWorker] Job result persisted to failedReports for manual recovery: ${jobId}`);
-  } catch (storageError) {
-    console.error('[ServiceWorker] Failed to persist failed report:', storageError.message);
+    await JobLedger.intentoDeReporte(jobId).catch(() => {});
+    await retryWithDelay(() => ApiClient.reportJobResult(state.config, jobId, payload), intentos, 3000);
+    await JobLedger.reporteConfirmado(jobId);
+    return true;
+  } catch (err) {
+    console.error(`[ServiceWorker] Resultado de ${jobId} sin confirmar (queda en la libreta para reenviar):`, err.message);
+    persistLog('WARN', 'JOB', `Resultado sin confirmar por el backend, se reenvía solo: ${jobId}`, { jobId });
+    return false;
   }
 }
 
-// Reenvía los resultados que quedaron guardados por no poder reportarse. Es el
-// resultado de una operación que YA pasó (no se repite nada en el panel); el
-// backend lo aplica si el job sigue abierto, lo ignora si ya estaba cerrado, y
-// si era un éxito de un job dado por fallido avisa al operador para que no lo
-// reintente.
-async function flushFailedReports() {
-  if (state.flushingFailedReports || !state.config?.backendUrl) return;
-  state.flushingFailedReports = true;
+function emitirBot(evento, data) {
+  if (state.websocket?.readyState !== WebSocket.OPEN) return false;
   try {
-    const stored = await chrome.storage.local.get(['failedReports']);
-    const pending = stored.failedReports || [];
-    if (pending.length === 0) return;
-    const remaining = [];
-    for (const report of pending) {
-      try {
-        await ApiClient.reportJobResult(state.config, report.jobId, report.result);
-        persistLog('INFO', 'JOB', `Resultado reenviado tras reconexión: ${report.jobId}`, { jobId: report.jobId });
-      } catch (err) {
-        remaining.push(report);
+    state.websocket.send('42/bot,' + JSON.stringify([evento, data]));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// El backend se entera apenas se toca Aceptar: si el job después queda colgado, le
+// dice al operador "en duda, no reintentar" en vez de un timeout genérico.
+JobProcessor.onProgress = (jobId, etapa) => {
+  emitirBot('extension:job_progress', { jobId, etapa, panelId: state.config?.panelId || null, at: new Date().toISOString() });
+};
+
+JobProcessor.onLog = (level, msg, data) => {
+  persistLog(level, 'PANEL', msg, data ?? null);
+};
+
+// Resumen de la libreta para el backend (evento propio: el DTO del heartbeat no
+// acepta campos nuevos y un 400 ahí fuerza reconexiones).
+function enviarResumenLibreta() {
+  if (!state.ledgerResumen) return;
+  emitirBot('extension:ledger', { ...state.ledgerResumen, panelId: state.config?.panelId || null });
+}
+
+async function actualizarResumenLibreta() {
+  try {
+    const r = await JobLedger.resumen();
+    state.ledgerResumen = { abiertas: r.abiertas, sinConfirmar: r.sinConfirmar, porVerificar: r.porVerificar };
+    return r;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Verifica por saldo una ficha que quedó con Aceptar tocado y sin veredicto. Ocupa
+ * el bot (como un job) para no pisarse con una carga. Sólo lee.
+ */
+async function verificarFichaPendiente(ficha, { yaReservado = false } = {}) {
+  if (!yaReservado && isBusy()) return false;
+  state.status = 'PROCESSING';
+  state.currentJob = { id: ficha.jobId, type: 'VERIFICACION', targetUsername: ficha.username, amount: ficha.amount, startTime: Date.now() };
+  updateBadge();
+  persistLog('INFO', 'JOB', `Verificando por saldo una ${ficha.type === 'WITHDRAW_CHIPS' ? 'descarga' : 'carga'} en duda: ${ficha.username} ($${ficha.amount})`, { jobId: ficha.jobId });
+  try {
+    const result = await JobProcessor.verificarFicha(ficha, state.config);
+    await reportarFicha(ficha.jobId, {
+      success: true,
+      outcome: 'APPLIED',
+      completedAt: new Date().toISOString(),
+      verifiedByBalance: true,
+    });
+    persistLog('SUCCESS', 'JOB', `Verificada por saldo: ${result?.message || 'entró'}`, { jobId: ficha.jobId });
+  } catch (error) {
+    if (error.pendingVerification) {
+      // No se pudo leer el saldo (sesión, panel): queda abierta y se reintenta.
+      persistLog('WARN', 'JOB', `No se pudo verificar por saldo todavía (${ficha.username}); se reintenta`, { jobId: ficha.jobId });
+    } else {
+      const f = await JobLedger.get(ficha.jobId);
+      await reportarFicha(ficha.jobId, { success: false, outcome: outcomeDe(f, error), error: error.message });
+      persistLog('WARN', 'JOB', `Verificación por saldo: ${error.message}`, { jobId: ficha.jobId });
+    }
+  } finally {
+    state.status = 'CONNECTED';
+    state.currentJob = null;
+    updateBadge();
+  }
+  return true;
+}
+
+/**
+ * Recorre las fichas abiertas. Corre al arrancar, al reconectar y cada ~1 min.
+ * - Resultado sin confirmar → se reenvía.
+ * - Aceptar tocado sin veredicto → se verifica por saldo (sólo lectura).
+ * - Con veredicto y sin resultado armado → se arma y se reporta.
+ * - Cortada antes de Aceptar (y no es el job en curso) → NO se hizo, se reporta.
+ */
+async function procesarLibreta({ forzar = false } = {}) {
+  if (!state.config?.backendUrl || state.procesandoLibreta) return;
+  if (!forzar && Date.now() - state.ultimaLibretaAt < 60000) return;
+  state.procesandoLibreta = true;
+  state.ultimaLibretaAt = Date.now();
+  try {
+    const migradas = await JobLedger.migrarReportesViejos().catch(() => 0);
+    if (migradas) persistLog('INFO', 'JOB', `${migradas} resultado(s) viejos pasados a la libreta para reenviar`);
+
+    const abiertas = await JobLedger.abiertas();
+    for (const f of abiertas) {
+      const enCurso = state.currentJob?.id === f.jobId || state.claimingJobIds.has(f.jobId);
+      if (enCurso) continue;
+
+      if (f.resultado && !f.reporte?.confirmado) {
+        await reportarFicha(f.jobId, f.resultado, { intentos: 0 });
+        continue;
+      }
+      if (necesitaVerificacion(f)) {
+        if (isBusy()) continue;
+        // Respiro entre la falla y la verificación: el panel puede tardar en asentar.
+        if (Date.now() - Date.parse(f.actualizada) < 20000) continue;
+        await verificarFichaPendiente(f);
+        continue;
+      }
+      if (f.veredicto) {
+        await reportarFicha(f.jobId, payloadDesdeFicha(f), { intentos: 0 });
+        continue;
+      }
+      if (!pasoAceptar(f) && Date.now() - Date.parse(f.actualizada) > 3 * 60 * 1000) {
+        await JobLedger.veredicto(f.jobId, 'NO_APLICADA', {
+          certeza: 'etapa',
+          motivo: conPlata(f)
+            ? `No se ${f.type === 'WITHDRAW_CHIPS' ? 'descargó' : 'cargó'}: la extensión se cortó antes de enviarla`
+            : 'Error: la extensión se cortó antes de terminar',
+        });
+        const actual = await JobLedger.get(f.jobId);
+        await reportarFicha(f.jobId, payloadDesdeFicha(actual), { intentos: 0 });
       }
     }
-    await chrome.storage.local.set({ failedReports: remaining });
+    await JobLedger.limpiar().catch(() => {});
+  } catch (e) {
+    console.warn('[ServiceWorker] procesarLibreta:', e.message);
   } finally {
-    state.flushingFailedReports = false;
+    state.procesandoLibreta = false;
+    await actualizarResumenLibreta();
   }
+}
+
+/**
+ * Un job que vuelve a llegar y ya tiene ficha. Devuelve true si se resolvió sin
+ * volver a operar en el panel (ya tenía resultado, o había que verificarlo).
+ */
+async function atenderFichaExistente(ficha) {
+  if (ficha.etapa === 'CERRADA') {
+    console.warn(`[ServiceWorker] Job ${ficha.jobId} ya cerrado en la libreta: se ignora`);
+    return true;
+  }
+  if (ficha.resultado && !ficha.reporte?.confirmado) {
+    await reportarFicha(ficha.jobId, ficha.resultado);
+    return true;
+  }
+  if (necesitaVerificacion(ficha)) {
+    // Este mismo job está reservado (claimingJobIds) mientras se atiende.
+    await verificarFichaPendiente(ficha, { yaReservado: true });
+    return true;
+  }
+  if (ficha.veredicto) {
+    await reportarFicha(ficha.jobId, payloadDesdeFicha(ficha));
+    return true;
+  }
+  return false; // antes de Aceptar y sin resultado: se puede hacer de cero
+}
+
+/**
+ * Antes de cargar: ¿hay una carga igual (mismo usuario, tipo y monto, últimas 24 h)
+ * que se tocó y quedó en duda? Primero se resuelve esa. Si entró, esta no se hace.
+ * Si sigue en duda, se frena UNA vez para que el operador revise; si insiste
+ * (manda el mismo pedido de nuevo), se hace.
+ */
+async function chequearDuplicadoEnDuda(job) {
+  const dudas = await JobLedger.dudasPara(job);
+  for (const d of dudas) {
+    let ficha = d;
+    if (necesitaVerificacion(ficha)) {
+      try {
+        await JobProcessor.verificarFicha(ficha, state.config);
+      } catch (e) { /* el veredicto (o la falta de él) queda en la ficha */ }
+      ficha = await JobLedger.get(d.jobId);
+      if (ficha?.veredicto) {
+        reportarFicha(ficha.jobId, payloadDesdeFicha(ficha), { intentos: 0 }).catch(() => {});
+      }
+    }
+    const quien = `${job.targetUsername} ($${Number(job.amount).toLocaleString('es-AR')})`;
+    if (ficha?.veredicto === 'OK') {
+      const tx = ficha.respuestaPanel?.transaction != null ? `, transacción ${ficha.respuestaPanel.transaction}` : '';
+      const error = new Error(`No se ${job.type === 'WITHDRAW_CHIPS' ? 'descargó' : 'cargó'} de nuevo: ya estaba hecha (job ${ficha.jobId.slice(0, 8)}${tx})`);
+      error.loadNotApplied = true;
+      error.duplicadoEvitado = true;
+      throw error;
+    }
+    if (ficha && (!ficha.veredicto || ficha.veredicto === 'EN_DUDA') && !ficha.avisoDuplicado) {
+      await JobLedger.marcarAvisoDuplicado(ficha.jobId);
+      const error = new Error(`Error: no se pudo confirmar una ${job.type === 'WITHDRAW_CHIPS' ? 'descarga' : 'carga'} igual anterior a ${quien}. Revisá el saldo en el panel; si no está, volvé a mandarla y se hace`);
+      error.loadNotApplied = true;
+      error.duplicadoEvitado = true;
+      throw error;
+    }
+  }
+}
+
+/** Espera (hasta 60 s) a que termine un login que la extensión ya está haciendo. */
+async function esperarLoginEnCurso() {
+  for (let i = 0; i < 120 && JobProcessor.isLoginInFlight(); i++) {
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+/**
+ * Fallas que no dicen nada de la carga en sí (sesión, navegación, panel lento,
+ * scripts): si pasan antes de tocar Aceptar, rehacer es seguro y suele andar.
+ * Las fallas "de verdad" (fichas insuficientes, usuario inexistente, monto
+ * inválido, guardia) no entran: rehacerlas daría lo mismo.
+ */
+function esFallaPasajera(err) {
+  if (!err || err.loadNotApplied && /monto|ya estaba hecha|no se pudo confirmar/i.test(err.message)) return false;
+  if (err.isUserNotFoundOnPanel || err.userNotFoundInPanel || err.guardBlocked || err.duplicadoEvitado) return false;
+  if (err.timeoutDespuesDeAceptar || err.uncertain || err.ambiguousAfterSubmit) return false;
+  if (/timed out after/i.test(err.message)) return false; // el vigilante ya cortó: no hay tiempo
+  return /Login failed|sesión del panel|Frame with ID|No frame with id|frame was removed|execution context|Tab load timed out|Script injection|Content script injection|SPA hydration|no result from content script|Users page link not found|Tab \d+ was closed|Elemento no encontrado|no quedó listo|no se pudo poner el monto/i.test(String(err.message || ''));
+}
+
+/**
+ * Vigilante de tiempo del job. Antes de tocar Aceptar: 120 s (240 s si hubo que
+ * re-loguear y rehacer). Con Aceptar tocado y sin resultado se le da tiempo a la
+ * espera de respuesta y a la verificación por saldo (hasta 5 min desde el clic).
+ * Mientras tanto la extensión le avisa al backend que sigue trabajando
+ * (extension:job_progress), así no lo da por colgado.
+ */
+function vigilarTiempo(jobId, startTime, baseMs) {
+  let detenido = false;
+  let timer = null;
+  const promise = new Promise((_, reject) => {
+    const tick = async () => {
+      if (detenido) return;
+      const f = await JobLedger.get(jobId).catch(() => null);
+      const ahora = Date.now();
+      let limite;
+      const despuesDeAceptar = !!(f && pasoAceptar(f) && !f.veredicto);
+      if (despuesDeAceptar) limite = Math.min(Date.parse(f.aceptarAt) + 300000, startTime + 420000);
+      else if (f?.veredicto) limite = startTime + 420000;
+      else limite = startTime + (f?.reintentoPorSesion || f?.reintentoTransitorio ? 240000 : baseMs);
+      // Cada ~30 s: "sigo trabajando en este job" (el backend no lo da por colgado).
+      if (Math.floor((ahora - startTime) / 30000) !== Math.floor((ahora - 2000 - startTime) / 30000)) {
+        try { JobProcessor.onProgress(jobId, f?.etapa || 'EN_CURSO'); } catch { /* opcional */ }
+      }
+      if (ahora > limite) {
+        const e = new Error(`Job execution timed out after ${Math.round((ahora - startTime) / 1000)}s`);
+        e.timeoutDespuesDeAceptar = despuesDeAceptar;
+        reject(e);
+        return;
+      }
+      if (!detenido) timer = setTimeout(tick, 2000);
+    };
+    timer = setTimeout(tick, 2000);
+  });
+  return { promise, detener: () => { detenido = true; if (timer) clearTimeout(timer); } };
 }
 
 // Id estable de esta instalación de la extensión. El backend lo usa para que una
@@ -293,6 +560,7 @@ chrome.runtime.onStartup.addListener(async () => {
   if (state.config?.backendUrl && state.config?.apiKey) {
     await initializeConnection();
     await openPanelTabIfMissing();
+    procesarLibreta({ forzar: true }).catch(() => {});
   } else {
     console.log('[ServiceWorker] Backend not configured yet - please configure in options page');
     state.status = 'IDLE';
@@ -412,45 +680,25 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       }
 
       if (loginOk) {
-        console.log('[ServiceWorker] Auto-login successful!');
-
-        // Wait a bit for login to complete
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Navigate to users page if not already there
-        if (!tabUrlObj.pathname.includes('users')) {
-          const origin = new URL(state.config.panelUrl).origin;
-          const usersUrl = `${origin}/users`;
-          console.log('[ServiceWorker] Navigating to users page:', usersUrl);
-
-          await chrome.tabs.update(tabId, { url: usersUrl });
-
-          // Show success notification (silent, no sound)
-          chrome.notifications.create({
-            type: 'basic',
-            iconUrl: 'icons/icon128.png',
-            title: 'Login Automático',
-            message: 'Sesión iniciada - Navegando a página de usuarios',
-            priority: 0,
-            silent: true
-          });
-        } else {
-          console.log('[ServiceWorker] Already on users page');
-          chrome.notifications.create({
-            type: 'basic',
-            iconUrl: 'icons/icon128.png',
-            title: 'Bot Listo',
-            message: 'Sesión iniciada - Bot listo en página de usuarios',
-            priority: 0,
-            silent: true
-          });
-        }
+        persistLog('INFO', 'PANEL', 'Sesión del panel iniciada sola; yendo a la lista de usuarios');
+        // A la lista de usuarios según dónde quedó la pestaña DESPUÉS del login (antes
+        // se miraba la URL vieja, /login, y a veces no navegaba).
+        await JobProcessor.asegurarListaDeUsuarios(tabId);
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+          title: 'Bot listo',
+          message: 'Sesión iniciada — en la lista de usuarios',
+          priority: 0,
+          silent: true
+        });
       } else {
         console.warn('[ServiceWorker] Auto-login failed:', loginError);
+        persistLog('WARN', 'PANEL', `No se pudo iniciar sesión en el panel: ${loginError}`);
         // Show error notification
         chrome.notifications.create({
           type: 'basic',
-          iconUrl: 'icons/icon128.png',
+          iconUrl: chrome.runtime.getURL('icons/icon128.png'),
           title: 'Auto-login Fallido',
           message: loginError || 'Error desconocido',
           priority: 1
@@ -1171,7 +1419,7 @@ function getJobRejectionReason(job) {
   if (state.config.panelId && job?.panelId && job.panelId !== state.config.panelId) {
     return `wrong_panel (configured for ${state.config.panelId})`;
   }
-  const COOLDOWN_MS = 30000;
+  const COOLDOWN_MS = 5000; // resguardo: la pausa real (8-15 s al azar) la maneja el backend
   const timeSinceLastJob = Date.now() - state.lastJobCompletedAt;
   if (state.lastJobCompletedAt > 0 && timeSinceLastJob < COOLDOWN_MS) {
     return `cooldown (${Math.ceil((COOLDOWN_MS - timeSinceLastJob) / 1000)}s remaining)`;
@@ -1264,11 +1512,19 @@ async function _handleNewJobInner(job) {
   }
 
   // Cooldown enforcement — silently ignore, job stays QUEUED for next dispatch cycle
-  const COOLDOWN_MS = 30000;
+  const COOLDOWN_MS = 5000; // resguardo: la pausa real (8-15 s al azar) la maneja el backend
   const timeSinceLastJob = Date.now() - state.lastJobCompletedAt;
   if (state.lastJobCompletedAt > 0 && timeSinceLastJob < COOLDOWN_MS) {
     const remainingS = Math.ceil((COOLDOWN_MS - timeSinceLastJob) / 1000);
     console.warn(`[ServiceWorker] Cooldown active, ${remainingS}s remaining. Ignoring job:`, job.id);
+    return;
+  }
+
+  // Libreta: si este job ya pasó por esta extensión, no se opera de nuevo en el
+  // panel; se reporta lo que ya se sabe o se verifica por saldo.
+  const fichaPrevia = await JobLedger.get(job.id).catch(() => null);
+  if (fichaPrevia && await atenderFichaExistente(fichaPrevia)) {
+    await actualizarResumenLibreta();
     return;
   }
 
@@ -1331,10 +1587,26 @@ async function _handleNewJobInner(job) {
 
   // Process job (Fix 2: timeout prevents permanent PROCESSING deadlock)
   const JOB_TIMEOUT_MS = 120000;
-  const startTime = Date.now();
+  let startTime = Date.now();
+  let vigilante = null;
+  let jobExecution = null;
   try {
+    // Ficha de la libreta: sin ella no se toca Aceptar (la carga la necesita).
+    await JobLedger.abrir(job);
+
+    // Una carga igual que quedó en duda se resuelve primero (puede ser el operador
+    // reintentando una que ya entró).
+    if (conPlata(job)) {
+      await chequearDuplicadoEnDuda(job);
+      startTime = Date.now();
+    }
+
+    // Si la extensión está en otro paso (p. ej. re-logueándose sola), la carga espera
+    // a que termine en vez de arrancar en paralelo.
+    await esperarLoginEnCurso();
+
     // Route job execution based on type
-    const jobExecution = isVerifyChips
+    const ejecutar = () => (isVerifyChips
       ? JobProcessor.verifyChips(job.targetUsername, state.config)
       : isCreateUser
       ? JobProcessor.createUser(job.targetUsername, state.config)
@@ -1342,14 +1614,26 @@ async function _handleNewJobInner(job) {
         ? JobProcessor.executePasswordChange(job, state.config)
         : isWithdrawal
           ? JobProcessor.executeWithdrawChips(job, state.config)
-          : JobProcessor.execute(job, state.config);
+          : JobProcessor.execute(job, state.config));
 
-    const result = await Promise.race([
-      jobExecution,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`Job execution timed out after ${JOB_TIMEOUT_MS / 1000}s`)), JOB_TIMEOUT_MS)
-      )
-    ]);
+    vigilante = vigilarTiempo(job.id, startTime, JOB_TIMEOUT_MS);
+    try { JobProcessor.onProgress(job.id, 'EN_CURSO'); } catch { /* opcional */ }
+    let result;
+    for (let intento = 0; ; intento++) {
+      jobExecution = ejecutar();
+      try {
+        result = await Promise.race([jobExecution, vigilante.promise]);
+        break;
+      } catch (err) {
+        // Falla pasajera antes de tocar Aceptar: no se envió nada, se rehace una vez.
+        if (intento > 0 || !conPlata(job) || !esFallaPasajera(err)) throw err;
+        if (!(await JobLedger.reintentarAntesDeAceptar(job.id, err.message))) throw err;
+        persistLog('WARN', 'JOB', `Falla pasajera antes de Aceptar (${String(err.message).slice(0, 120)}): se rehace una vez`, { jobId: job.id });
+        await esperarLoginEnCurso();
+        await new Promise((r) => setTimeout(r, 2000 + Math.random() * 2000));
+      }
+    }
+    vigilante.detener();
     const duration = Math.round((Date.now() - startTime) / 1000); // seconds
 
     console.log('[ServiceWorker] Job completed successfully:', result);
@@ -1366,16 +1650,15 @@ async function _handleNewJobInner(job) {
       screenshotPath: screenshotPath || undefined,
       duration,
       completedAt: new Date().toISOString(),
+      ...(conPlata(job) ? { outcome: 'APPLIED' } : {}),
+      ...(result?.panelTransaction != null ? { panelTransaction: String(result.panelTransaction) } : {}),
+      ...(result?.verifiedByBalance ? { verifiedByBalance: true } : {}),
       // VERIFY_CHIPS devuelve el saldo leido del panel: el backend lo necesita para
       // decidir si el usuario tiene fichas suficientes para el premio.
       ...(isVerifyChips ? { balance: result?.balance, result } : {})
     };
-    try {
-      await retryWithDelay(() => ApiClient.reportJobResult(state.config, job.id, successResult));
-    } catch (reportError) {
-      console.error('[ServiceWorker] All retries failed for job result report:', reportError.message);
-      await persistFailedReport(job.id, successResult);
-    }
+    await reportarFicha(job.id, successResult);
+    await actualizarResumenLibreta();
 
     // Record in local stats
     await recordJobCompletion(job, true, duration);
@@ -1421,8 +1704,22 @@ async function _handleNewJobInner(job) {
       initializeConnection().catch(console.error);
     }
   } catch (error) {
+    vigilante?.detener();
     const duration = Math.round((Date.now() - startTime) / 1000);
     console.error('[ServiceWorker] Job failed:', error);
+
+    // Tiempo agotado: la ficha queda cancelada (el flujo que siga vivo ya no puede
+    // tocar Aceptar) y se espera un rato a que termine antes de liberar el bot, para
+    // que no se pise con la próxima carga en la misma pestaña.
+    if (error?.message?.includes('timed out')) {
+      await JobLedger.cancelar(job.id, 'tiempo agotado').catch(() => {});
+      const fichaTimeout = await JobLedger.get(job.id).catch(() => null);
+      if (fichaTimeout && pasoAceptar(fichaTimeout) && !fichaTimeout.veredicto) {
+        error.timeoutDespuesDeAceptar = true;
+        error.message = `Error: no se pudo confirmar si se ${job.type === 'WITHDRAW_CHIPS' ? 'descargó' : 'cargó'}. Revisá el saldo de ${job.targetUsername} en el panel antes de volver a ${job.type === 'WITHDRAW_CHIPS' ? 'descargar' : 'cargar'}`;
+      }
+      if (jobExecution) await Promise.race([jobExecution.catch(() => {}), new Promise((r) => setTimeout(r, 90000))]);
+    }
     persistLog('ERROR', 'JOB', `Job failed: ${job.targetUsername} ($${job.amount}) - ${error.message}`, { jobId: job.id, targetUsername: job.targetUsername, amount: job.amount, duration, error: error.message });
     if (error?.isPanelChallenge) {
       reportPanelChallenge(error.challenge, state.lastKnownUrl);
@@ -1466,20 +1763,19 @@ async function _handleNewJobInner(job) {
       }
     }
 
+    const fichaFinal = await JobLedger.get(job.id).catch(() => null);
+    const outcome = outcomeDe(fichaFinal, error);
     const failureResult = {
       success: false,
       error: screenshotLost
         ? `${error.message} [⚠ CAPTURA DE PANTALLA PERDIDA — no se pudo subir el screenshot del error]`
         : error.message,
       screenshotPath: screenshotPath || undefined,
-      duration
+      duration,
+      ...(outcome ? { outcome } : {}),
     };
-    try {
-      await retryWithDelay(() => ApiClient.reportJobResult(state.config, job.id, failureResult));
-    } catch (reportError) {
-      console.error('[ServiceWorker] All retries failed for job failure report:', reportError.message);
-      await persistFailedReport(job.id, failureResult);
-    }
+    await reportarFicha(job.id, failureResult);
+    await actualizarResumenLibreta();
 
     // Record in local stats
     await recordJobCompletion({ ...job, error: error.message }, false, duration);
@@ -1504,7 +1800,9 @@ async function _handleNewJobInner(job) {
       );
     }
 
-    // Track job failure for enriched heartbeat + circuit breaker
+    // Track job failure for enriched heartbeat + circuit breaker.
+    // Un duplicado evitado o un monto inválido no son fallas del bot: no suman al freno.
+    if (!error?.duplicadoEvitado && !/^Monto inválido/.test(error?.message || ''))
     state.consecutiveJobErrors = (state.consecutiveJobErrors || 0) + 1;
     state.recentJobErrors = [...(state.recentJobErrors || []), String(error.message || '').slice(0, 160)].slice(-3);
     // El guardia frenó un envío con monto/usuario distinto o un doble envío: algo en el
@@ -1899,6 +2197,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   // Step 0: Ensure offscreen document is alive (keeps SW from being suspended)
   await ensureOffscreenDocument();
 
+  // Libreta: reenviar lo no confirmado, verificar lo que quedó en duda (como mucho 1 vez por minuto)
+  procesarLibreta().then(enviarResumenLibreta).catch(() => {});
+
   // Step 1: Always reload config from storage (service worker restart wipes in-memory state,
   // and options page saves may not have notified us if SW was suspended)
   await loadConfig();
@@ -2042,7 +2343,7 @@ function showNotification(title, message, type = 'info') {
 
   chrome.notifications.create(notificationId, {
     type: 'basic',
-    iconUrl: 'icons/icon128.png',
+    iconUrl: chrome.runtime.getURL('icons/icon128.png'),
     title: title,
     message: message,
     priority: type === 'error' ? 2 : 1,
@@ -2083,6 +2384,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       };
     }
     sendResponse(responseState);
+  } else if (message.type === 'GET_LEDGER') {
+    JobLedger.resumen().then(sendResponse).catch(() => sendResponse(null));
+    return true;
   } else if (message.type === 'MANUAL_TRIGGER') {
     // Manual job trigger from popup
     handleManualTrigger(message.job).then(sendResponse);
@@ -2258,3 +2562,11 @@ async function getJobStats() {
 }
 
 console.log('[ServiceWorker] Initialized');
+
+// Sólo para la simulación en Node (tools/sim-libreta.mjs): nunca existe en Chrome.
+if (globalThis.__TR_TEST__) {
+  globalThis.__TR_TEST__.sw = {
+    state, procesarLibreta, atenderFichaExistente, chequearDuplicadoEnDuda,
+    vigilarTiempo, outcomeDe, payloadDesdeFicha, reportarFicha, handleNewJob,
+  };
+}

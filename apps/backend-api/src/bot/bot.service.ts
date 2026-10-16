@@ -237,7 +237,9 @@ export class BotService implements OnModuleInit {
 
   async handleJobResult(jobId: string, dto: JobResultDto) {
     this.releaseJobClaims(jobId);
-    this.logger.log(`Received job result for ${jobId}: success=${dto.success}`);
+    this.logger.log(
+      `Received job result for ${jobId}: success=${dto.success}${dto.outcome ? ` outcome=${dto.outcome}` : ''}${dto.panelTransaction ? ` tx=${dto.panelTransaction}` : ''}${dto.verifiedByBalance ? ' (por saldo)' : ''}`,
+    );
 
     // El bot ya contestó: si después se desconecta, este job no se reencola.
     try {
@@ -662,9 +664,23 @@ export class BotService implements OnModuleInit {
 
     // Update request status directly (critical path — must not be lost)
     if (!job.requestId) {
-      this.logger.error(
+      this.logger.warn(
         `Job ${jobId} has no requestId — cannot update request status`,
       );
+      // Igual hay que avisar que terminó: libera el panel y despacha el siguiente.
+      // Sin esto el panel quedaba "ocupado" hasta la reconciliación del minuto.
+      this.jobProgress.delete(jobId);
+      if (job.panelId) {
+        this.botGateway.markPanelIdle(job.panelId);
+        this.updatePanelState(job.panelId, {
+          status: 'online',
+          lastJobId: jobId,
+        });
+        this.eventEmitter.emit(AppEvent.JOB_COMPLETED, {
+          jobId,
+          panelId: job.panelId,
+        });
+      }
       return { success: true, message: 'Job result recorded (no request)' };
     }
     const requestStatus: RequestStatus = dto.success ? 'COMPLETED' : 'FAILED';
@@ -1315,9 +1331,8 @@ export class BotService implements OnModuleInit {
    * Get full dispatch diagnostic status — shows why jobs may not be dispatching
    */
   async getDispatchStatus() {
-    const cooldownMs = this.configService.get<number>(
-      'QUEUE_COOLDOWN_MS',
-      30000,
+    const cooldownMs = Number(
+      this.configService.get<number>('QUEUE_COOLDOWN_MS', 8000),
     );
 
     const [
@@ -1362,6 +1377,8 @@ export class BotService implements OnModuleInit {
       connectedPerPanel: this.botGateway.getConnectedCountPerPanel(),
       botState: this.getBotState(),
       panelStates: Object.fromEntries(this.botStates),
+      // Libreta de cada extensión (1.0.8+): operaciones sin cerrar.
+      ledgerByPanel: this.botGateway.getLedgerSummaries?.() ?? {},
       timestamp: new Date().toISOString(),
     };
   }

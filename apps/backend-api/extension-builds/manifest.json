@@ -1,6 +1,6 @@
 {
-  "version": "1.0.7",
-  "builtAt": "2026-10-16T17:42:44Z",
+  "version": "1.0.8",
+  "builtAt": "2026-10-16T18:45:41Z",
   "panels": [
     { "slug": "panel-3", "panelId": "6a6a6b21-c731-47cb-98a1-21777edb965e", "name": "Panel 3", "file": "tio-rico-bot-panel-3.zip" }
     ,

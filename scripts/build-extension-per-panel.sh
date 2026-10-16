@@ -38,6 +38,7 @@ for entry in "${PANELS[@]}"; do
     --exclude 'extension.zip' \
     --exclude 'package.json' \
     --exclude 'windows' \
+    --exclude 'tools' \
     --exclude '*.md' \
     --exclude '.DS_Store' \
     --exclude '._*'

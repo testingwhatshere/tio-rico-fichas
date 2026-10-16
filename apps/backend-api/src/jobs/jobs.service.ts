@@ -41,7 +41,42 @@ interface JobData {
 export class JobsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(JobsService.name);
   private readonly cooldownMs: number;
+  private readonly cooldownJitterMs: number;
+
+  private nextCooldownMs(): number {
+    return (
+      this.cooldownMs +
+      Math.floor(Math.random() * Math.max(0, this.cooldownJitterMs))
+    );
+  }
   private stuckJobCheckInterval: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Último aviso de progreso de cada job (extension:job_progress, extensión 1.0.8+).
+   * Un job que avisa que sigue trabajando no se da por colgado (hasta un tope), y
+   * si ya tocó Aceptar el operador ve "revisá el saldo" en vez de un timeout.
+   */
+  private jobProgress = new Map<string, { etapa: string; at: number }>();
+  private static readonly PROGRESS_FRESH_MS = 90_000;
+  private static readonly PROGRESS_HARD_CAP_MS = 10 * 60_000;
+  private static readonly ETAPAS_TRAS_ACEPTAR = new Set([
+    'ACEPTAR_TOCADO',
+    'VEREDICTO',
+  ]);
+
+  noteJobProgress(jobId: string, etapa: string) {
+    if (!jobId) return;
+    const prev = this.jobProgress.get(jobId);
+    // "Aceptar tocado" no se olvida aunque después lleguen avisos genéricos.
+    const keep =
+      prev &&
+      JobsService.ETAPAS_TRAS_ACEPTAR.has(prev.etapa) &&
+      !JobsService.ETAPAS_TRAS_ACEPTAR.has(etapa);
+    this.jobProgress.set(jobId, {
+      etapa: keep ? prev.etapa : etapa,
+      at: Date.now(),
+    });
+  }
   private periodicDispatchInterval: ReturnType<typeof setInterval> | null =
     null;
   private nextDispatchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -59,9 +94,14 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     private readonly requestsService: RequestsService,
     private readonly moduleRef: ModuleRef,
   ) {
-    this.cooldownMs = this.configService.get<number>(
-      'QUEUE_COOLDOWN_MS',
-      30000,
+    // Pausa entre cargas: mínimo QUEUE_COOLDOWN_MS (8 s) + un extra al azar de hasta
+    // QUEUE_COOLDOWN_JITTER_MS (7 s). Una persona no espera siempre lo mismo, y 30 s
+    // fijos hacían esperar de más a los clientes con la cola llena.
+    this.cooldownMs = Number(
+      this.configService.get<number>('QUEUE_COOLDOWN_MS', 8000),
+    );
+    this.cooldownJitterMs = Number(
+      this.configService.get<number>('QUEUE_COOLDOWN_JITTER_MS', 7000),
     );
     this.logger.log('JobsService initialized (Postgres-based queue)');
   }
@@ -152,7 +192,7 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     const cutoff = new Date(Date.now() - STUCK_JOB_TIMEOUT_MS);
 
     // Only detect PROCESSING jobs that have been running too long
-    const stuckJobs = await this.prisma.job.findMany({
+    const stuckCandidates = await this.prisma.job.findMany({
       where: {
         status: 'PROCESSING',
         OR: [
@@ -173,6 +213,20 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       // Need panelId for per-panel dispatch after cleanup
     });
 
+    // Limpieza de avisos viejos.
+    for (const [id, p] of this.jobProgress) {
+      if (Date.now() - p.at > JobsService.PROGRESS_HARD_CAP_MS)
+        this.jobProgress.delete(id);
+    }
+
+    // Un job cuya extensión avisó hace poco que sigue trabajando (verificando por
+    // saldo, re-logueando) no está colgado, salvo que pase el tope total.
+    const stuckJobs = stuckCandidates.filter((job) => {
+      const p = this.jobProgress.get(job.id);
+      if (!p || Date.now() - p.at > JobsService.PROGRESS_FRESH_MS) return true;
+      const since = (job.startedAt ?? job.createdAt)?.getTime?.() ?? 0;
+      return Date.now() - since > JobsService.PROGRESS_HARD_CAP_MS;
+    });
     if (stuckJobs.length === 0) return;
 
     this.logger.warn(
@@ -180,13 +234,32 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     );
 
     for (const job of stuckJobs) {
+      // Para el operador: cargó / no cargó / error. Si la extensión ya había tocado
+      // Aceptar no se sabe si entró → error con la única indicación útil.
+      // Si se sabe que el bot NO llegó a Aceptar → "no se cargó". Si tocó Aceptar, o no
+      // se sabe (p. ej. el backend se reinició y perdió los avisos) → error con la
+      // indicación segura; la extensión después reporta el resultado real.
+      const progress = this.jobProgress.get(job.id);
+      const knownBeforeSubmit =
+        !!progress && !JobsService.ETAPAS_TRAS_ACEPTAR.has(progress.etapa);
+      const isMoney =
+        job.type === 'LOAD_CREDITS' || job.type === 'WITHDRAW_CHIPS';
+      const verb = job.type === 'WITHDRAW_CHIPS' ? 'descarg' : 'carg';
+      const who =
+        job.targetUsername || job.request?.targetUsername || 'el usuario';
+      const stuckError = !isMoney
+        ? 'Error: el bot no respondió'
+        : knownBeforeSubmit
+          ? `No se ${verb}ó: el bot no respondió`
+          : `Error: no se pudo confirmar si se ${verb}ó. Revisá el saldo de ${who} en el panel antes de volver a ${verb}ar`;
+      this.jobProgress.delete(job.id);
       try {
         // Mark job as FAILED
         await this.prisma.job.update({
           where: { id: job.id },
           data: {
             status: 'FAILED',
-            error: `Job timed out - no progress received for ${STUCK_JOB_TIMEOUT_MS / 1000}s`,
+            error: stuckError,
             completedAt: new Date(),
           },
         });
@@ -214,7 +287,7 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
           this.events.emitJobFailed(job.request.userId, {
             jobId: job.id,
             requestId: job.requestId,
-            error: 'Job timed out - stuck in PROCESSING',
+            error: stuckError,
           });
         }
 
@@ -1417,6 +1490,6 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       } catch (error: any) {
         this.logger.error(`Failed to dispatch next job: ${error.message}`);
       }
-    }, this.cooldownMs);
+    }, this.nextCooldownMs());
   }
 }

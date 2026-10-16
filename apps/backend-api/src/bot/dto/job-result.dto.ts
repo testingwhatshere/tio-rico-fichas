@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsNumber,
   IsObject,
   IsOptional,
@@ -36,4 +37,20 @@ export class JobResultDto {
   @IsOptional()
   @IsObject()
   result?: Record<string, unknown>;
+
+  // Extensión 1.0.8+: qué pasó con la plata, más allá de success. APPLIED = se
+  // movió; NOT_APPLIED = seguro que no se movió; UNCERTAIN = no se pudo confirmar.
+  @IsOptional()
+  @IsIn(['APPLIED', 'NOT_APPLIED', 'UNCERTAIN'])
+  outcome?: 'APPLIED' | 'NOT_APPLIED' | 'UNCERTAIN';
+
+  // Id de transacción que devolvió el panel en addCredit/addDebit.
+  @IsOptional()
+  @IsString()
+  panelTransaction?: string;
+
+  // El resultado salió de mirar el saldo del usuario (no de la respuesta del panel).
+  @IsOptional()
+  @IsBoolean()
+  verifiedByBalance?: boolean;
 }

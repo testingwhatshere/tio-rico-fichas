@@ -563,7 +563,9 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await telegram.alertBotStalled(
         panelId,
         `La extensión de <b>${panelName}</b> se pausó por errores seguidos: ese panel no carga nada hasta que alguien la reactive.` +
-          (reasons.length ? `\n\nÚltimo error: ${reasons[reasons.length - 1]}` : '') +
+          (reasons.length
+            ? `\n\nÚltimo error: ${reasons[reasons.length - 1]}`
+            : '') +
           `\n\nRevisar la PC del bot (sesión del panel) y tocar <b>Reactivar</b> en la web de operadores.`,
       );
     } catch (err) {
@@ -617,6 +619,70 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       severity: 'warning',
       timestamp: new Date().toISOString(),
     });
+  }
+
+  /**
+   * La extensión avisa en qué etapa va un job (1.0.8+): sobre todo "ACEPTAR_TOCADO"
+   * y "sigo trabajando" mientras verifica por saldo. JobsService lo usa para no dar
+   * por colgado un job vivo y para que el operador vea un mensaje claro si se corta.
+   */
+  @SubscribeMessage('extension:job_progress')
+  handleJobProgress(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { jobId?: string; etapa?: string } | undefined,
+  ) {
+    const jobId =
+      typeof data?.jobId === 'string' ? data.jobId.slice(0, 64) : '';
+    const etapa =
+      typeof data?.etapa === 'string' ? data.etapa.slice(0, 32) : '';
+    if (!jobId || !etapa) return;
+    try {
+      const jobsService = this.moduleRef.get(JobsService, { strict: false });
+      jobsService?.noteJobProgress?.(jobId, etapa);
+    } catch {
+      /* sin JobsService: sólo se pierde el aviso */
+    }
+    if (etapa === 'ACEPTAR_TOCADO') {
+      this.logger.log(`Job ${jobId}: la extensión tocó Aceptar (${client.id})`);
+    }
+  }
+
+  /** Resumen de la libreta de la extensión: operaciones sin cerrar por panel. */
+  private ledgerByPanel = new Map<
+    string,
+    { abiertas: number; sinConfirmar: number; porVerificar: number; at: string }
+  >();
+
+  @SubscribeMessage('extension:ledger')
+  handleLedgerSummary(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data:
+      | { abiertas?: number; sinConfirmar?: number; porVerificar?: number }
+      | undefined,
+  ) {
+    const panelId = (client.handshake.query?.panelId as string) || 'unknown';
+    const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const summary = {
+      abiertas: n(data?.abiertas),
+      sinConfirmar: n(data?.sinConfirmar),
+      porVerificar: n(data?.porVerificar),
+      at: new Date().toISOString(),
+    };
+    const prev = this.ledgerByPanel.get(panelId);
+    this.ledgerByPanel.set(panelId, summary);
+    if (
+      summary.porVerificar > 0 &&
+      (!prev || prev.porVerificar !== summary.porVerificar)
+    ) {
+      this.logger.warn(
+        `Panel ${panelId}: la extensión tiene ${summary.porVerificar} operación(es) verificando por saldo`,
+      );
+    }
+  }
+
+  getLedgerSummaries() {
+    return Object.fromEntries(this.ledgerByPanel);
   }
 
   @SubscribeMessage('extension:selector_health')
