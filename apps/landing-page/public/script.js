@@ -12,24 +12,42 @@ document.addEventListener('DOMContentLoaded', function () {
 
   var btns = [
     document.getElementById('downloadBtn'),
-    document.getElementById('downloadBtn2'),
-    document.getElementById('navDownload')
+    document.getElementById('downloadBtn2')
   ];
   var hint = document.getElementById('downloadHint');
 
   btns.forEach(function (btn) {
     if (!btn) return;
-    var isNav = btn.id === 'navDownload';
     if (isIOS) {
       btn.href = WEB_APP_URL;
       btn.removeAttribute('download');
-      btn.textContent = isNav ? 'Abrir App' : 'Abrir App Web';
+      btn.lastChild.textContent = ' Abrir App Web';
     } else {
       btn.href = APK_URL;
       btn.setAttribute('download', '');
-      if (isNav) btn.textContent = 'Descargar';
     }
   });
+
+  // TioRicoCargas (chat privado): APK en su propio repo de releases, web para iPhone.
+  var CHAT_WEB_URL = 'https://tiorico-cargas-web.onrender.com';
+  var CHAT_APK_URL = 'https://github.com/testingwhatshere/tiorico-cargas-releases/releases/download/v1.0.1/tio-rico-cargas-1.0.1.apk';
+  var chatBtn = document.getElementById('chatDownloadBtn');
+  if (chatBtn) {
+    if (isIOS) {
+      chatBtn.href = CHAT_WEB_URL;
+      chatBtn.lastChild.textContent = ' Abrir Chat Web';
+    } else {
+      chatBtn.href = CHAT_APK_URL;
+      chatBtn.setAttribute('download', '');
+    }
+  }
+
+  var chatHint = document.getElementById('chatHint');
+  if (chatHint) {
+    chatHint.textContent = isIOS ? 'Version web para iPhone'
+      : isAndroid ? 'Disponible para Android'
+      : 'Android \u00B7 Web para iOS';
+  }
 
   if (hint) {
     hint.textContent = isIOS ? 'Version web para iPhone'

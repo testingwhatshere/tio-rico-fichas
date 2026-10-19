@@ -30,6 +30,10 @@ import {
   HEARTBEAT_PERSIST_INTERVAL_MS,
 } from '../common/constants/timeouts';
 import { PrizeClaimsService } from '../prize-claims/prize-claims.service';
+import {
+  debeReintentarSolo,
+  REINTENTO_DEMORA_MS,
+} from './reintento-automatico';
 import { ChatsService } from '../chats/chats.service';
 import { MessagesService } from '../messages/messages.service';
 import {
@@ -683,6 +687,13 @@ export class BotService implements OnModuleInit {
       }
       return { success: true, message: 'Job result recorded (no request)' };
     }
+    // Falló sin mover plata (antes de Aceptar): se reintenta solo una vez en vez
+    // de avisarle error al usuario. Ver reintento-automatico.ts.
+    if (!dto.success && job.type === 'LOAD_CREDITS') {
+      const reencolado = await this.reintentarSiCorresponde(job, dto);
+      if (reencolado) return reencolado;
+    }
+
     const requestStatus: RequestStatus = dto.success ? 'COMPLETED' : 'FAILED';
     await this.prisma.request.update({
       where: { id: job.requestId },
@@ -781,6 +792,64 @@ export class BotService implements OnModuleInit {
     }
 
     return { success: true, message: 'Job result recorded' };
+  }
+
+  private async reintentarSiCorresponde(job: any, dto: JobResultDto) {
+    try {
+      // require: JobsService importa BotService (dependencia circular)
+      const { JobsService } = require('../jobs/jobs.service');
+      const jobsService = this.moduleRef.get(JobsService, { strict: false });
+      if (!jobsService || !job.requestId) return null;
+      const decide = debeReintentarSolo({
+        outcome: dto.outcome,
+        error: dto.error,
+        tocoAceptar: jobsService.tocoAceptar(job.id),
+        yaReintentado: await jobsService.yaSeReintentoSolo(job.requestId),
+      });
+      if (!decide) return null;
+
+      const nuevo = await jobsService.reintentarCargaNoAplicada(
+        {
+          id: job.id,
+          requestId: job.requestId,
+          panelId: job.panelId,
+          targetUsername: job.targetUsername ?? job.request?.targetUsername,
+          amount: job.amount ?? job.request?.amount,
+        },
+        dto.error,
+      );
+      this.logger.warn(
+        `Reintento automático: ${job.request?.targetUsername || job.targetUsername} $${Number(job.request?.amount ?? job.amount)} falló sin cargarse (${(dto.error || '').slice(0, 160)}); job nuevo ${nuevo.id} sale en ${REINTENTO_DEMORA_MS / 1000}s`,
+      );
+    } catch (err: any) {
+      // Si no se pudo reencolar, sigue el camino de siempre (FAILED → operador).
+      this.logger.error(
+        `No se pudo reintentar ${job.id}: ${err.message} — queda como fallida`,
+      );
+      return null;
+    }
+
+    // Lo mismo que al terminar cualquier job: liberar el panel y despachar el siguiente.
+    this.jobProgress.delete(job.id);
+    this.botState.lastJobId = job.id;
+    this.botState.status = 'online';
+    this.persistBotState();
+    if (job.panelId) {
+      this.botGateway.markPanelIdle(job.panelId);
+      this.updatePanelState(job.panelId, {
+        status: 'online',
+        lastJobId: job.id,
+      });
+      this.eventEmitter.emit(AppEvent.JOB_COMPLETED, {
+        jobId: job.id,
+        panelId: job.panelId,
+      });
+    }
+    this.eventsGateway.emitDashboardUpdate();
+    return {
+      success: true,
+      message: 'Falló sin cargarse: se reintenta sola una vez',
+    };
   }
 
   /**

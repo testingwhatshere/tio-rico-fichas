@@ -496,7 +496,7 @@ async function persistLog(level, category, message, data = null) {
         category,
         message,
         timestamp: new Date().toISOString(),
-        metadata: { panelId: state.config?.panelId }
+        metadata: { panelId: state.config?.panelId, ...(data ? { data: JSON.stringify(data).slice(0, 1500) } : {}) }
       }]));
     } catch (_) { /* best-effort streaming */ }
   }
@@ -746,15 +746,40 @@ async function openPanelTabIfMissing() {
     const hostname = new URL(panelUrl).hostname;
     const tabs = await chrome.tabs.query({ url: `*://${hostname}/*` });
     if (tabs.length > 0) {
-      state.panelTabId = tabs[0].id;
+      const tab = await JobProcessor.aislarEnVentanaPropia(tabs[0]);
+      state.panelTabId = tab.id;
       return;
     }
-    const tab = await chrome.tabs.create({ url: panelUrl, active: false });
-    state.panelTabId = tab.id;
-    persistLog('INFO', 'PANEL', 'Pestaña del panel abierta al iniciar Chrome');
+    // Ventana propia y sin foco: el operador puede usar Chrome sin tocar el panel
+    const win = await chrome.windows.create({ url: panelUrl, focused: false, state: 'normal' });
+    state.panelTabId = win.tabs[0].id;
+    persistLog('INFO', 'PANEL', 'Ventana del panel abierta al iniciar Chrome');
   } catch (err) {
     console.warn('[ServiceWorker] Could not open panel tab at startup:', err.message);
   }
+}
+
+// Inyecta content/sin-pausa.js en el panel al iniciar cada documento, para que la
+// automatización no se frene cuando el operador tapa o minimiza la ventana del bot.
+async function registrarSinPausa(panelUrl) {
+  if (!panelUrl) return;
+  let hostname;
+  try { hostname = new URL(panelUrl).hostname; } catch { hostname = new URL('https://' + panelUrl).hostname; }
+  const matches = [`*://${hostname}/*`];
+  const scripts = ['MAIN', 'ISOLATED'].map((world) => ({
+    id: `sin-pausa-${world.toLowerCase()}`,
+    js: ['content/sin-pausa.js'],
+    matches,
+    runAt: 'document_start',
+    world,
+    persistAcrossSessions: true,
+  }));
+  const ya = await chrome.scripting.getRegisteredContentScripts({ ids: scripts.map((s) => s.id) });
+  const iguales = ya.length === scripts.length && ya.every((r) => r.matches?.[0] === matches[0]);
+  if (iguales) return;
+  if (ya.length) await chrome.scripting.unregisterContentScripts({ ids: ya.map((r) => r.id) });
+  await chrome.scripting.registerContentScripts(scripts);
+  console.log('[ServiceWorker] sin-pausa registrado para', hostname);
 }
 
 // Load configuration from storage
@@ -792,6 +817,8 @@ async function loadConfig() {
     state.config.backendUrl = DEFAULT_CONFIG.backendUrl;
     state.config.apiKey = DEFAULT_CONFIG.apiKey;
   }
+  registrarSinPausa(state.config.panelUrl).catch((e) =>
+    console.warn('[ServiceWorker] No se pudo registrar sin-pausa:', e.message));
   console.log('[ServiceWorker] Config loaded:', {
     backendUrl: state.config.backendUrl,
     hasApiKey: !!state.config.apiKey

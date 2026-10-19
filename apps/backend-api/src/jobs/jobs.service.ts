@@ -27,6 +27,10 @@ import {
   ValidationCompletedEvent,
 } from '../common/events/app-events';
 import { REDISCOVERY_PENDING_MARKER } from '../discovery/discovery.service';
+import {
+  REINTENTO_CHANGED_BY,
+  REINTENTO_DEMORA_MS,
+} from '../bot/reintento-automatico';
 
 interface JobData {
   id: string;
@@ -77,6 +81,78 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       at: Date.now(),
     });
   }
+  /** true si la extensión avisó que tocó Aceptar (o ya tiene veredicto) en este job. */
+  tocoAceptar(jobId: string): boolean {
+    const p = this.jobProgress.get(jobId);
+    return !!p && JobsService.ETAPAS_TRAS_ACEPTAR.has(p.etapa);
+  }
+
+  /** ¿Este pedido ya tuvo su reintento automático? (ver bot/reintento-automatico.ts) */
+  async yaSeReintentoSolo(requestId: string): Promise<boolean> {
+    const previo = await this.prisma.requestStatusHistory.findFirst({
+      where: { requestId, changedBy: REINTENTO_CHANGED_BY },
+      select: { id: true },
+    });
+    return !!previo;
+  }
+
+  /**
+   * Reencola UNA vez una carga que falló sin mover plata (ver
+   * bot/reintento-automatico.ts). Job nuevo (con el mismo id la libreta de la
+   * extensión no vuelve a operar), con createdAt a futuro: el despachador no lo
+   * toma hasta que pasa la demora. Todo en una transacción: el pedido nunca queda
+   * sin job, aunque el backend se reinicie en el medio.
+   */
+  async reintentarCargaNoAplicada(
+    job: {
+      id: string;
+      requestId: string;
+      panelId: string | null;
+      targetUsername: string | null;
+      amount: any;
+    },
+    error?: string,
+  ) {
+    const desde = new Date(Date.now() + REINTENTO_DEMORA_MS);
+    const nuevo = await this.prisma.$transaction(async (tx) => {
+      await tx.job.delete({ where: { id: job.id } });
+      const request = await tx.request.update({
+        where: { id: job.requestId },
+        data: { status: 'APPROVED' },
+      });
+      await tx.requestStatusHistory.create({
+        data: {
+          requestId: job.requestId,
+          status: 'APPROVED',
+          changedBy: REINTENTO_CHANGED_BY,
+          metadata: {
+            failedJobId: job.id,
+            error: (error || '').slice(0, 500),
+            retryAt: desde.toISOString(),
+          },
+        },
+      });
+      return tx.job.create({
+        data: {
+          requestId: job.requestId,
+          status: 'QUEUED',
+          panelId: job.panelId,
+          targetUsername: job.targetUsername ?? request.targetUsername,
+          amount: job.amount ?? request.amount,
+          createdAt: desde,
+        },
+      });
+    });
+    this.jobProgress.delete(job.id);
+    this.events.emitJobQueued({
+      jobId: nuevo.id,
+      requestId: job.requestId,
+      targetUsername: nuevo.targetUsername,
+    });
+    this.events.emitDashboardUpdate();
+    return nuevo;
+  }
+
   private periodicDispatchInterval: ReturnType<typeof setInterval> | null =
     null;
   private nextDispatchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -738,7 +814,11 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
           if (activeJob) return null;
 
           // Find next QUEUED job for this panel
-          const queuedWhere: any = { status: 'QUEUED' as const };
+          // createdAt a futuro = reintento automático que todavía espera su turno
+          const queuedWhere: any = {
+            status: 'QUEUED' as const,
+            createdAt: { lte: new Date() },
+          };
           if (panelId) queuedWhere.panelId = panelId;
           else queuedWhere.panelId = null;
 

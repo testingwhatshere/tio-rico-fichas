@@ -20,17 +20,7 @@
 
 <body>
 
-  <!-- Nav -->
-  <nav class="nav">
-    <div class="nav-inner">
-      <div class="nav-brand">
-        <img src="app-icon.png" alt="Tio Rico" width="36" height="36" class="nav-logo">
-        <span class="nav-name">Tio Rico</span>
-      </div>
-      <a class="nav-cta" id="navDownload" href="#">Descargar</a>
-    </div>
-  </nav>
-
+  <div class="heroes">
   <!-- Hero -->
   <section class="hero">
     <div class="hero-inner">
@@ -54,6 +44,37 @@
       </div>
     </div>
   </section>
+
+  <!-- Hero chat (TioRicoCargas) -->
+  <section class="hero hero-chat">
+    <div class="hero-inner">
+      <div class="hero-text">
+        <div class="hero-badge">
+          <span class="badge-dot"></span>
+          Chat privado &middot; Sin caidas &middot; Mas seguro
+        </div>
+        <h1>Habla con nosotros<br><span class="accent">sin caidas.</span></h1>
+        <p class="hero-sub">TioRicoCargas es nuestro chat propio: mas seguro, sin depender de WhatsApp, y te respondemos al toque.</p>
+        <ul class="hero-points">
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Entras con tu usuario, sin contraseña</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Te atiende una persona, no un bot</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Mandas tu comprobante desde el chat</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Te avisa cuando te respondemos</li>
+        </ul>
+        <div class="hero-actions">
+          <a class="btn btn-gold" id="chatDownloadBtn" href="#">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Descargar Chat
+          </a>
+          <p class="hero-hint" id="chatHint"></p>
+        </div>
+      </div>
+      <div class="hero-mascot">
+        <img src="chat-icon.png" alt="TioRicoCargas" width="340" height="340" class="mascot-img">
+      </div>
+    </div>
+  </section>
+  </div>
 
   <!-- Steps -->
   <section class="steps">
@@ -134,6 +155,7 @@
       </a>
     </div>
   </section>
+
 
   <!-- Footer -->
   <footer class="footer">

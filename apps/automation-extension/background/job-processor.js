@@ -251,7 +251,13 @@ export class JobProcessor {
   }
 
   /**
-   * Ensure panel tab exists and is focused
+   * Devuelve la pestaña del panel, sola en su propia ventana.
+   *
+   * Antes se activaba la pestaña y se le daba foco a la ventana en cada carga:
+   * le sacaba la pantalla al operador y, si después tocaba WhatsApp u otra pestaña
+   * de esa misma ventana, el panel quedaba oculto. Chrome deja de dibujar las
+   * pestañas ocultas (los diálogos del panel no abren ni cierran) y la carga se cortaba.
+   * En su propia ventana el panel es siempre la pestaña visible, y nunca se le roba el foco.
    */
   static async ensurePanelTab(panelUrl) {
     // Match on hostname to handle panelUrl with or without path
@@ -263,24 +269,39 @@ export class JobProcessor {
       hostname = new URL('https://' + panelUrl).hostname;
     }
 
-    // Check if panel tab already exists (match by hostname, not full URL)
     const tabs = await chrome.tabs.query({ url: `*://${hostname}/*` });
 
     if (tabs.length > 0) {
-      // Tab exists, focus it
-      const tab = tabs[0];
-      await chrome.tabs.update(tab.id, { active: true });
-      await chrome.windows.update(tab.windowId, { focused: true });
+      // Preferir una pestaña que ya esté sola en su ventana
+      let elegida = tabs[0];
+      for (const t of tabs) {
+        const vecinas = await chrome.tabs.query({ windowId: t.windowId });
+        if (vecinas.length === 1) { elegida = t; break; }
+      }
+      const tab = await this.aislarEnVentanaPropia(elegida);
       console.log('[JobProcessor] Using existing panel tab:', tab.id, tab.url);
       return tab;
     }
 
-    // Create new tab
-    const tab = await chrome.tabs.create({
-      url: panelUrl,
-      active: true
-    });
-    console.log('[JobProcessor] Created new panel tab:', tab.id);
+    const win = await chrome.windows.create({ url: panelUrl, focused: false, state: 'normal' });
+    const tab = win.tabs[0];
+    console.log('[JobProcessor] Created panel window:', win.id, 'tab:', tab.id);
+    return tab;
+  }
+
+  static async aislarEnVentanaPropia(tab) {
+    const vecinas = await chrome.tabs.query({ windowId: tab.windowId });
+    if (vecinas.length > 1) {
+      const win = await chrome.windows.create({ tabId: tab.id, focused: false, state: 'normal' });
+      console.log('[JobProcessor] Panel tab moved to its own window:', win.id);
+      return win.tabs?.[0] || await chrome.tabs.get(tab.id);
+    }
+    if (!tab.active) await chrome.tabs.update(tab.id, { active: true });
+    // Minimizada Chrome tampoco la dibuja: se restaura sin darle foco
+    const win = await chrome.windows.get(tab.windowId);
+    if (win.state === 'minimized') {
+      await chrome.windows.update(win.id, { state: 'normal', focused: false });
+    }
     return tab;
   }
 
@@ -651,34 +672,39 @@ export class JobProcessor {
               }
               return lista() && filas().length > 0;
             };
-            const buscar = async (usuario) => {
-              const input = document.querySelector('.md-form.mb-3 input') || document.querySelector('input[aria-label="Username"]');
+            const buscar = async () => {
               const btn = [...document.querySelectorAll('button.btn-cyan')].find((b) => (b.innerText ?? b.textContent ?? '').trim().toUpperCase() === 'BUSCAR');
               if (!btn) return false;
-              if (input) {
-                const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-                setter.call(input, usuario);
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-              }
               await sleep(300 + Math.random() * 500);
               btn.click();
               return true;
             };
-            let busco = false;
-            if (!q.buscarUsuario) {
-              if (!(await esperarFilas(8000))) {
-                busco = await buscar('');
-                await esperarFilas(10000);
-              }
-            } else {
-              busco = await buscar(q.username);
-              if (!busco) return { ok: false, motivo: 'no se encontró el botón BUSCAR del historial' };
-              await sleep(800);
-              await esperarFilas(10000);
-            }
+            // El panel arma el filtro de fechas con el día en UTC: de 21 a 24 h (Argentina)
+            // ya es "mañana" y la tabla sale vacía. Se amplía el rango de ayer a mañana,
+            // como haría una persona con los selectores de fecha, y se aprieta BUSCAR.
+            // El filtro "Username" no filtra por destino (con el usuario da 0 filas): no se usa.
+            const ampliarFechas = () => {
+              const buscarVm = (vm) => {
+                if (vm?.dates && vm?.table?.data && 'dateFrom' in vm.table.data) return vm;
+                for (const c of vm?.$children || []) { const r = buscarVm(c); if (r) return r; }
+                return null;
+              };
+              const vm = buscarVm(window.$nuxt);
+              if (!vm) return false;
+              const dia = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              const ahora = Date.now();
+              vm.dates.start = dia(new Date(ahora - 864e5));
+              vm.dates.end = dia(new Date(ahora + 864e5));
+              return true;
+            };
+            const amplio = ampliarFechas();
+            await sleep(300 + Math.random() * 400);
+            const busco = await buscar();
+            if (!busco) return { ok: false, motivo: 'no se encontró el botón BUSCAR del historial' };
+            await sleep(800);
+            await esperarFilas(q.buscarUsuario ? 10000 : 8000);
             const vacia = (document.querySelector('#DataTables_Table_0 .dataTables_empty')?.innerText || '').trim();
-            return { ok: true, filas: filas().slice(0, 50), url: window.location?.href, vacia, busco };
+            return { ok: true, filas: filas().slice(0, 50), url: window.location?.href, vacia, amplio };
           },
           args: [{ username, buscarUsuario: intento === 1 }],
         });
@@ -691,7 +717,7 @@ export class JobProcessor {
         this.log('WARN', `Historial: ${r?.motivo || 'sin resultado'}`);
         return null;
       }
-      this.log('INFO', `Historial (${intento === 0 ? 'sin buscar' : `buscando ${username}`}): ${r.filas.length} fila(s)`, { primeras: r.filas.slice(0, 3), url: r.url, vacia: r.vacia });
+      this.log('INFO', `Historial (vuelta ${intento + 1}${r.amplio ? '' : ', sin ampliar fechas'}): ${r.filas.length} fila(s)`, { primeras: r.filas.slice(0, 3), url: r.url, vacia: r.vacia });
 
       const ahora = Date.now();
       const candidatas = [];

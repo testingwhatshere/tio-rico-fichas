@@ -16,31 +16,36 @@
 html { scroll-behavior:smooth; -webkit-font-smoothing:antialiased; }
 body { font-family:var(--font); background:var(--bg); color:var(--text); line-height:1.6; overflow-x:hidden; }
 
-/* Nav */
-.nav { position:fixed; top:0; left:0; right:0; z-index:100; background:rgba(11,15,21,0.85); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); border-bottom:1px solid var(--border); }
-.nav-inner { display:flex; align-items:center; justify-content:space-between; max-width:1000px; margin:0 auto; height:56px; padding:0 24px; }
-.nav-brand { display:flex; align-items:center; gap:10px; }
-.nav-logo { border-radius:8px; }
-.nav-name { font-weight:800; font-size:1.05rem; }
-.nav-cta { font-size:0.82rem; font-weight:700; color:var(--bg); background:var(--emerald); padding:7px 18px; border-radius:8px; text-decoration:none; transition:transform 0.2s var(--ease),box-shadow 0.2s; }
-.nav-cta:hover { transform:translateY(-1px); box-shadow:0 4px 14px rgba(16,185,129,0.35); }
-
-/* Hero */
-.hero { min-height:100vh; min-height:100dvh; display:flex; align-items:center; padding:80px 24px 40px; }
-.hero-inner { display:flex; align-items:center; gap:clamp(40px,6vw,80px); max-width:1000px; margin:0 auto; width:100%; }
+/* Heroes: los dos (fichas + chat) entran juntos en la pantalla */
+.heroes { min-height:100vh; min-height:100dvh; display:flex; flex-direction:column; }
+.hero { flex:1; display:flex; align-items:center; padding:clamp(16px,3.5dvh,40px) 24px; }
+.hero-inner { display:flex; align-items:center; gap:clamp(32px,5vw,72px); max-width:1000px; margin:0 auto; width:100%; }
 .hero-text { flex:1; max-width:500px; }
-.hero-badge { display:inline-flex; align-items:center; gap:8px; font-size:0.75rem; font-weight:600; color:var(--emerald); text-transform:uppercase; letter-spacing:0.04em; padding:5px 14px 5px 10px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.15); border-radius:100px; margin-bottom:24px; }
+.hero-badge { display:inline-flex; align-items:center; gap:8px; font-size:0.72rem; font-weight:600; color:var(--emerald); text-transform:uppercase; letter-spacing:0.04em; padding:4px 14px 4px 10px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.15); border-radius:100px; margin-bottom:clamp(10px,1.8dvh,20px); }
 .badge-dot { width:6px; height:6px; border-radius:50%; background:var(--emerald); animation:pulse 2s ease-in-out infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-.hero h1 { font-size:clamp(2.6rem,6vw,4.2rem); font-weight:900; line-height:1.04; letter-spacing:-0.04em; margin-bottom:20px; }
+.hero h1 { font-size:clamp(1.8rem,min(5.5vw,5.6dvh),3.4rem); font-weight:900; line-height:1.04; letter-spacing:-0.04em; margin-bottom:clamp(8px,1.6dvh,16px); }
 .accent { background:linear-gradient(135deg,var(--emerald),#34D399,var(--gold)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
-.hero-sub { font-size:clamp(0.95rem,1.6vw,1.1rem); color:var(--muted); max-width:400px; margin-bottom:32px; }
-.hero-actions { display:flex; flex-direction:column; align-items:flex-start; gap:10px; }
+.hero-sub { font-size:clamp(0.9rem,1.5vw,1.05rem); color:var(--muted); max-width:420px; margin-bottom:clamp(12px,2.4dvh,24px); }
+.hero-actions { display:flex; flex-direction:column; align-items:flex-start; gap:8px; }
 .hero-hint { font-size:0.8rem; color:var(--faint); }
 
 /* Mascot */
 .hero-mascot { flex-shrink:0; }
-.mascot-img { border-radius:32px; box-shadow:0 24px 60px rgba(0,0,0,0.5),0 0 80px rgba(16,185,129,0.08); display:block; width:clamp(220px,30vw,340px); height:auto; }
+.mascot-img { border-radius:28px; box-shadow:0 24px 60px rgba(0,0,0,0.5),0 0 80px rgba(16,185,129,0.08); display:block; width:clamp(140px,min(26vw,30dvh),300px); height:auto; }
+
+/* Hero del chat (TioRicoCargas): mismo hero, en dorado */
+.hero-chat { border-top:1px solid var(--border); }
+.hero-chat .hero-badge { color:var(--gold); background:rgba(245,158,11,0.08); border-color:rgba(245,158,11,0.18); }
+.hero-chat .badge-dot { background:var(--gold); }
+.hero-chat .accent { background:linear-gradient(135deg,var(--gold),#FCD34D,#FDE68A); -webkit-background-clip:text; background-clip:text; }
+.hero-chat .mascot-img { box-shadow:0 24px 60px rgba(0,0,0,0.5),0 0 80px rgba(245,158,11,0.1); }
+.hero-points { list-style:none; display:flex; flex-direction:column; gap:clamp(4px,0.8dvh,8px); margin:calc(-1 * clamp(4px,1dvh,10px)) 0 clamp(14px,2.6dvh,26px); }
+.hero-points li { display:flex; align-items:center; gap:8px; font-size:clamp(0.82rem,1.3vw,0.95rem); color:rgba(241,245,249,0.72); }
+.hero-points svg { flex-shrink:0; color:var(--gold); }
+.btn.btn-gold { background:linear-gradient(135deg,var(--gold),#FCD34D); box-shadow:0 4px 20px rgba(245,158,11,0.3); }
+.btn.btn-gold:hover { box-shadow:0 8px 28px rgba(245,158,11,0.4); }
+.btn.btn-gold:focus-visible { outline:2px solid var(--gold); outline-offset:3px; }
 
 /* Button */
 .btn { display:inline-flex; align-items:center; gap:10px; font-family:var(--font); font-weight:700; font-size:1rem; color:var(--bg); background:linear-gradient(135deg,var(--emerald),#34D399); padding:15px 34px; border-radius:10px; text-decoration:none; border:none; cursor:pointer; transition:transform 0.2s var(--ease),box-shadow 0.2s; box-shadow:0 4px 20px rgba(16,185,129,0.3); }
@@ -88,10 +93,18 @@ body { font-family:var(--font); background:var(--bg); color:var(--text); line-he
 
 /* Responsive */
 @media(max-width:768px) {
-  .hero-inner { flex-direction:column; text-align:center; gap:36px; }
-  .hero-text { align-items:center; display:flex; flex-direction:column; }
-  .hero-actions { align-items:center; }
-  .hero-sub { max-width:400px; }
+  .hero { padding:clamp(12px,2.5dvh,28px) 16px; }
+  .hero-inner { flex-direction:column-reverse; text-align:center; gap:clamp(8px,1.6dvh,16px); }
+  .hero-text { align-items:center; display:flex; flex-direction:column; width:100%; }
+  .hero-actions { align-items:center; width:100%; }
+  .hero-sub { max-width:400px; font-size:0.86rem; }
+  .hero-hint { display:none; }
+  .hero-chat .hero-sub { display:none; }
+  .hero-points { align-self:center; margin:0 0 clamp(12px,2dvh,20px); gap:4px; }
+  .hero-points li { font-size:0.84rem; }
+  .hero h1 { font-size:clamp(1.5rem,4.2dvh,2.3rem); }
+  .hero-badge { font-size:0.64rem; }
+  .mascot-img { width:clamp(64px,11dvh,120px); border-radius:18px; }
   .steps-grid { grid-template-columns:1fr; max-width:420px; margin:0 auto; }
   .stats-inner { flex-direction:column; gap:24px; }
   .stat-div { width:40px; height:1px; }
@@ -101,10 +114,21 @@ body { font-family:var(--font); background:var(--bg); color:var(--text); line-he
 }
 
 @media(max-width:480px) {
-  .btn { width:100%; justify-content:center; }
-  .mascot-img { width:200px; }
+  .btn { width:100%; justify-content:center; padding:13px 24px; }
+}
+
+/* Pantallas bajitas: priorizar que entren los dos heros */
+@media(max-height:760px) and (max-width:768px) {
+  .hero-sub { display:none; }
+}
+@media(max-height:800px) and (min-width:769px) {
+  .hero-hint { display:none; }
+  .hero-chat .hero-sub { display:none; }
+}
+@media(max-height:700px) and (max-width:768px) {
+  .hero-points { display:none; }
 }
 
 /* Accessibility */
-.btn:focus-visible,.nav-cta:focus-visible { outline:2px solid var(--emerald); outline-offset:3px; }
+.btn:focus-visible { outline:2px solid var(--emerald); outline-offset:3px; }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:0.01ms!important; transition-duration:0.01ms!important; } [data-reveal]{opacity:1;transform:none;} }

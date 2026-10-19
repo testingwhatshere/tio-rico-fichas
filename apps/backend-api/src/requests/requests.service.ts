@@ -11,6 +11,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { REINTENTO_CHANGED_BY } from '../bot/reintento-automatico';
 import { EventsGateway } from '../events/events.gateway';
 import { OperatorGateway } from '../events/operator.gateway';
 import { SettingsService } from '../settings/settings.service';
@@ -1858,6 +1859,27 @@ export class RequestsService {
     // Mismo alias que usa `create()`: el nombre en el panel puede diferir del
     // nombre en la app.
     const targetUsername = user.savedTargetUsername ?? user.username;
+
+    // Si una carga de este usuario falló sin hacerse y se está reintentando sola,
+    // cargar a mano ahora sería cargar dos veces (ver bot/reintento-automatico.ts).
+    const reintentando = await this.prisma.request.findFirst({
+      where: {
+        userId,
+        status: { in: ['APPROVED', 'PROCESSING'] },
+        statusHistory: {
+          some: {
+            changedBy: REINTENTO_CHANGED_BY,
+            createdAt: { gte: new Date(Date.now() - 30 * 60_000) },
+          },
+        },
+      },
+      select: { amount: true },
+    });
+    if (reintentando) {
+      throw new BadRequestException(
+        `Ya hay una carga de $${Number(reintentando.amount).toLocaleString('es-AR')} para este usuario que se está reintentando sola. Esperá a que termine antes de cargar a mano.`,
+      );
+    }
 
     const request = await this.prisma.$transaction(async (tx) => {
       const created = await tx.request.create({
