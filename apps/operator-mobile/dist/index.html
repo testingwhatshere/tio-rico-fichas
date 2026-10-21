@@ -1,22 +1,27 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="utf-8" />
     <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-    <title>Operator Panel</title>
-    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
+    <title>Tío Rico · Operadores</title>
+    <meta name="theme-color" content="#0b0d0c" />
+    <meta name="description" content="Panel de operadores de Tío Rico" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Tío Rico" />
     <style id="expo-reset">
-      /* These styles make the body full-height */
       html,
       body {
         height: 100%;
+        background: #0b0d0c;
       }
-      /* These styles disable body scrolling if you are using <ScrollView> */
       body {
         overflow: hidden;
       }
-      /* These styles make the root element full-height */
       #root {
         display: flex;
         height: 100%;
@@ -26,12 +31,17 @@
   <link rel="shortcut icon" href="/favicon.ico" /></head>
 
   <body>
-    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
-    <noscript>
-      You need to enable JavaScript to run this app.
-    </noscript>
-    <!-- The root element for your Expo app. -->
+    <noscript>Necesitás JavaScript para usar el panel.</noscript>
     <div id="root"></div>
-  <script src="/_expo/static/js/web/entry-41a810f061d4fd1dfa76f9f1e7aa6a01.js" defer></script>
+    <script>
+      // PWA: el service worker se registra sólo en producción (en desarrollo
+      // cachearía el bundle de Metro y confundiría).
+      if ('serviceWorker' in navigator && !/^(localhost|127\.)/.test(location.hostname)) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () {});
+        });
+      }
+    </script>
+  <script src="/_expo/static/js/web/entry-aac9813547e8b9b0f96eddf6e67d089b.js" defer></script>
 </body>
 </html>
