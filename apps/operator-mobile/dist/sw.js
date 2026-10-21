@@ -7,8 +7,8 @@
  * - Nada de otros orígenes: la API y el socket van siempre directo al servidor.
  *   Datos de la operación cacheados serían datos viejos presentados como actuales.
  */
-const VERSION = 'tr-op-v1';
-const SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
+const VERSION = 'tr-op-v2';
+const SHELL = ['/', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
