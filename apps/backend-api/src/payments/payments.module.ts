@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 import { ProofValidationService } from './proof-validation.service';
+import { PayoutFingerprintService } from './payout-fingerprint.service';
 import { RequestsModule } from '../requests/requests.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { EventsModule } from '../events/events.module';
@@ -28,7 +29,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     }),
   ],
   controllers: [PaymentsController],
-  providers: [PaymentsService, ProofValidationService],
-  exports: [PaymentsService, ProofValidationService],
+  providers: [PaymentsService, ProofValidationService, PayoutFingerprintService],
+  exports: [PaymentsService, ProofValidationService, PayoutFingerprintService],
 })
 export class PaymentsModule {}

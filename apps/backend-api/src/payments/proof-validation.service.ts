@@ -151,6 +151,15 @@ export class ProofValidationService {
   }
 
   /**
+   * Validador conectado y sin nada en curso. Para trabajo de fondo (leer los
+   * comprobantes de premios pagados) que no debe demorar la carga de nadie.
+   */
+  isIdle(): boolean {
+    const status = this.validatorGateway.getStatus();
+    return status.connected && status.pendingValidations === 0;
+  }
+
+  /**
    * Check if validation service is available
    */
   isAvailable(): boolean {

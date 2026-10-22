@@ -100,6 +100,9 @@ describe('PaymentsService', () => {
     uploadsService = {
       // Identity passthrough — the actual transform is unit-tested separately.
       toDeliverableUrl: jest.fn((url: string) => url),
+      originalPdfDownloadUrl: jest.fn(
+        () => 'https://api.cloudinary.com/v1_1/test/image/download?signed',
+      ),
     };
 
     settingsService = {
@@ -993,6 +996,188 @@ describe('PaymentsService', () => {
       expect(result.details?.flags).not.toContain('RECIPIENT_UNVERIFIABLE');
       expect(result.valid).toBe(true);
     });
+
+    // Auditoría 2026-10-21: el comprobante de un premio que pagamos nosotros le
+    // llega al ganador por el chat y pasaba el chequeo porque nuestra cuenta
+    // aparece en él, sólo que como la que PAGA.
+    const MP_TEXT = (payer: string, payee: string) =>
+      `Comprobante de transferencia\n$ 5.000\nOrigen y destino\n${payer}\n${payee}\nN.* de operación de Mercado Pago 185401837748`;
+    const JUAN =
+      'Juan Perez Mercado Pago CVU: 1234567890123456789012 CUIT/CUIL: 20-12345678-9';
+    const MARIA =
+      'Maria Gomez Mercado Pago CVU: 0000003100099988877766 CUIT/CUIL: 27-30111222-3';
+
+    it('bloquea con OUR_WALLET_AS_SENDER cuando nuestra cuenta es la que paga', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ ocrText: MP_TEXT(JUAN, MARIA) }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).toContain('OUR_WALLET_AS_SENDER');
+      expect(result.details?.recipientVerifiedBy).toBeNull();
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('desde una cuenta nuestra');
+    });
+
+    it('con nuestra cuenta como destino en el mismo formato, verifica', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ ocrText: MP_TEXT(MARIA, JUAN) }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).not.toContain('OUR_WALLET_AS_SENDER');
+      expect(result.details?.recipientVerifiedBy).toBe('cbu:MP Juan');
+      expect(result.valid).toBe(true);
+    });
+
+    it('"Mercado Pago" en el titular de una billetera no verifica cualquier comprobante de MP', async () => {
+      prisma.paymentConfig.findMany.mockResolvedValue([
+        {
+          id: 'wallet-3',
+          label: 'MP Rosa',
+          holderName: 'Rosa Quiroga - Mercado Pago',
+          holderLegalName: null,
+          holderDni: null,
+          details: { alias: '0000003100055566677788' },
+        },
+      ]);
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          ocrText: MP_TEXT(
+            MARIA,
+            'Pablo Toledo Mercado Pago CVU: 0000003100011112222333 CUIT/CUIL: 20-30999888-1',
+          ),
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.recipientVerifiedBy).toBeNull();
+      expect(result.valid).toBe(false);
+    });
+  });
+
+  describe('comprobantes de premios pagados', () => {
+    it('bloquea con PAYOUT_PROOF_REUSED si el número de operación es de un premio nuestro', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      prisma.request.findFirst.mockResolvedValue(null);
+      prisma.$queryRaw.mockImplementation((strings: TemplateStringsArray) =>
+        Promise.resolve(
+          strings.join(' ').includes('"PrizeClaim"') ? [{ id: 'claim-1' }] : [],
+        ),
+      );
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ transactionId: '185437414802' }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).toContain('PAYOUT_PROOF_REUSED');
+      expect(result.details?.fraudFlags).toContain('PAYOUT_PROOF_REUSED');
+      expect(result.valid).toBe(false);
+    });
+
+    it('no marca nada si el número de operación no es de un premio', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      prisma.request.findFirst.mockResolvedValue(null);
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ transactionId: '185437414802' }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).not.toContain('PAYOUT_PROOF_REUSED');
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('imagen que no es un comprobante', () => {
+    it('marca NOT_A_RECEIPT cuando hay texto pero ni banco ni monto', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          extractedAmount: null,
+          bankName: null,
+          ocrText: '+54 9 387 587-8034 (Tú) MUEVELO Y PONLO 2,2 mill. reproducciones facebook.com',
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).toContain('NOT_A_RECEIPT');
+      expect(result.details?.flags).toContain('AMOUNT_UNREADABLE');
+      expect(result.error).toContain('no parece un comprobante');
+      expect(result.valid).toBe(false);
+    });
+
+    it('sin texto (validador caído) no afirma que no sea un comprobante', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ extractedAmount: null, bankName: null, ocrText: null }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.flags).not.toContain('NOT_A_RECEIPT');
+    });
+  });
+
+  describe('remitente por posición', () => {
+    const OUR_WALLET = {
+      id: 'wallet-1',
+      label: 'MP Juan',
+      holderName: 'Juan Perez',
+      holderLegalName: null,
+      holderDni: '12345678',
+      type: 'MERCADOPAGO',
+      details: { cbu: '1234567890123456789012' },
+    };
+
+    beforeEach(() => {
+      prisma.paymentConfig.findMany.mockResolvedValue([OUR_WALLET]);
+    });
+
+    it('reemplaza nuestro CUIT leído como remitente por el del que pagó', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          senderDniCuit: '20123456789',
+          senderName: 'Juan Perez',
+          ocrText:
+            'Origen y destino\nMaria Gomez Mercado Pago CVU: 0000003100099988877766 CUIT/CUIL: 27-30111222-3\n' +
+            'Juan Perez Mercado Pago CVU: 1234567890123456789012 CUIT/CUIL: 20-12345678-9',
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.senderDniCuit).toBe('27301112223');
+      expect(result.details?.senderName).toBeNull();
+      // El chequeo de "pagó otra persona" corre con el CUIT corregido.
+      const crossUserCall = prisma.$queryRaw.mock.calls.find((c: any[]) =>
+        c[0].join(' ').includes('senderDniCuit'),
+      );
+      expect(crossUserCall).toContain('27301112223');
+    });
+
+    it('sin tramo del que paga, descarta nuestro propio CUIT como remitente', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({
+          senderDniCuit: '20123456789',
+          ocrText: 'Transferencia a Juan Perez CVU 1234567890123456789012',
+        }),
+      );
+
+      const result = await service.validateProof('req-1');
+
+      expect(result.details?.senderDniCuit).toBeNull();
+    });
   });
 
   // ========================================================
@@ -1026,6 +1211,42 @@ describe('PaymentsService', () => {
   // ========================================================
   // MIME type detection
   // ========================================================
+  describe('PDF que Cloudinary no puede convertir', () => {
+    it('reintenta una vez con el PDF original', async () => {
+      prisma.request.findUnique.mockResolvedValue(
+        buildRequest({ proofUrl: 'https://res.cloudinary.com/test/image/upload/v1/proofs/x.pdf' }),
+      );
+      proofValidationService.validateProof
+        .mockResolvedValueOnce(
+          buildProofResult({
+            isValid: false,
+            confidence: 0,
+            extractedAmount: null,
+            flags: ['IMAGE_FETCH_ERROR', 'REQUIRES_MANUAL_REVIEW'],
+          }),
+        )
+        .mockResolvedValueOnce(buildProofResult());
+
+      const result = await service.validateProof('req-1');
+
+      expect(proofValidationService.validateProof).toHaveBeenCalledTimes(2);
+      expect(proofValidationService.validateProof.mock.calls[1][0]).toContain('/download');
+      expect(proofValidationService.validateProof.mock.calls[1][1]).toBe('application/pdf');
+      expect(result.valid).toBe(true);
+    });
+
+    it('una imagen que no se pudo bajar no se reintenta', async () => {
+      prisma.request.findUnique.mockResolvedValue(buildRequest());
+      proofValidationService.validateProof.mockResolvedValue(
+        buildProofResult({ isValid: false, flags: ['IMAGE_FETCH_ERROR'] }),
+      );
+
+      await service.validateProof('req-1');
+
+      expect(proofValidationService.validateProof).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('MIME type detection', () => {
     it('should detect PDF mime type from URL', async () => {
       prisma.request.findUnique.mockResolvedValue(

@@ -27,18 +27,15 @@ import {
 import { PushService } from '../notifications/push.service';
 import { toDeliverableProofUrlOrNull } from '../common/utils/proof-url';
 import { attachProofTwins } from '../common/utils/proof-twins';
-
-/** Billetera nuestra, con lo mínimo para comparar contra un comprobante. */
-interface WalletTarget {
-  id: string;
-  label: string;
-  holderName: string;
-  holderLegalName: string | null;
-  holderDni: string | null;
-  alias?: string;
-  cbu?: string;
-  cvu?: string;
-}
+import {
+  WalletTarget,
+  walletIdentifiers,
+  locateOurWallet,
+  extractPayerCuit,
+  isOurHolderName,
+  isOurHolderDni,
+  personalNameTokens,
+} from './proof-roles';
 
 /**
  * Un request que sigue en VALIDATING pasado este tiempo desde que subió el
@@ -638,13 +635,32 @@ export class PaymentsService implements OnApplicationBootstrap {
 
       // Send Cloudinary URL directly to validator — validator fetches the image itself
       // No more downloading file buffer on the backend
-      const result = await this.proofValidationService.validateProof(
+      let result = await this.proofValidationService.validateProof(
         deliverableUrl,
         validationMimeType,
         Number(request.amount),
         request.id,
         walletInfo,
       );
+
+      // PDF que Cloudinary no puede convertir (encriptado por el banco: la
+      // transformación da 500). Se reintenta una vez con el PDF original y lo
+      // convierte el validador con pdf.js. Ver UploadsService.originalPdfDownloadUrl.
+      if (isPdf && result.flags?.includes('IMAGE_FETCH_ERROR')) {
+        const original = this.uploadsService.originalPdfDownloadUrl(proofUrl);
+        if (original) {
+          this.logger.warn(
+            `Request ${request.id}: Cloudinary no convirtió el PDF, se valida el original`,
+          );
+          result = await this.proofValidationService.validateProof(
+            original,
+            'application/pdf',
+            Number(request.amount),
+            request.id,
+            walletInfo,
+          );
+        }
+      }
 
       this.logger.log(
         `Validation result for request ${request.id}: valid=${result.isValid}, confidence=${result.confidence}`,
@@ -714,6 +730,29 @@ export class PaymentsService implements OnApplicationBootstrap {
         }
       }
 
+      // === REMITENTE POR POSICIÓN ===
+      // El parser a veces guarda como remitente el CUIT o el nombre del que COBRA
+      // (en el formato "Origen y destino" de MP toma la segunda persona). Con
+      // nuestro CUIT como "remitente", CROSS_USER_SENDER salta en cualquier carga
+      // de otro usuario que nos haya pagado. Se corrige con el tramo del que paga.
+      if (result.ocrText) {
+        const payerCuit = extractPayerCuit(result.ocrText);
+        if (payerCuit && !isOurHolderDni(payerCuit, ourWallets)) {
+          if (payerCuit !== result.senderDniCuit) {
+            this.logger.log(
+              `Request ${request.id}: remitente corregido por posición ${result.senderDniCuit ?? '-'} → ${payerCuit}`,
+            );
+          }
+          result.senderDniCuit = payerCuit;
+        }
+      }
+      if (isOurHolderDni(result.senderDniCuit, ourWallets)) {
+        result.senderDniCuit = null;
+      }
+      if (isOurHolderName(result.senderName, ourWallets)) {
+        result.senderName = null;
+      }
+
       // === FRAUD DETECTION ===
 
       // Change 4: Transaction ID duplicate detection
@@ -726,6 +765,19 @@ export class PaymentsService implements OnApplicationBootstrap {
             },
             select: { id: true, userId: true, status: true },
           });
+          // El número de operación de un premio que pagamos nosotros: el ganador
+          // recibe ese comprobante por el chat y lo está usando como carga.
+          const payout: { id: string }[] = await this.prisma.$queryRaw`
+            SELECT id FROM "PrizeClaim"
+            WHERE "payoutProofs" @> ${JSON.stringify([{ transactionId: result.transactionId }])}::jsonb
+            LIMIT 1
+          `;
+          if (payout?.length > 0) {
+            flags.push('PAYOUT_PROOF_REUSED');
+            this.logger.warn(
+              `Request ${request.id}: el número de operación ${result.transactionId} es del pago del premio ${payout[0].id}`,
+            );
+          }
           if (txDup) {
             flags.push('DUPLICATE_TRANSACTION_ID');
             this.logger.warn(
@@ -929,6 +981,19 @@ export class PaymentsService implements OnApplicationBootstrap {
         flags.push('AMOUNT_UNREADABLE');
       }
 
+      // Ni banco ni monto: lo más probable es que la imagen no sea un comprobante
+      // (una captura de WhatsApp, una foto). Ya va a revisión por el monto; esto es
+      // para que el operador no la apruebe sin mirarla (mirta1feb, 2026-09-13:
+      // $20.000 cargados con la captura de un video). Sólo si el validador leyó
+      // texto: sin texto (validador caído, imagen ilegible) no se sabe qué es.
+      if (
+        result.ocrText?.trim() &&
+        !result.bankName &&
+        !result.extractedAmount
+      ) {
+        flags.push('NOT_A_RECEIPT');
+      }
+
       // Change 7a: Critical flags override isValid
       // Nota: CROSS_USER_SENDER NO es critical — en AR es comun que un familiar (madre,
       // pareja, etc.) pague desde su cuenta por el usuario. Sigue como flag visible para
@@ -950,6 +1015,9 @@ export class PaymentsService implements OnApplicationBootstrap {
         // dudoso es como acreditar sin leerlo — es la variante del incidente del
         // 30/08/2026, donde dos comprobantes de $1.000 se leyeron como $51.000.
         'AMOUNT_AMBIGUOUS',
+        // Comprobante de un premio que pagamos nosotros, reconocido por su número
+        // de operación (ver PrizeClaimsService.fingerprintPayoutProofs).
+        'PAYOUT_PROOF_REUSED',
       ];
       // Los flags de destinatario bloquean SÓLO cuando el veredicto es confiable,
       // o sea cuando pudimos barrer el texto completo del comprobante. Con el
@@ -961,6 +1029,7 @@ export class PaymentsService implements OnApplicationBootstrap {
           'RECIPIENT_ACCOUNT_MISMATCH',
           'RECIPIENT_MISMATCH',
           'RECIPIENT_UNVERIFIABLE',
+          'OUR_WALLET_AS_SENDER',
         );
       }
       const hasCriticalFlags = flags.some((f) => criticalFlags.includes(f));
@@ -1066,6 +1135,9 @@ export class PaymentsService implements OnApplicationBootstrap {
               'AMOUNT_OVERPAID',
               'AMOUNT_TEXT_UNCONFIRMED',
               'AMOUNT_OVER_LIMIT',
+              'OUR_WALLET_AS_SENDER',
+              'PAYOUT_PROOF_REUSED',
+              'NOT_A_RECEIPT',
             ].includes(f),
           ),
         },
@@ -1120,22 +1192,27 @@ export class PaymentsService implements OnApplicationBootstrap {
   }
 
   /**
-   * Decide si el comprobante prueba que el dinero lleg\u00f3 a una cuenta nuestra.
-   * Devuelve el flag a levantar, o null si qued\u00f3 verificado.
+   * Decide si el comprobante prueba que el dinero llegó a una cuenta nuestra.
+   * Devuelve el flag a levantar, o null si quedó verificado.
    *
-   * Criterio: **alcanza con que aparezca CUALQUIER dato nuestro** \u2014 el nombre del
-   * titular, el nombre legal, el CBU, el CVU, el alias o el DNI de CUALQUIERA de
-   * nuestras billeteras activas. No hace falta que sea la billetera que se le mostr\u00f3
-   * al usuario (la billetera rota mientras el usuario paga) ni que el parser haya
-   * acertado el campo "Para": se busca en TODO el texto del comprobante.
+   * Criterio: tiene que aparecer un dato nuestro (nombre del titular, nombre legal,
+   * CBU, CVU, alias o DNI de CUALQUIERA de nuestras billeteras activas) **del lado
+   * del que cobra**. No hace falta que sea la billetera que se le mostró al usuario
+   * (la billetera rota mientras el usuario paga) ni que el parser haya acertado el
+   * campo "Para": se busca en todo el texto del comprobante y se mira en qué tramo
+   * cayó (ver proof-roles.ts).
+   *
+   * Si nuestros datos aparecen SÓLO como el que paga, el comprobante es de una
+   * transferencia que hicimos nosotros (típicamente el pago de un premio, que le
+   * llega al ganador por el chat): `OUR_WALLET_AS_SENDER`, bloqueante.
    *
    * `blocking` dice si el resultado es confiable como para frenar la carga.
    *
-   * S\u00f3lo el barrido sobre el texto completo bloquea. El camino de campos parseados
-   * NO bloquea, porque la extracci\u00f3n del destinatario no es confiable: en los
+   * Sólo el barrido sobre el texto completo bloquea. El camino de campos parseados
+   * NO bloquea, porque la extracción del destinatario no es confiable: en los
    * comprobantes de Mercado Pago con bloque "Origen y destino", el parser toma el
    * CVU del REMITENTE como cuenta destino y marca mismatch en cargas perfectamente
-   * leg\u00edtimas (caso darian88, 2026-08-20). Ah\u00ed el flag queda como aviso para el
+   * legítimas (caso darian88, 2026-08-20). Ahí el flag queda como aviso para el
    * operador, igual que antes, y la carga sigue su curso.
    */
   private verifyRecipient(
@@ -1148,9 +1225,7 @@ export class PaymentsService implements OnApplicationBootstrap {
     // Sin billeteras con identificadores usables no hay contra qu\u00e9 comparar. Es una
     // mala configuraci\u00f3n, no un comprobante sospechoso: se avisa fuerte y se deja
     // pasar al circuito normal en vez de frenar todas las cargas.
-    const usable = ourWallets.filter(
-      (w) => this.walletIdentifiers(w).length > 0,
-    );
+    const usable = ourWallets.filter((w) => walletIdentifiers(w).length > 0);
     if (usable.length === 0) {
       this.logger.error(
         `No hay billeteras activas con identificadores (nombre/CBU/CVU/alias/DNI) para ` +
@@ -1159,15 +1234,27 @@ export class PaymentsService implements OnApplicationBootstrap {
       return { flag: null, verifiedBy: null, blocking: false };
     }
 
-    // 1) Barrido sobre el comprobante completo: cualquier dato nuestro sirve.
+    // 1) Barrido sobre el comprobante completo: un dato nuestro del lado del que cobra.
     if (ocrText && ocrText.trim()) {
-      const hit = this.findWalletInText(ocrText, usable);
-      if (hit) {
+      const location = locateOurWallet(ocrText, usable);
+      if (location.verdict === 'payee') {
+        const { hit } = location;
         const verifiedBy = `${hit.field}:${hit.wallet.label}`;
         this.logger.log(
           `Request ${requestId}: destinatario verificado por ${hit.field} de la billetera "${hit.wallet.label}"`,
         );
         return { flag: null, verifiedBy, blocking: true };
+      }
+      if (location.verdict === 'payer-only') {
+        this.logger.warn(
+          `Request ${requestId}: la billetera "${location.hit.wallet.label}" aparece como la que PAGA, ` +
+            `no como la que cobra: es un comprobante de una transferencia nuestra`,
+        );
+        return {
+          flag: 'OUR_WALLET_AS_SENDER',
+          verifiedBy: null,
+          blocking: true,
+        };
       }
       this.logger.warn(
         `Request ${requestId}: no se encontr\u00f3 ning\u00fan dato nuestro en el comprobante ` +
@@ -1241,127 +1328,32 @@ export class PaymentsService implements OnApplicationBootstrap {
   }
 
   /**
-   * Identificadores buscables de una billetera: n\u00fameros de cuenta (CBU/CVU/alias
-   * num\u00e9rico), alias alfanum\u00e9rico, DNI/CUIT y nombres del titular.
-   */
-  private walletIdentifiers(
-    wallet: WalletTarget,
-  ): { field: string; value: string }[] {
-    const out: { field: string; value: string }[] = [];
-    const push = (field: string, value?: string | null) => {
-      const v = (value ?? '').trim();
-      if (v) out.push({ field, value: v });
-    };
-    push('cbu', wallet.cbu);
-    push('cvu', wallet.cvu);
-    push('alias', wallet.alias);
-    push('dni', wallet.holderDni);
-    push('holderName', wallet.holderName);
-    push('holderLegalName', wallet.holderLegalName);
-    return out;
-  }
-
-  /**
-   * Busca cualquier identificador nuestro dentro del texto del comprobante.
-   *
-   * Los n\u00fameros se comparan sobre la secuencia de d\u00edgitos del texto (el OCR mete
-   * espacios y puntos en los CBU); los nombres, sobre el texto normalizado, exigiendo
-   * al menos nombre + apellido para no matchear por un "Maria" suelto.
-   */
-  private findWalletInText(
-    ocrText: string,
-    wallets: WalletTarget[],
-  ): { wallet: WalletTarget; field: string } | null {
-    const digitsOnly = ocrText.replace(/\D/g, '');
-    const textNorm = ocrText
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, ' ');
-
-    for (const wallet of wallets) {
-      for (const { field, value } of this.walletIdentifiers(wallet)) {
-        const numeric = value.replace(/\D/g, '');
-        // Identificador num\u00e9rico (CBU, CVU, alias num\u00e9rico, DNI/CUIT): comparar
-        // contra los d\u00edgitos del comprobante. M\u00ednimo 8 d\u00edgitos para que un n\u00famero
-        // corto no matchee por casualidad.
-        const compact = value.replace(/[\s.-]/g, '');
-        if (numeric.length >= 8 && numeric.length === compact.length) {
-          if (digitsOnly.includes(numeric)) return { wallet, field };
-          continue;
-        }
-        const valueNorm = value
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        if (!valueNorm) continue;
-        if (field === 'alias') {
-          // Alias tipo "tiorico.fichas": literal, sin fuzzy.
-          if (valueNorm.length >= 4 && textNorm.includes(valueNorm)) {
-            return { wallet, field };
-          }
-          continue;
-        }
-        // Nombres: el nombre completo tal cual, o nombre + apellido en cualquier
-        // orden (los comprobantes invierten "Apellido, Nombre" seguido).
-        if (textNorm.includes(valueNorm)) return { wallet, field };
-        const tokens = valueNorm.split(' ').filter((t) => t.length >= 3);
-        if (tokens.length >= 2) {
-          const present = tokens.filter((t) =>
-            new RegExp(
-              `\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
-            ).test(textNorm),
-          );
-          if (present.length >= 2) return { wallet, field };
-        }
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Fuzzy match extracted recipient name against expected wallet holder names
+   * ¿El nombre leído como destinatario es el de alguno de los titulares? Se comparan
+   * sólo las palabras que identifican a la persona: "Mercado Pago" en el campo leído
+   * o en el nombre cargado de la billetera no cuenta (ver proof-roles.ts).
    */
   private fuzzyNameMatch(
     extracted: string,
     holderName: string,
     holderLegalName?: string,
   ): boolean {
-    const normalize = (s: string) =>
-      s
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    const extractedNorm = normalize(extracted);
+    const extractedTokens = personalNameTokens(extracted);
+    // Fragmentos cortos o genéricos son basura de OCR ("Zo", "Entidad", "Mercado
+    // Pago"): no alcanzan para afirmar un match.
+    if (extractedTokens.length === 0) return false;
 
-    // Fragmentos cortos son basura de OCR ("Zo", "Ea", "Cup\u00f3n"): no alcanzan para
-    // afirmar un match. Se tratan como "no verificado", no como match.
-    if (extractedNorm.length < 4) return false;
-
-    const candidates = [holderName, holderLegalName]
-      .filter(Boolean)
-      .map((n) => normalize(n!));
-
-    return candidates.some((candidate) => {
-      if (extractedNorm === candidate) return true;
-      if (
-        extractedNorm.includes(candidate) ||
-        candidate.includes(extractedNorm)
-      )
-        return true;
-      const extractedTokens = extractedNorm.split(/\s+/);
-      const candidateTokens = candidate.split(/\s+/);
-      const matches = extractedTokens.filter((t) =>
-        candidateTokens.includes(t),
-      );
-      // Dos tokens compartidos (nombre + apellido). La vieja regla de "un token
-      // alcanza si el titular es una sola palabra" hac\u00eda pasar cualquier cosa.
-      return matches.length >= 2;
-    });
+    return [holderName, holderLegalName]
+      .filter((n): n is string => !!n)
+      .some((candidate) => {
+        const candidateTokens = personalNameTokens(candidate);
+        const shared = extractedTokens.filter((t) =>
+          candidateTokens.includes(t),
+        );
+        // Dos palabras propias compartidas (nombre + apellido). La vieja regla de
+        // "un token alcanza si el titular es una sola palabra" hacía pasar
+        // cualquier cosa.
+        return new Set(shared).size >= 2;
+      });
   }
 
   /**
@@ -1411,6 +1403,17 @@ export class PaymentsService implements OnApplicationBootstrap {
 
     if (flags.includes('DUPLICATE_PROOF')) {
       reasons.push('El comprobante ya fue utilizado');
+    }
+    if (
+      flags.includes('PAYOUT_PROOF_REUSED') ||
+      flags.includes('OUR_WALLET_AS_SENDER')
+    ) {
+      reasons.push(
+        'El comprobante es de una transferencia hecha desde una cuenta nuestra (por ejemplo, el pago de un premio)',
+      );
+    }
+    if (flags.includes('NOT_A_RECEIPT')) {
+      reasons.push('La imagen no parece un comprobante de transferencia');
     }
     if (flags.includes('DUPLICATE_TRANSACTION_ID')) {
       reasons.push('El numero de operacion ya fue usado en otra solicitud');

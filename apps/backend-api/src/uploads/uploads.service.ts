@@ -10,7 +10,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import { PrismaService } from '../prisma/prisma.service';
 import { FILE_SIZE_LIMIT_BYTES } from '../common/constants/timeouts';
-import { toDeliverableProofUrl } from '../common/utils/proof-url';
+import {
+  toDeliverableProofUrl,
+  cloudinaryPublicIdFromUrl,
+} from '../common/utils/proof-url';
 
 export interface UploadedFile {
   id: string;
@@ -361,5 +364,40 @@ export class UploadsService {
    */
   toDeliverableUrl(url: string, mimeType?: string): string {
     return toDeliverableProofUrl(url, mimeType);
+  }
+
+  /**
+   * Link firmado y temporal al PDF ORIGINAL de un comprobante.
+   *
+   * Algunos PDFs vienen encriptados por el banco y Cloudinary no los puede
+   * convertir: cualquier transformación (`f_jpg,pg_1` incluida) devuelve 500
+   * "General Error", y el PDF crudo da 401 por "Restricted media types". Fueron 8
+   * de 126 PDFs entre el 14 y el 21/10/2026, todos a revisión manual. El validador
+   * los abre sin problema con pdf.js; sólo hay que hacerle llegar el original.
+   *
+   * La descarga firmada no consume transformaciones (el plan de Cloudinary es el
+   * gratuito): sólo el ancho de banda del archivo, una vez.
+   */
+  originalPdfDownloadUrl(url: string): string | null {
+    const publicId = cloudinaryPublicIdFromUrl(url);
+    if (!publicId || !this.apiSecret) return null;
+    const isRaw = url.includes('/raw/upload/');
+    try {
+      return cloudinary.utils.private_download_url(
+        // Los assets 'raw' guardan la extensión dentro del public_id.
+        isRaw ? `${publicId}.pdf` : publicId,
+        isRaw ? '' : 'pdf',
+        {
+          resource_type: isRaw ? 'raw' : 'image',
+          type: 'upload',
+          expires_at: Math.floor(Date.now() / 1000) + 10 * 60,
+        },
+      );
+    } catch (err: any) {
+      this.logger.warn(
+        `No se pudo firmar la descarga de ${publicId}: ${err?.message || err}`,
+      );
+      return null;
+    }
   }
 }

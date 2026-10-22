@@ -1479,6 +1479,23 @@ export class PrizeClaimsService implements OnModuleInit, OnModuleDestroy {
       `Prize claim ${claimId} COMPLETED by operator ${operatorId}`,
     );
 
+    // Registrar el número de operación de cada comprobante: le llegan al ganador
+    // por el chat y no tienen que poder usarse como comprobante de una carga. Si
+    // el validador está ocupado, lo levanta el barrido de PayoutFingerprintService.
+    try {
+      const { PayoutFingerprintService } = require('../payments/payout-fingerprint.service');
+      const fingerprints = this.moduleRef.get(PayoutFingerprintService, {
+        strict: false,
+      });
+      fingerprints
+        ?.fingerprintClaim(claimId)
+        .catch((err: any) =>
+          this.logger.warn(`Payout fingerprint failed for ${claimId}: ${err?.message || err}`),
+        );
+    } catch (err: any) {
+      this.logger.warn(`PayoutFingerprintService no disponible: ${err?.message || err}`);
+    }
+
     this.events.emitToUser(claim.userId, 'prize_claim:status_update', {
       claimId,
       status: 'COMPLETED',
